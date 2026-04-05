@@ -1,0 +1,17 @@
+targets:
+  $default:
+    builders:
+      # ── Drift ───────────────────────────────────────────────────────────────
+      drift_dev:
+        options:
+          # Store generated SQL as Drift schema files for future migrations
+          generate_connect_constructor: false
+          # Named parameters for insert companions (more readable call sites)
+          named_parameters: true
+
+      # ── Freezed ─────────────────────────────────────────────────────────────
+      freezed:
+        # Use json_serializable for toJson/fromJson on all @freezed classes
+        options:
+          # Discriminator key used by sealed union variants in JSON
+          union_key: runtimeType

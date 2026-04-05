@@ -1,0 +1,76 @@
+{
+  "test_results": {"passed": 0, "failed": 0, "skipped": 0},
+  "lint_clean": null,
+  "type_check_clean": null,
+  "issues": [
+    {
+      "severity": "critical",
+      "file": "app/lib/models/plan.dart",
+      "line": 6,
+      "description": "Missing generated files: plan.freezed.dart and plan.g.dart are declared via `part` directives but do not exist on disk. build_runner has never been executed. This is one of 9 missing generated files that collectively prevent the entire project from compiling. Affected files: plan.freezed.dart, plan.g.dart, plan_step.freezed.dart, plan_step.g.dart, app_database.g.dart, plan_repository.g.dart, plan_execution_engine.g.dart, notification_service.g.dart, plan_providers.g.dart.",
+      "suggestion": "Run `flutter pub run build_runner build --delete-conflicting-outputs` from the app/ directory to generate all required .freezed.dart and .g.dart files (Freezed, JsonSerializable, Drift ORM, Riverpod code-gen)."
+    },
+    {
+      "severity": "critical",
+      "file": "app/lib/database/app_database.dart",
+      "line": 14,
+      "description": "Missing generated file: app_database.g.dart is declared via `part` directive but does not exist. This file contains all Drift ORM generated classes (AppDatabase mixin, _$AppDatabase, PlansTableData, TtsCacheCompanion, ExecutionStateTableCompanion, AppSettingsCompanion, etc.) that the entire data layer and repositories depend on. Every database call in the project will fail to compile.",
+      "suggestion": "Run `flutter pub run build_runner build --delete-conflicting-outputs` to generate app_database.g.dart and all other missing generated files."
+    },
+    {
+      "severity": "critical",
+      "file": "app/lib/services/plan_execution_engine.dart",
+      "line": 51,
+      "description": "Missing generated file: plan_execution_engine.g.dart is declared via `part` directive but does not exist. This contains the Riverpod-generated planExecutionEngineProvider code referenced throughout the app (NowPlayingScreen, PlanLibraryScreen, BackgroundService).",
+      "suggestion": "Run `flutter pub run build_runner build --delete-conflicting-outputs`."
+    },
+    {
+      "severity": "critical",
+      "file": "app/lib/services/notification_service.dart",
+      "line": 14,
+      "description": "Missing generated file: notification_service.g.dart is declared via `part` directive but does not exist. Contains Riverpod-generated notificationServiceProvider and notificationRouteStreamProvider used in main.dart and BackgroundService.",
+      "suggestion": "Run `flutter pub run build_runner build --delete-conflicting-outputs`."
+    },
+    {
+      "severity": "critical",
+      "file": "app/lib/repositories/plan_repository.dart",
+      "line": 9,
+      "description": "Missing generated file: plan_repository.g.dart is declared via `part` directive but does not exist. Contains the Riverpod-generated planRepositoryProvider used across PlanLibraryScreen, PlanEditorScreen, and OnboardingScreen.",
+      "suggestion": "Run `flutter pub run build_runner build --delete-conflicting-outputs`."
+    },
+    {
+      "severity": "critical",
+      "file": "app/lib/providers/plan_providers.dart",
+      "line": 7,
+      "description": "Missing generated file: plan_providers.g.dart is declared via `part` directive but does not exist. Contains the Riverpod-generated planListProvider (the reactive stream provider used by PlanLibraryScreen to display and filter plans).",
+      "suggestion": "Run `flutter pub run build_runner build --delete-conflicting-outputs`."
+    },
+    {
+      "severity": "major",
+      "file": "app/lib/screens/settings/settings_screen.dart",
+      "line": 14,
+      "description": "SettingsScreen is an unimplemented stub that renders only 'Settings — coming soon'. REQ-024 (must-priority: default TTS voice, ambient volume, voice volume, notification sound/vibration settings) and REQ-030 (should-priority: Android OEM battery optimization prompt for Xiaomi/Samsung/Huawei) are entirely absent. AC-019 ('GIVEN an Android device from Xiaomi, Samsung, or Huawei WHEN the app detects the OEM THEN it displays a one-time battery optimization prompt') is NOT met.",
+      "suggestion": "Implement SettingsScreen per TASK-015: add Voice section (default TTS voice dropdown with alloy/nova), Volume section (Ambient Volume Slider and Voice Volume Slider), Notifications section (sound and vibration SwitchListTiles), and BatteryOptimizationPrompt widget using device_info_plus to detect manufacturer."
+    },
+    {
+      "severity": "major",
+      "file": "app/lib/screens/now_playing/now_playing_screen.dart",
+      "line": 335,
+      "description": "NowPlayingScreen uses state.currentStepIndex (an index into the engine's internal *flattened* step list) to index directly into state.plan.steps (the *unflattened* top-level steps list). For plans containing repeat blocks these lists have different lengths. Example: a plan with [SayStep, RepeatStep{count:3, children:[WaitStep, SayStep]}] has 2 top-level steps but 7 flattened steps. When currentStepIndex >= 2, the UI clamps it to 1 and permanently displays the RepeatStep card text (not the actual executing WaitStep or SayStep) for all of iterations 2 and 3. This violates AC-013 ('screen shows the current step text') for every plan with repeat blocks, and the 'next up' preview (line 337) is also wrong for the same reason.",
+      "suggestion": "Add a `currentStepText` and `nextStepText` field to ExecutionState, populated by the engine from the flattened step at execution time (_flatSteps[_currentStepIndex]). The NowPlayingScreen should display these fields directly instead of re-indexing into plan.steps."
+    },
+    {
+      "severity": "minor",
+      "file": "assets/audio/ambient/",
+      "description": "All audio asset directories (ambient/, effects/, silence/) contain only .gitkeep placeholder files — no actual MP3 audio files are present. At runtime, just_audio's AudioPlayer.setAsset() will throw when the Flutter asset bundle cannot load assets/audio/ambient/rain.mp3, etc. This means AC-016 (ambient audio loops continuously), REQ-026 (5 ambient tracks + 3 effect sounds bundled), and the iOS silence keep-alive (WaitStep background execution) all fail at runtime even after the compilation blockers are resolved.",
+      "suggestion": "Add royalty-free MP3 audio files for all 9 asset keys. The gen_audio_placeholders.py script at the project root can generate silent placeholder MP3 files for development/CI use: `python3 gen_audio_placeholders.py`."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/services/plan_execution_engine.dart",
+      "description": "REQ-022 (should-priority): Preview/dry-run mode is not implemented. PlanExecutionEngine has no startPreview() method and no speedMultiplier field. PlanEditorScreen has no 'Preview' button. Users cannot quickly verify a plan's timing and content at 4x speed before committing to a full run.",
+      "suggestion": "Add startPreview(Plan plan) to PlanExecutionEngine that sets speedMultiplier = 4.0 and divides WaitStep durations by this factor before starting; add a 'Preview' action button in PlanEditorScreen's AppBar that calls startPreview() and navigates to NowPlayingScreen."
+    }
+  ],
+  "verdict": "fail"
+}

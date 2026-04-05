@@ -1,0 +1,90 @@
+name: instructor
+description: A personal, push-only life conductor app. Create and run time-sequenced Plans with voice instructions, notifications, and ambient audio.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── Database ──────────────────────────────────────────────────────────────
+  drift: ^2.22.0
+  sqlite3_flutter_libs: ^0.5.26
+  path_provider: ^2.1.3
+  path: ^1.9.0
+
+  # ── State Management ─────────────────────────────────────────────────────
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # ── Navigation ───────────────────────────────────────────────────────────
+  go_router: ^14.6.2
+
+  # ── Audio ─────────────────────────────────────────────────────────────────
+  audio_service: ^0.18.15
+  just_audio: ^0.9.40
+  # audio_session handles phone-call interruptions on both iOS and Android
+  # (replaces the higher-risk phone_state package that requires READ_PHONE_STATE)
+  audio_session: ^0.1.21
+
+  # ── Notifications ─────────────────────────────────────────────────────────
+  flutter_local_notifications: ^18.0.1
+
+  # ── TTS ───────────────────────────────────────────────────────────────────
+  flutter_tts: ^4.1.0
+
+  # ── Networking ────────────────────────────────────────────────────────────
+  http: ^1.2.2
+
+  # ── Hashing / Crypto ──────────────────────────────────────────────────────
+  crypto: ^3.0.3
+
+  # ── Device Info ──────────────────────────────────────────────────────────
+  device_info_plus: ^10.1.2
+
+  # ── Screen Brightness (auto-dim during NowPlaying) ───────────────────────
+  screen_brightness: ^0.2.2+1
+
+  # ── Serialisation ────────────────────────────────────────────────────────
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # ── Utilities ────────────────────────────────────────────────────────────
+  uuid: ^4.4.2
+  collection: ^1.18.0
+  async: ^2.11.0          # CancelableOperation for volume ducking transitions
+  equatable: ^2.0.5
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # ── Linting ──────────────────────────────────────────────────────────────
+  flutter_lints: ^5.0.0
+  custom_lint: ^0.7.3
+  riverpod_lint: ^2.6.1
+
+  # ── Code Generation ──────────────────────────────────────────────────────
+  build_runner: ^2.4.13
+  drift_dev: ^2.22.0
+  riverpod_generator: ^2.6.1
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+
+dependency_overrides:
+  analyzer_plugin: ^0.13.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/audio/ambient/
+    - assets/audio/effects/
+    - assets/audio/silence/
+    - assets/images/onboarding/
