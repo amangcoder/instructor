@@ -226,12 +226,13 @@ class _$PlanImpl extends _Plan {
       this.description,
       this.category = PlanCategory.custom,
       final List<String> tags = const [],
-      this.defaultVoice = 'nova',
+      this.defaultVoice = 'aoede',
       final List<PlanStep> steps = const [],
       required this.createdAt,
       required this.updatedAt,
       this.lastUsedAt})
-      : _tags = tags,
+      : assert(defaultVoice != '', 'defaultVoice must not be empty'),
+        _tags = tags,
         _steps = steps,
         super._();
 

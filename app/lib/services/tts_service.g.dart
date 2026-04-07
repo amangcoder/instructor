@@ -6,7 +6,7 @@ part of 'tts_service.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$ttsServiceHash() => r'61a2dadd925b6d8b0ab2b5a399ea61107350f9aa';
+String _$ttsServiceHash() => r'd620a64849216c1ad2aefff94e1a94bf19794203';
 
 /// Singleton [TTSService] provider.
 ///

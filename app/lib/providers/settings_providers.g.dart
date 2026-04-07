@@ -117,6 +117,71 @@ final vibrationSettingProvider = AutoDisposeStreamProvider<bool>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef VibrationSettingRef = AutoDisposeStreamProviderRef<bool>;
+String _$speechRateSettingHash() => r'66ddfed390c8116083b4ec7bcb9d87f156fbb0b0';
+
+/// Reactive stream of the speech playback speed (0.5–2.0).
+///
+/// Emits [kDefaultSpeechRate] when the key is absent or unparseable.
+///
+/// Copied from [speechRateSetting].
+@ProviderFor(speechRateSetting)
+final speechRateSettingProvider = AutoDisposeStreamProvider<double>.internal(
+  speechRateSetting,
+  name: r'speechRateSettingProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$speechRateSettingHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef SpeechRateSettingRef = AutoDisposeStreamProviderRef<double>;
+String _$ttsLocaleSettingHash() => r'98425cfe840b0a05a80a82b55bfdb4f59b16d7f2';
+
+/// Reactive stream of the selected TTS locale / accent.
+///
+/// Emits [kDefaultTtsLocale] when the key is absent or unrecognised.
+///
+/// Copied from [ttsLocaleSetting].
+@ProviderFor(ttsLocaleSetting)
+final ttsLocaleSettingProvider = AutoDisposeStreamProvider<TtsLocale>.internal(
+  ttsLocaleSetting,
+  name: r'ttsLocaleSettingProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$ttsLocaleSettingHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef TtsLocaleSettingRef = AutoDisposeStreamProviderRef<TtsLocale>;
+String _$backendServerUrlSettingHash() =>
+    r'c211d1068055a739b22dabf9d8c5ead580557ac4';
+
+/// Reactive stream of the backend server URL.
+///
+/// Emits [kDefaultBackendServerUrl] when the key is absent.
+///
+/// Copied from [backendServerUrlSetting].
+@ProviderFor(backendServerUrlSetting)
+final backendServerUrlSettingProvider =
+    AutoDisposeStreamProvider<String>.internal(
+  backendServerUrlSetting,
+  name: r'backendServerUrlSettingProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$backendServerUrlSettingHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef BackendServerUrlSettingRef = AutoDisposeStreamProviderRef<String>;
 String _$batteryPromptDismissedSettingHash() =>
     r'd8d7254e92c0e85098602e788c15894ded3b25a9';
 

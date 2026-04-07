@@ -54,7 +54,7 @@ class $PlansTableTable extends PlansTable
       'default_voice', aliasedName, false,
       type: DriftSqlType.string,
       requiredDuringInsert: false,
-      defaultValue: const Constant('nova'));
+      defaultValue: const Constant('aoede'));
   @override
   late final GeneratedColumnWithTypeConverter<List<PlanStep>, String> steps =
       GeneratedColumn<String>('steps', aliasedName, false,
@@ -569,6 +569,22 @@ class $TtsCacheTableTable extends TtsCacheTable
       requiredDuringInsert: false,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES plans (id) ON DELETE SET NULL'));
+  static const VerificationMeta _providerMeta =
+      const VerificationMeta('provider');
+  @override
+  late final GeneratedColumn<String> provider = GeneratedColumn<String>(
+      'provider', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('gemini'));
+  static const VerificationMeta _speechRateMeta =
+      const VerificationMeta('speechRate');
+  @override
+  late final GeneratedColumn<String> speechRate = GeneratedColumn<String>(
+      'speech_rate', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('1.0'));
   static const VerificationMeta _createdAtMeta =
       const VerificationMeta('createdAt');
   @override
@@ -578,8 +594,17 @@ class $TtsCacheTableTable extends TtsCacheTable
       requiredDuringInsert: false,
       defaultValue: currentDateAndTime);
   @override
-  List<GeneratedColumn> get $columns =>
-      [id, textHash, voiceId, filePath, fileSizeBytes, planId, createdAt];
+  List<GeneratedColumn> get $columns => [
+        id,
+        textHash,
+        voiceId,
+        filePath,
+        fileSizeBytes,
+        planId,
+        provider,
+        speechRate,
+        createdAt
+      ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -621,6 +646,16 @@ class $TtsCacheTableTable extends TtsCacheTable
       context.handle(_planIdMeta,
           planId.isAcceptableOrUnknown(data['plan_id']!, _planIdMeta));
     }
+    if (data.containsKey('provider')) {
+      context.handle(_providerMeta,
+          provider.isAcceptableOrUnknown(data['provider']!, _providerMeta));
+    }
+    if (data.containsKey('speech_rate')) {
+      context.handle(
+          _speechRateMeta,
+          speechRate.isAcceptableOrUnknown(
+              data['speech_rate']!, _speechRateMeta));
+    }
     if (data.containsKey('created_at')) {
       context.handle(_createdAtMeta,
           createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
@@ -646,6 +681,10 @@ class $TtsCacheTableTable extends TtsCacheTable
           .read(DriftSqlType.int, data['${effectivePrefix}file_size_bytes'])!,
       planId: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}plan_id']),
+      provider: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}provider'])!,
+      speechRate: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}speech_rate'])!,
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
     );
@@ -661,7 +700,11 @@ class TtsCacheTableData extends DataClass
     implements Insertable<TtsCacheTableData> {
   final int id;
 
-  /// SHA-256 hash of (voiceId + ":" + text) — used as the deduplication key.
+  /// SHA-256 hash of all synthesis parameters — the deduplication key.
+  ///
+  /// From schema v2 onwards this is computed by [fullParamCacheKey]
+  /// (JSON-serialised, alphabetical keys). Older rows stored the legacy
+  /// `provider:voiceId:text` hash; they remain valid but will be superseded.
   final String textHash;
   final String voiceId;
 
@@ -673,6 +716,16 @@ class TtsCacheTableData extends DataClass
 
   /// Optional reference back to the owning Plan for bulk cache eviction.
   final int? planId;
+
+  /// TTS provider that generated this audio (e.g. 'gemini', 'kokoro').
+  ///
+  /// Added in schema v2. Defaults to 'gemini' for rows migrated from v1.
+  final String provider;
+
+  /// Speech rate at which the audio was generated (e.g. '1.0').
+  ///
+  /// Added in schema v2. Defaults to '1.0' (normal speed) for v1 rows.
+  final String speechRate;
   final DateTime createdAt;
   const TtsCacheTableData(
       {required this.id,
@@ -681,6 +734,8 @@ class TtsCacheTableData extends DataClass
       required this.filePath,
       required this.fileSizeBytes,
       this.planId,
+      required this.provider,
+      required this.speechRate,
       required this.createdAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -693,6 +748,8 @@ class TtsCacheTableData extends DataClass
     if (!nullToAbsent || planId != null) {
       map['plan_id'] = Variable<int>(planId);
     }
+    map['provider'] = Variable<String>(provider);
+    map['speech_rate'] = Variable<String>(speechRate);
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -706,6 +763,8 @@ class TtsCacheTableData extends DataClass
       fileSizeBytes: Value(fileSizeBytes),
       planId:
           planId == null && nullToAbsent ? const Value.absent() : Value(planId),
+      provider: Value(provider),
+      speechRate: Value(speechRate),
       createdAt: Value(createdAt),
     );
   }
@@ -720,6 +779,8 @@ class TtsCacheTableData extends DataClass
       filePath: serializer.fromJson<String>(json['filePath']),
       fileSizeBytes: serializer.fromJson<int>(json['fileSizeBytes']),
       planId: serializer.fromJson<int?>(json['planId']),
+      provider: serializer.fromJson<String>(json['provider']),
+      speechRate: serializer.fromJson<String>(json['speechRate']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -733,6 +794,8 @@ class TtsCacheTableData extends DataClass
       'filePath': serializer.toJson<String>(filePath),
       'fileSizeBytes': serializer.toJson<int>(fileSizeBytes),
       'planId': serializer.toJson<int?>(planId),
+      'provider': serializer.toJson<String>(provider),
+      'speechRate': serializer.toJson<String>(speechRate),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
@@ -744,6 +807,8 @@ class TtsCacheTableData extends DataClass
           String? filePath,
           int? fileSizeBytes,
           Value<int?> planId = const Value.absent(),
+          String? provider,
+          String? speechRate,
           DateTime? createdAt}) =>
       TtsCacheTableData(
         id: id ?? this.id,
@@ -752,6 +817,8 @@ class TtsCacheTableData extends DataClass
         filePath: filePath ?? this.filePath,
         fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
         planId: planId.present ? planId.value : this.planId,
+        provider: provider ?? this.provider,
+        speechRate: speechRate ?? this.speechRate,
         createdAt: createdAt ?? this.createdAt,
       );
   TtsCacheTableData copyWithCompanion(TtsCacheTableCompanion data) {
@@ -764,6 +831,9 @@ class TtsCacheTableData extends DataClass
           ? data.fileSizeBytes.value
           : this.fileSizeBytes,
       planId: data.planId.present ? data.planId.value : this.planId,
+      provider: data.provider.present ? data.provider.value : this.provider,
+      speechRate:
+          data.speechRate.present ? data.speechRate.value : this.speechRate,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -777,14 +847,16 @@ class TtsCacheTableData extends DataClass
           ..write('filePath: $filePath, ')
           ..write('fileSizeBytes: $fileSizeBytes, ')
           ..write('planId: $planId, ')
+          ..write('provider: $provider, ')
+          ..write('speechRate: $speechRate, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
-      id, textHash, voiceId, filePath, fileSizeBytes, planId, createdAt);
+  int get hashCode => Object.hash(id, textHash, voiceId, filePath,
+      fileSizeBytes, planId, provider, speechRate, createdAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -795,6 +867,8 @@ class TtsCacheTableData extends DataClass
           other.filePath == this.filePath &&
           other.fileSizeBytes == this.fileSizeBytes &&
           other.planId == this.planId &&
+          other.provider == this.provider &&
+          other.speechRate == this.speechRate &&
           other.createdAt == this.createdAt);
 }
 
@@ -805,6 +879,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
   final Value<String> filePath;
   final Value<int> fileSizeBytes;
   final Value<int?> planId;
+  final Value<String> provider;
+  final Value<String> speechRate;
   final Value<DateTime> createdAt;
   const TtsCacheTableCompanion({
     this.id = const Value.absent(),
@@ -813,6 +889,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
     this.filePath = const Value.absent(),
     this.fileSizeBytes = const Value.absent(),
     this.planId = const Value.absent(),
+    this.provider = const Value.absent(),
+    this.speechRate = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   TtsCacheTableCompanion.insert({
@@ -822,6 +900,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
     required String filePath,
     this.fileSizeBytes = const Value.absent(),
     this.planId = const Value.absent(),
+    this.provider = const Value.absent(),
+    this.speechRate = const Value.absent(),
     this.createdAt = const Value.absent(),
   })  : textHash = Value(textHash),
         voiceId = Value(voiceId),
@@ -833,6 +913,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
     Expression<String>? filePath,
     Expression<int>? fileSizeBytes,
     Expression<int>? planId,
+    Expression<String>? provider,
+    Expression<String>? speechRate,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
@@ -842,6 +924,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
       if (filePath != null) 'file_path': filePath,
       if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
       if (planId != null) 'plan_id': planId,
+      if (provider != null) 'provider': provider,
+      if (speechRate != null) 'speech_rate': speechRate,
       if (createdAt != null) 'created_at': createdAt,
     });
   }
@@ -853,6 +937,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
       Value<String>? filePath,
       Value<int>? fileSizeBytes,
       Value<int?>? planId,
+      Value<String>? provider,
+      Value<String>? speechRate,
       Value<DateTime>? createdAt}) {
     return TtsCacheTableCompanion(
       id: id ?? this.id,
@@ -861,6 +947,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
       filePath: filePath ?? this.filePath,
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
       planId: planId ?? this.planId,
+      provider: provider ?? this.provider,
+      speechRate: speechRate ?? this.speechRate,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -886,6 +974,12 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
     if (planId.present) {
       map['plan_id'] = Variable<int>(planId.value);
     }
+    if (provider.present) {
+      map['provider'] = Variable<String>(provider.value);
+    }
+    if (speechRate.present) {
+      map['speech_rate'] = Variable<String>(speechRate.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -901,6 +995,8 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
           ..write('filePath: $filePath, ')
           ..write('fileSizeBytes: $fileSizeBytes, ')
           ..write('planId: $planId, ')
+          ..write('provider: $provider, ')
+          ..write('speechRate: $speechRate, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -2062,6 +2158,8 @@ typedef $$TtsCacheTableTableCreateCompanionBuilder = TtsCacheTableCompanion
   required String filePath,
   Value<int> fileSizeBytes,
   Value<int?> planId,
+  Value<String> provider,
+  Value<String> speechRate,
   Value<DateTime> createdAt,
 });
 typedef $$TtsCacheTableTableUpdateCompanionBuilder = TtsCacheTableCompanion
@@ -2072,6 +2170,8 @@ typedef $$TtsCacheTableTableUpdateCompanionBuilder = TtsCacheTableCompanion
   Value<String> filePath,
   Value<int> fileSizeBytes,
   Value<int?> planId,
+  Value<String> provider,
+  Value<String> speechRate,
   Value<DateTime> createdAt,
 });
 
@@ -2119,6 +2219,12 @@ class $$TtsCacheTableTableFilterComposer
 
   ColumnFilters<int> get fileSizeBytes => $composableBuilder(
       column: $table.fileSizeBytes, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get provider => $composableBuilder(
+      column: $table.provider, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get speechRate => $composableBuilder(
+      column: $table.speechRate, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
@@ -2169,6 +2275,12 @@ class $$TtsCacheTableTableOrderingComposer
       column: $table.fileSizeBytes,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get provider => $composableBuilder(
+      column: $table.provider, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get speechRate => $composableBuilder(
+      column: $table.speechRate, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
 
@@ -2216,6 +2328,12 @@ class $$TtsCacheTableTableAnnotationComposer
 
   GeneratedColumn<int> get fileSizeBytes => $composableBuilder(
       column: $table.fileSizeBytes, builder: (column) => column);
+
+  GeneratedColumn<String> get provider =>
+      $composableBuilder(column: $table.provider, builder: (column) => column);
+
+  GeneratedColumn<String> get speechRate => $composableBuilder(
+      column: $table.speechRate, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -2270,6 +2388,8 @@ class $$TtsCacheTableTableTableManager extends RootTableManager<
             Value<String> filePath = const Value.absent(),
             Value<int> fileSizeBytes = const Value.absent(),
             Value<int?> planId = const Value.absent(),
+            Value<String> provider = const Value.absent(),
+            Value<String> speechRate = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
           }) =>
               TtsCacheTableCompanion(
@@ -2279,6 +2399,8 @@ class $$TtsCacheTableTableTableManager extends RootTableManager<
             filePath: filePath,
             fileSizeBytes: fileSizeBytes,
             planId: planId,
+            provider: provider,
+            speechRate: speechRate,
             createdAt: createdAt,
           ),
           createCompanionCallback: ({
@@ -2288,6 +2410,8 @@ class $$TtsCacheTableTableTableManager extends RootTableManager<
             required String filePath,
             Value<int> fileSizeBytes = const Value.absent(),
             Value<int?> planId = const Value.absent(),
+            Value<String> provider = const Value.absent(),
+            Value<String> speechRate = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
           }) =>
               TtsCacheTableCompanion.insert(
@@ -2297,6 +2421,8 @@ class $$TtsCacheTableTableTableManager extends RootTableManager<
             filePath: filePath,
             fileSizeBytes: fileSizeBytes,
             planId: planId,
+            provider: provider,
+            speechRate: speechRate,
             createdAt: createdAt,
           ),
           withReferenceMapper: (p0) => p0

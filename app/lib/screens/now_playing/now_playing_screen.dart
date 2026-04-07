@@ -354,11 +354,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       const SizedBox(height: 32),
 
                       // ── Current step text with step-type color bg ─────
-                      _CurrentStepCard(
-                        text: currentStepText,
-                        stepType: stepType,
-                        backgroundColor: stepBgColor,
-                        accentColor: stepColor,
+                      Flexible(
+                        child: _CurrentStepCard(
+                          text: currentStepText,
+                          stepType: stepType,
+                          backgroundColor: stepBgColor,
+                          accentColor: stepColor,
+                        ),
                       ),
 
                       const SizedBox(height: 24),
@@ -541,14 +543,20 @@ class _CurrentStepCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            // Main instruction text (≥ 24sp as required)
-            Text(
-              text.isEmpty ? '—' : text,
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w500,
-                height: 1.4,
-                color: Colors.white,
+            // Main instruction text (≥ 24sp as required).
+            // Wrapped in Flexible + SingleChildScrollView so long
+            // texts scroll instead of overflowing the screen.
+            Flexible(
+              child: SingleChildScrollView(
+                child: Text(
+                  text.isEmpty ? '—' : text,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w500,
+                    height: 1.4,
+                    color: Colors.white,
+                  ),
+                ),
               ),
             ),
           ],

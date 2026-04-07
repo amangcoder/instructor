@@ -27,6 +27,7 @@
 library audio_engine;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
@@ -49,7 +50,13 @@ abstract class AudioEngine {
   ///
   /// If a voice file is already playing it is replaced immediately (the duck
   /// stays active until the new file completes).
-  Future<void> playVoice(String filePath);
+  Future<void> playVoice(String filePath, {double speed = 1.0});
+
+  /// Plays a one-shot effect sound (bell, chime, gong) on the voice channel.
+  ///
+  /// Ducks the ambient channel while the effect plays, then restores it.
+  /// The [assetKey] is resolved via [resolveAudioAssetPath].
+  Future<void> playEffect(String assetKey);
 
   /// Starts an ambient track identified by [assetKey].
   ///
@@ -184,7 +191,7 @@ class AudioEngineImpl implements AudioEngine {
   // ────────────────────────────────────────────────────────────────────────
 
   @override
-  Future<void> playVoice(String filePath) async {
+  Future<void> playVoice(String filePath, {double speed = 1.0}) async {
     _assertNotDisposed();
 
     // Cancel any in-progress restore fade from a previous voice playback.
@@ -205,10 +212,10 @@ class AudioEngineImpl implements AudioEngine {
       durationMs: kDuckDurationMs,
     );
 
-    // Load and play the voice file.
+    // Load and play the voice file at the requested speed.
     await _voicePlayer.setFilePath(filePath);
+    await _voicePlayer.setSpeed(speed.clamp(0.5, 2.0));
     await _voicePlayer.seek(Duration.zero);
-    unawaited(_voicePlayer.play());
 
     // Restore ambient volume when voice playback finishes, and resolve the
     // completer so that callers awaiting playVoice() are unblocked.
@@ -225,8 +232,71 @@ class AudioEngineImpl implements AudioEngine {
       _voiceCompleter = null;
     });
 
+    // Guard against playback errors. just_audio surfaces errors through the
+    // play() Future. Without catching them, a failed play() would leave
+    // _voiceCompleter pending forever and hang the execution engine.
+    _voicePlayer.play().catchError((Object e) {
+      _voiceCompletionSubscription?.cancel();
+      _voiceCompletionSubscription = null;
+      unawaited(restoreAmbient());
+      if (!(_voiceCompleter?.isCompleted ?? true)) {
+        _voiceCompleter!.completeError(e);
+      }
+      _voiceCompleter = null;
+    });
+
     // Await completion so that the caller (PlanExecutionEngine) can sequence
     // steps correctly — the next step only starts after voice is done.
+    await _voiceCompleter!.future;
+  }
+
+  @override
+  Future<void> playEffect(String assetKey) async {
+    _assertNotDisposed();
+    final assetPath = resolveAudioAssetPath(assetKey);
+
+    // Reuse the voice channel: duck ambient, play the effect, restore.
+    _cancelFade();
+    _voiceCompletionSubscription?.cancel();
+    _voiceCompletionSubscription = null;
+
+    if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
+      _voiceCompleter!.complete();
+    }
+    _voiceCompleter = Completer<void>();
+
+    await _animateAmbientVolume(
+      from: _currentAmbientVolume,
+      to: kDuckVolume,
+      durationMs: kDuckDurationMs,
+    );
+
+    await _voicePlayer.setSpeed(1.0);
+    await _voicePlayer.setAsset(assetPath);
+    await _voicePlayer.seek(Duration.zero);
+
+    _voiceCompletionSubscription = _voicePlayer.processingStateStream
+        .where((state) => state == ProcessingState.completed)
+        .listen((_) {
+      _voiceCompletionSubscription?.cancel();
+      _voiceCompletionSubscription = null;
+      unawaited(restoreAmbient());
+      if (!(_voiceCompleter?.isCompleted ?? true)) {
+        _voiceCompleter!.complete();
+      }
+      _voiceCompleter = null;
+    });
+
+    _voicePlayer.play().catchError((Object e) {
+      _voiceCompletionSubscription?.cancel();
+      _voiceCompletionSubscription = null;
+      unawaited(restoreAmbient());
+      if (!(_voiceCompleter?.isCompleted ?? true)) {
+        _voiceCompleter!.completeError(e);
+      }
+      _voiceCompleter = null;
+    });
+
     await _voiceCompleter!.future;
   }
 
@@ -345,6 +415,10 @@ class AudioEngineImpl implements AudioEngine {
   @override
   Future<void> startSilenceKeepAlive() async {
     if (_disposed) return;
+    // Both iOS and Android need a silent audio loop during wait steps to
+    // prevent the OS from suspending the Dart isolate. On iOS this keeps
+    // AVAudioSession active; on Android it keeps the foreground service's
+    // audio focus alive and prevents process suspension.
     final silencePath = resolveAudioAssetPath(kSilenceTrack);
     await _silencePlayer.setLoopMode(LoopMode.one);
     await _silencePlayer.setVolume(0.0);

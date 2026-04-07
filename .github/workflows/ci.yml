@@ -1,0 +1,233 @@
+name: CI — Full Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same PR to save CI minutes
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Fast checks — run before expensive jobs
+  # ─────────────────────────────────────────────────────────────────────────
+  backend-typecheck:
+    name: Backend TypeScript Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+        working-directory: server
+      - run: npx tsc --noEmit
+        working-directory: server
+
+  flutter-analyze:
+    name: Flutter Static Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+      - run: flutter pub get
+        working-directory: app
+      - run: flutter analyze --no-fatal-infos
+        working-directory: app
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Unit tests — run in parallel after fast checks pass
+  # ─────────────────────────────────────────────────────────────────────────
+  backend-unit:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [backend-typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: server
+      - name: Run unit tests with coverage
+        run: npm run test:cov
+        working-directory: server
+        env:
+          JWT_SECRET: test-jwt-secret-for-ci
+          GEMINI_API_KEY: test-gemini-key
+          AWS_S3_BUCKET: test-bucket
+          AWS_REGION: ap-south-1
+          AWS_ACCESS_KEY_ID: test-key-id
+          AWS_SECRET_ACCESS_KEY: test-secret-key
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: server/coverage/
+          retention-days: 30
+
+  flutter-unit:
+    name: Flutter Unit & Widget Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [flutter-analyze]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+      - name: Get dependencies
+        run: flutter pub get
+        working-directory: app
+      - name: Run tests with coverage
+        run: flutter test --coverage --reporter=github
+        working-directory: app
+      - name: Upload Flutter coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flutter-coverage-${{ github.run_id }}
+          path: app/coverage/lcov.info
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # E2E tests — run after unit tests pass (slower)
+  # ─────────────────────────────────────────────────────────────────────────
+  backend-e2e:
+    name: Backend E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend-unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: server
+      - name: Run e2e tests
+        run: npm run test:e2e
+        working-directory: server
+        env:
+          JWT_SECRET: test-jwt-secret-for-ci
+          GEMINI_API_KEY: test-gemini-key
+          AWS_S3_BUCKET: test-bucket
+          AWS_REGION: ap-south-1
+          AWS_ACCESS_KEY_ID: test-key-id
+          AWS_SECRET_ACCESS_KEY: test-secret-key
+          DATABASE_PATH: ':memory:'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Coverage gate — fails PR if coverage drops below threshold
+  # ─────────────────────────────────────────────────────────────────────────
+  coverage-gate:
+    name: Coverage Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [backend-unit, flutter-unit]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: coverage/backend/
+        continue-on-error: true
+
+      - name: Download Flutter coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: flutter-coverage-${{ github.run_id }}
+          path: coverage/flutter/
+        continue-on-error: true
+
+      - name: Check backend line coverage >= 80%
+        run: |
+          if [ -f coverage/backend/lcov.info ]; then
+            LINES_FOUND=$(grep -oP 'LF:\K\d+' coverage/backend/lcov.info | awk '{s+=$1} END {print s}')
+            LINES_HIT=$(grep -oP 'LH:\K\d+' coverage/backend/lcov.info | awk '{s+=$1} END {print s}')
+            if [ "$LINES_FOUND" -gt 0 ]; then
+              PCT=$(echo "scale=1; $LINES_HIT * 100 / $LINES_FOUND" | bc)
+              echo "Backend line coverage: ${PCT}% (${LINES_HIT}/${LINES_FOUND})"
+              THRESHOLD=80
+              if (( $(echo "$PCT < $THRESHOLD" | bc -l) )); then
+                echo "ERROR: Backend coverage ${PCT}% is below minimum ${THRESHOLD}%"
+                exit 1
+              fi
+            fi
+          else
+            echo "Warning: Backend coverage file not found — skipping gate"
+          fi
+        shell: bash
+
+      - name: Check Flutter line coverage >= 70%
+        run: |
+          if [ -f coverage/flutter/lcov.info ]; then
+            LINES_FOUND=$(grep -oP 'LF:\K\d+' coverage/flutter/lcov.info | awk '{s+=$1} END {print s}')
+            LINES_HIT=$(grep -oP 'LH:\K\d+' coverage/flutter/lcov.info | awk '{s+=$1} END {print s}')
+            if [ "$LINES_FOUND" -gt 0 ]; then
+              PCT=$(echo "scale=1; $LINES_HIT * 100 / $LINES_FOUND" | bc)
+              echo "Flutter line coverage: ${PCT}% (${LINES_HIT}/${LINES_FOUND})"
+              THRESHOLD=70
+              if (( $(echo "$PCT < $THRESHOLD" | bc -l) )); then
+                echo "ERROR: Flutter coverage ${PCT}% is below minimum ${THRESHOLD}%"
+                exit 1
+              fi
+            fi
+          else
+            echo "Warning: Flutter coverage file not found — skipping gate"
+          fi
+        shell: bash
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Final gate — this job must pass for PRs to merge
+  # ─────────────────────────────────────────────────────────────────────────
+  all-tests-passed:
+    name: All Tests Passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs:
+      - backend-unit
+      - backend-e2e
+      - flutter-unit
+    if: always()
+    steps:
+      - name: Check all required jobs succeeded
+        run: |
+          if [[ "${{ needs.backend-unit.result }}" != "success" ]]; then
+            echo "Backend unit tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.flutter-unit.result }}" != "success" ]]; then
+            echo "Flutter unit tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.backend-e2e.result }}" != "success" ]]; then
+            echo "Backend e2e tests failed"
+            exit 1
+          fi
+          echo "All required tests passed!"

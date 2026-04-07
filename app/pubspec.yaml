@@ -53,6 +53,9 @@ dependencies:
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
 
+  # ── Secure Storage (auth tokens) ─────────────────────────────────────────
+  flutter_secure_storage: ^9.2.4
+
   # ── Utilities ────────────────────────────────────────────────────────────
   uuid: ^4.4.2
   collection: ^1.18.0
@@ -69,6 +72,9 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   custom_lint: ^0.7.3
   riverpod_lint: ^2.6.1
+
+  # ── App Icon Generation ────────────────────────────────────────────────
+  flutter_launcher_icons: ^0.14.3
 
   # ── Code Generation ──────────────────────────────────────────────────────
   build_runner: ^2.4.13
@@ -88,3 +94,14 @@ flutter:
     - assets/audio/effects/
     - assets/audio/silence/
     - assets/images/onboarding/
+    - assets/images/logo.png
+    - assets/images/logo.svg
+
+# ── Launcher icon generation (run: dart run flutter_launcher_icons) ────────
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo.png"
+  adaptive_icon_background: "#5B6BE8"
+  adaptive_icon_foreground: "assets/images/logo.png"
+  remove_alpha_ios: true

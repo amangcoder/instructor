@@ -6,12 +6,16 @@ part of 'execution_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$executionStateHash() => r'e810db0972ccdb010797bacd8bdef47c9a9ebfa0';
+String _$executionStateHash() => r'862f3d023d81bfdd73eab78a33fbd4e485d2d571';
 
 /// Reactive stream of [ExecutionState] from [PlanExecutionEngine.stateStream].
 ///
 /// Consumed by [NowPlayingScreen] to display the current step, countdown timer,
 /// and next-up preview.
+///
+/// Seeds the stream with [PlanExecutionEngine.currentState] when available so
+/// that [NowPlayingScreen] (which subscribes after [startPlan] emits the
+/// initial state on the broadcast stream) does not get stuck in [AsyncLoading].
 ///
 /// The [keepAlive: false] default means the stream subscription is cancelled
 /// when no widgets are listening (e.g. after navigating away from NowPlaying),

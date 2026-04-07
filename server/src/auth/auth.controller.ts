@@ -1,0 +1,86 @@
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  Logger,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
+import { OptionalAuthGuard } from './optional-auth.guard';
+import { JwtPayload } from './auth.service';
+import type { Request } from 'express';
+
+@Controller('auth')
+export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
+  constructor(private readonly authService: AuthService) {}
+
+  /**
+   * POST /api/auth/request-otp
+   * Sends a 6-digit OTP to the given email.
+   * Rate-limited: 3 requests per email per 5 minutes.
+   */
+  @Post('request-otp')
+  @HttpCode(200)
+  async requestOtp(@Body() dto: RequestOtpDto): Promise<{ message: string }> {
+    this.logger.log(`POST /auth/request-otp — email=${dto.email}`);
+    return this.authService.requestOtp(dto.email);
+  }
+
+  /**
+   * POST /api/auth/verify-otp
+   * Validates the OTP and returns JWT access + refresh tokens.
+   */
+  @Post('verify-otp')
+  @HttpCode(200)
+  async verifyOtp(@Body() dto: VerifyOtpDto) {
+    this.logger.log(`POST /auth/verify-otp — email=${dto.email}`);
+    return this.authService.verifyOtp(dto.email, dto.otp);
+  }
+
+  /**
+   * POST /api/auth/refresh
+   * Exchanges a valid refresh token for a new access token.
+   */
+  @Post('refresh')
+  @HttpCode(200)
+  async refresh(@Body() dto: RefreshTokenDto) {
+    this.logger.log(`POST /auth/refresh`);
+    return this.authService.refreshAccessToken(dto.refreshToken);
+  }
+
+  /**
+   * POST /api/auth/logout
+   * Revokes the provided refresh token. If a valid JWT is attached,
+   * revokes ALL refresh tokens for that user (logout-all).
+   * Always returns 200 to avoid leaking token validity.
+   */
+  @Post('logout')
+  @UseGuards(OptionalAuthGuard)
+  @HttpCode(200)
+  async logout(
+    @Body() dto: LogoutDto,
+    @Req() req: Request,
+  ): Promise<{ message: string }> {
+    const user = (req as any).user as JwtPayload | undefined;
+
+    if (user) {
+      // JWT present — revoke all tokens for this user.
+      await this.authService.revokeAllRefreshTokens(user.sub);
+      this.logger.log(`POST /auth/logout — revoked all tokens for user ${user.sub}`);
+    } else if (dto.refreshToken) {
+      // No JWT but refresh token provided — revoke just that token.
+      await this.authService.revokeRefreshToken(dto.refreshToken);
+      this.logger.log(`POST /auth/logout — revoked single refresh token`);
+    }
+
+    return { message: 'Logged out' };
+  }
+}

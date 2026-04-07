@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/models/enums.dart';
+import 'package:instructor/providers/tts_providers.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data class
@@ -59,7 +61,7 @@ Future<PlanMetadata?> showPlanMetadataSheet(
 // Sheet widget
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _PlanMetadataSheet extends StatefulWidget {
+class _PlanMetadataSheet extends ConsumerStatefulWidget {
   const _PlanMetadataSheet({
     required this.initialName,
     this.initialDescription,
@@ -75,10 +77,10 @@ class _PlanMetadataSheet extends StatefulWidget {
   final String initialVoice;
 
   @override
-  State<_PlanMetadataSheet> createState() => _PlanMetadataSheetState();
+  ConsumerState<_PlanMetadataSheet> createState() => _PlanMetadataSheetState();
 }
 
-class _PlanMetadataSheetState extends State<_PlanMetadataSheet> {
+class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _descController;
@@ -228,19 +230,7 @@ class _PlanMetadataSheetState extends State<_PlanMetadataSheet> {
               const SizedBox(height: 12),
 
               // ── Default Voice ─────────────────────────────────────────────
-              DropdownButtonFormField<String>(
-                value: _voice,
-                decoration: const InputDecoration(labelText: 'Default Voice'),
-                items: PlanVoice.values
-                    .map(
-                      (v) => DropdownMenuItem(
-                        value: v.name,
-                        child: Text(_voiceLabel(v.name)),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (v) => setState(() => _voice = v ?? 'nova'),
-              ),
+              _buildVoiceDropdown(),
               const SizedBox(height: 16),
 
               // ── Tags ──────────────────────────────────────────────────────
@@ -317,14 +307,52 @@ class _PlanMetadataSheetState extends State<_PlanMetadataSheet> {
         PlanCategory.custom => 'Custom',
       };
 
-  String _voiceLabel(String voiceId) => switch (voiceId) {
-        'nova' => 'Nova (warm, clear)',
-        'shimmer' => 'Shimmer (soft, calming)',
-        'onyx' => 'Onyx (deep, energetic)',
-        'alloy' => 'Alloy (neutral)',
-        'echo' => 'Echo (reserved)',
-        'fable' => 'Fable (expressive)',
-        'platform' => 'Platform TTS (device)',
-        _ => voiceId,
-      };
+  Widget _buildVoiceDropdown() {
+    final voicesAsync = ref.watch(availableVoicesProvider);
+
+    return voicesAsync.when(
+      data: (voices) {
+        if (voices.isEmpty) {
+          return DropdownButtonFormField<String>(
+            value: _voice,
+            decoration: const InputDecoration(labelText: 'Default Voice'),
+            items: [DropdownMenuItem(value: _voice, child: Text(_voice))],
+            onChanged: null,
+          );
+        }
+
+        // Auto-correct voice if it doesn't match the current provider.
+        final validVoice = voices.any((v) => v.id == _voice)
+            ? _voice
+            : voices.first.id;
+        if (validVoice != _voice) {
+          _voice = validVoice;
+        }
+
+        return DropdownButtonFormField<String>(
+          key: ValueKey(validVoice),
+          value: validVoice,
+          decoration: const InputDecoration(labelText: 'Default Voice'),
+          items: voices
+              .map((v) => DropdownMenuItem(value: v.id, child: Text(v.label)))
+              .toList(),
+          onChanged: (v) {
+            if (v != null) setState(() => _voice = v);
+          },
+        );
+      },
+      loading: () => DropdownButtonFormField<String>(
+        value: _voice,
+        decoration: const InputDecoration(labelText: 'Default Voice'),
+        items: [DropdownMenuItem(value: _voice, child: Text(_voice))],
+        onChanged: null,
+      ),
+      error: (_, __) => DropdownButtonFormField<String>(
+        value: _voice,
+        decoration: const InputDecoration(labelText: 'Default Voice'),
+        items: [DropdownMenuItem(value: _voice, child: Text(_voice))],
+        onChanged: null,
+      ),
+    );
+  }
 }

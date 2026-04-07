@@ -211,7 +211,7 @@ class FlutterNotificationService extends NotificationService {
   @override
   Future<void> initialize() async {
     const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('ic_stat_instructor');
 
     // Register the iOS "RESUME_CATEGORY" with a "Resume" foreground action so
     // the action button appears on the lock screen and in notification centre.
@@ -314,6 +314,7 @@ class FlutterNotificationService extends NotificationService {
     const androidDetails = AndroidNotificationDetails(
       kPlanNotificationsChannelId,
       kPlanNotificationsChannelName,
+      icon: 'ic_stat_instructor',
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Plan step',
@@ -340,6 +341,7 @@ class FlutterNotificationService extends NotificationService {
     const androidDetails = AndroidNotificationDetails(
       kPlanNotificationsChannelId,
       kPlanNotificationsChannelName,
+      icon: 'ic_stat_instructor',
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Resume plan',
@@ -387,6 +389,7 @@ class FlutterNotificationService extends NotificationService {
     const androidDetails = AndroidNotificationDetails(
       _foregroundChannelId,
       _foregroundChannelName,
+      icon: 'ic_stat_instructor',
       importance: Importance.low,
       priority: Priority.low,
       ongoing: true,

@@ -5,7 +5,10 @@ import 'package:instructor/app.dart';
 import 'package:instructor/database/app_database.dart';
 import 'package:instructor/services/background_service.dart';
 import 'package:instructor/services/notification_service.dart';
+import 'package:instructor/data/starter_plans.dart';
+import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/services/tts_service.dart';
 
 /// Entry point for the Instructor app.
 ///
@@ -27,8 +30,9 @@ import 'package:instructor/services/plan_execution_engine.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Step 1: Resolve the SQLite file path. ─────────────────────────────────
+  // ── Step 1: Resolve the SQLite file path and TTS audio directory. ──────────
   await initDatabase();
+  await initTtsAudioDirectory();
 
   // ── Step 2: Create the Riverpod container early so we can read services ───
   //           that are needed by the background handler.
@@ -57,7 +61,10 @@ void main() async {
     debugPrint('Background service init failed: $e');
   }
 
-  // ── Step 4: Run the Flutter app. ──────────────────────────────────────────
+  // ── Step 4: Seed starter plans on first launch. ──────────────────────────
+  await seedStarterPlans(container.read(planRepositoryProvider));
+
+  // ── Step 5: Run the Flutter app. ──────────────────────────────────────────
   runApp(
     ProviderScope(
       parent: container,

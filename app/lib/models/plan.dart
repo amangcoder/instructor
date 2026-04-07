@@ -13,13 +13,14 @@ part 'plan.g.dart';
 class Plan with _$Plan {
   const Plan._();
 
+  @Assert("defaultVoice != ''", 'defaultVoice must not be empty')
   const factory Plan({
     required int id,
     required String name,
     String? description,
     @Default(PlanCategory.custom) PlanCategory category,
     @Default([]) List<String> tags,
-    @Default('nova') String defaultVoice,
+    @Default('aoede') String defaultVoice,
     @Default([]) List<PlanStep> steps,
     required DateTime createdAt,
     required DateTime updatedAt,

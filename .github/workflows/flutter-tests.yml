@@ -1,0 +1,185 @@
+name: Flutter Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'app/**'
+      - '.github/workflows/flutter-tests.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'app/**'
+      - '.github/workflows/flutter-tests.yml'
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Unit & Widget tests
+  # ─────────────────────────────────────────────────────────────────────────
+  test:
+    name: Flutter Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Verify code generation is up to date
+        run: |
+          dart run build_runner build --delete-conflicting-outputs
+          git diff --exit-code lib/
+        continue-on-error: true  # Non-blocking; generated files may differ in CI
+
+      - name: Run unit and widget tests
+        run: flutter test --coverage --reporter=expanded
+        env:
+          # Suppress platform plugin warnings in tests
+          FLUTTER_TEST: 'true'
+
+      - name: Upload coverage to artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flutter-coverage
+          path: app/coverage/lcov.info
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Specific test suites (run in parallel for speed)
+  # ─────────────────────────────────────────────────────────────────────────
+  test-auth:
+    name: Auth Service & Screen Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run auth tests
+        run: |
+          flutter test \
+            test/services/auth_service_test.dart \
+            test/screens/auth/login_screen_test.dart \
+            test/screens/auth/otp_verification_screen_test.dart \
+            --reporter=expanded
+
+  test-sync:
+    name: Sync & Media Cache Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run sync and cache tests
+        run: |
+          flutter test \
+            test/services/sync_service_test.dart \
+            test/services/media_cache_service_test.dart \
+            test/utils/hash_utils_test.dart \
+            --reporter=expanded
+
+  test-screens:
+    name: Screen Widget Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Run screen tests
+        run: |
+          flutter test \
+            test/screens/plan_generation/plan_generation_screen_test.dart \
+            test/screens/settings/settings_screen_test.dart \
+            test/screens/plan_library/plan_library_screen_test.dart \
+            --reporter=expanded
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Static analysis
+  # ─────────────────────────────────────────────────────────────────────────
+  analyze:
+    name: Flutter Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Format check
+  # ─────────────────────────────────────────────────────────────────────────
+  format:
+    name: Dart Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .

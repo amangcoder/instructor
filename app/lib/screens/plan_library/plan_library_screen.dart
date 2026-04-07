@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
@@ -48,6 +49,7 @@ class PlanLibraryScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final searchQuery = ref.watch(searchQueryProvider);
     final selectedCategory = ref.watch(selectedCategoryProvider);
+    final isLoggedIn = ref.watch(isAuthenticatedProvider);
 
     final plansAsync = ref.watch(
       planListProvider(
@@ -84,7 +86,10 @@ class PlanLibraryScreen extends ConsumerWidget {
           // ── Plan list ─────────────────────────────────────────────────────
           Expanded(
             child: plansAsync.when(
-              data: (plans) => _PlanList(plans: plans),
+              data: (plans) => _PlanList(
+                plans: plans,
+                isAuthenticated: isLoggedIn,
+              ),
               loading: () =>
                   const Center(child: CircularProgressIndicator()),
               error: (error, _) => _ErrorState(
@@ -96,12 +101,14 @@ class PlanLibraryScreen extends ConsumerWidget {
         ],
       ),
 
-      // ── FAB: new Plan ──────────────────────────────────────────────────────
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push(AppRoutes.editorNew),
-        tooltip: 'New Plan',
-        child: const Icon(Icons.add),
-      ),
+      // ── FAB: new Plan (only for authenticated users) ───────────────────────
+      floatingActionButton: isLoggedIn
+          ? FloatingActionButton(
+              onPressed: () => context.push(AppRoutes.editorNew),
+              tooltip: 'New Plan',
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }
@@ -111,9 +118,10 @@ class PlanLibraryScreen extends ConsumerWidget {
 // ────────────────────────────────────────────────────────────────────────────
 
 class _PlanList extends ConsumerWidget {
-  const _PlanList({required this.plans});
+  const _PlanList({required this.plans, required this.isAuthenticated});
 
   final List<Plan> plans;
+  final bool isAuthenticated;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -131,9 +139,15 @@ class _PlanList extends ConsumerWidget {
           child: PlanCard(
             plan: plan,
             onTap: () => _onPlanTap(context, ref, plan),
-            onEdit: () => context.push('/editor/${plan.id}'),
-            onDuplicate: () => _duplicatePlan(context, ref, plan),
-            onDelete: () => _confirmDelete(context, ref, plan),
+            onEdit: isAuthenticated
+                ? () => context.push('/editor/${plan.id}')
+                : null,
+            onDuplicate: isAuthenticated
+                ? () => _duplicatePlan(context, ref, plan)
+                : null,
+            onDelete: isAuthenticated
+                ? () => _confirmDelete(context, ref, plan)
+                : null,
           ),
         );
       },

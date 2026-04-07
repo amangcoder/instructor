@@ -15,7 +15,7 @@ _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
       tags:
           (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
               const [],
-      defaultVoice: json['defaultVoice'] as String? ?? 'nova',
+      defaultVoice: json['defaultVoice'] as String? ?? 'aoede',
       steps: (json['steps'] as List<dynamic>?)
               ?.map((e) => PlanStep.fromJson(e as Map<String, dynamic>))
               .toList() ??

@@ -13,14 +13,78 @@ String sha256Hex(String input) {
   return sha256.convert(bytes).toString();
 }
 
-/// Computes the TTS cache key for a given [voiceId] and [text] pair.
+/// Computes the TTS cache key for a given [provider], [voiceId] and [text].
 ///
-/// The key is the SHA-256 hex digest of `"$voiceId:$text"`, matching the
-/// column comment on [TtsCacheTable.textHash]:
-/// > SHA-256 hash of (voiceId + ":" + text) — used as the deduplication key.
+/// The key is the SHA-256 hex digest of `"$provider:$voiceId:$text"`.
+/// Including the provider ensures switching between OpenAI and Google Cloud
+/// re-renders audio instead of serving a stale cached file from the other
+/// provider.
 ///
-/// Identical text across multiple Plans that use the same voice will share
-/// a single cached audio file.
-String ttsCacheKey({required String voiceId, required String text}) {
-  return sha256Hex('$voiceId:$text');
+/// **Legacy key format** — preserved for backward-compatibility cache lookup.
+/// Prefer [fullParamCacheKey] / [mediaCacheKey] for new cache entries.
+String ttsCacheKey({
+  required String provider,
+  required String voiceId,
+  required String text,
+}) {
+  return sha256Hex('$provider:$voiceId:$text');
 }
+
+/// Computes the full-parameter TTS cache key matching the server-side format.
+///
+/// ## Key format
+/// Parameters are JSON-serialised with alphabetically sorted keys, then the
+/// resulting string is SHA-256 hashed. This matches the backend implementation
+/// exactly so that client and server cache keys are always identical.
+///
+/// ```json
+/// {"locale":"en-IN","provider":"gemini","speechRate":"1.0","text":"...","voice":"aoede"}
+/// ```
+///
+/// ## Parameters
+/// - [text]       — the text to be synthesised
+/// - [voice]      — voice identifier (e.g. 'aoede')
+/// - [locale]     — locale identifier (e.g. 'en-IN')
+/// - [provider]   — TTS provider ('gemini' or 'kokoro')
+/// - [speechRate] — playback speed as a string (e.g. '1.0')
+String fullParamCacheKey({
+  required String text,
+  required String voice,
+  required String locale,
+  required String provider,
+  required String speechRate,
+}) {
+  // Keys must be in alphabetical order to match server-side JSON serialisation.
+  final params = <String, String>{
+    'locale': locale,
+    'provider': provider,
+    'speechRate': speechRate,
+    'text': text,
+    'voice': voice,
+  };
+
+  // Use a sorted map to guarantee deterministic key ordering.
+  final sortedKeys = params.keys.toList()..sort();
+  final sortedMap = {for (final k in sortedKeys) k: params[k]!};
+  final jsonString = jsonEncode(sortedMap);
+  return sha256Hex(jsonString);
+}
+
+/// Alias for [fullParamCacheKey] — matches the naming convention used in tests
+/// and corresponds to the server-side `cacheKey()` function.
+///
+/// Both [mediaCacheKey] and [fullParamCacheKey] produce identical output.
+String mediaCacheKey({
+  required String text,
+  required String voice,
+  required String locale,
+  required String provider,
+  required String speechRate,
+}) =>
+    fullParamCacheKey(
+      text: text,
+      voice: voice,
+      locale: locale,
+      provider: provider,
+      speechRate: speechRate,
+    );

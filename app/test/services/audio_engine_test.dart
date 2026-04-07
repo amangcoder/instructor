@@ -64,7 +64,7 @@ class _FakeAudioEngine implements AudioEngine {
   double get targetVolume => _targetVolume;
 
   @override
-  Future<void> playVoice(String filePath) async {
+  Future<void> playVoice(String filePath, {double speed = 1.0}) async {
     voiceFilesPlayed.add(filePath);
     _voiceController.add(filePath);
     // Simulate duck (fires synchronously before the first await so that
@@ -135,6 +135,16 @@ class _FakeAudioEngine implements AudioEngine {
   @override
   Future<void> stopSilenceKeepAlive() async {
     silenceStopCount++;
+  }
+
+  final List<String> effectsPlayed = [];
+
+  @override
+  Future<void> playEffect(String assetKey) async {
+    effectsPlayed.add(assetKey);
+    duckAmbientCount++;
+    await Future.delayed(const Duration(milliseconds: 10));
+    restoreAmbientCount++;
   }
 
   @override

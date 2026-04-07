@@ -94,7 +94,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 
   Future<void> _getStarted() async {
-    await showTemplatePickerSheet(context, ref);
+    await showTemplatePickerSheet(context);
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────

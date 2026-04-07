@@ -40,6 +40,7 @@ import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/utils/hash_utils.dart';
 
@@ -57,10 +58,18 @@ class _FakeTTSService implements TTSService {
   final List<({String textHash, String voiceId})> isCachedCalls = [];
   final List<String> renderWithPlatformTTSCalls = [];
 
+  /// Records every (completed, total) pair passed to the [onProgress] callback.
+  final List<({int completed, int total})> progressCallbacks = [];
+
   // Controllable state
   bool _isCachedResult = false;
   Exception? _renderError;
   final Map<String, String> _cacheMap = {};
+
+  /// When set, the fake will simulate [stepCount] progress callbacks when
+  /// [preRenderPlan] is called (useful for testing callers that depend on
+  /// progress reporting).
+  int simulatedStepCount = 0;
 
   // Fake setup helpers
   void setIsCachedResult({required bool value}) => _isCachedResult = value;
@@ -70,7 +79,7 @@ class _FakeTTSService implements TTSService {
     required String voiceId,
     required String filePath,
   }) {
-    _cacheMap[ttsCacheKey(voiceId: voiceId, text: text)] = filePath;
+    _cacheMap[ttsCacheKey(provider: 'backend', voiceId: voiceId, text: text)] = filePath;
   }
 
   @override
@@ -80,14 +89,24 @@ class _FakeTTSService implements TTSService {
   }) async {
     renderTTSCalls.add((text: text, voiceId: voiceId));
     if (_renderError != null) throw _renderError!;
-    final hash = ttsCacheKey(voiceId: voiceId, text: text);
-    return _cacheMap[hash] ?? '/fake/tts/$hash.mp3';
+    final hash = ttsCacheKey(provider: 'backend', voiceId: voiceId, text: text);
+    return _cacheMap[hash] ?? '/fake/tts/$hash.wav';
   }
 
   @override
-  Future<void> preRenderPlan(Plan plan) async {
+  Future<void> preRenderPlan(
+    Plan plan, {
+    void Function(int completed, int total)? onProgress,
+  }) async {
     preRenderPlanCalls.add(plan);
     if (_renderError != null) throw _renderError!;
+    // Simulate progress callbacks if the caller has configured a step count.
+    if (onProgress != null && simulatedStepCount > 0) {
+      for (var i = 1; i <= simulatedStepCount; i++) {
+        progressCallbacks.add((completed: i, total: simulatedStepCount));
+        onProgress(i, simulatedStepCount);
+      }
+    }
   }
 
   @override
@@ -107,6 +126,9 @@ class _FakeTTSService implements TTSService {
     if (_renderError != null) throw _renderError!;
     return '/fake/platform/${sha256Hex(text)}.wav';
   }
+
+  @override
+  Future<void> speakDirect(String text, {double speed = 1.0}) async {}
 }
 
 /// A fake [PlatformTtsEngine] that writes a small binary placeholder file
@@ -133,6 +155,9 @@ class _FakePlatformTtsEngine implements PlatformTtsEngine {
     );
     return true;
   }
+
+  @override
+  Future<void> speak(String text, {double speed = 1.0}) async {}
 
   @override
   Future<void> stop() async {
@@ -213,16 +238,17 @@ void main() {
     });
 
     test('ttsCacheKey returns a 64-char hex string for a voice+text pair', () {
-      final key = ttsCacheKey(voiceId: 'nova', text: 'Hello, world!');
+      final key = ttsCacheKey(provider: 'openai', voiceId: 'nova', text: 'Hello, world!');
       expect(key.length, 64);
     });
 
-    test('ttsCacheKey is consistent with sha256Hex("voiceId:text")', () {
+    test('ttsCacheKey is consistent with sha256Hex("provider:voiceId:text")', () {
+      const provider = 'openai';
       const voiceId = 'shimmer';
       const text = 'Take a deep breath.';
       expect(
-        ttsCacheKey(voiceId: voiceId, text: text),
-        equals(sha256Hex('$voiceId:$text')),
+        ttsCacheKey(provider: provider, voiceId: voiceId, text: text),
+        equals(sha256Hex('$provider:$voiceId:$text')),
       );
     });
 
@@ -230,8 +256,8 @@ void main() {
       'ttsCacheKey produces different keys for same text with different voices',
       () {
         const text = 'Begin now.';
-        final novaKey = ttsCacheKey(voiceId: 'nova', text: text);
-        final onyxKey = ttsCacheKey(voiceId: 'onyx', text: text);
+        final novaKey = ttsCacheKey(provider: 'openai', voiceId: 'nova', text: text);
+        final onyxKey = ttsCacheKey(provider: 'openai', voiceId: 'onyx', text: text);
         expect(novaKey, isNot(equals(onyxKey)));
       },
     );
@@ -240,8 +266,8 @@ void main() {
       'ttsCacheKey produces different keys for same voice with different texts',
       () {
         const voice = 'nova';
-        final key1 = ttsCacheKey(voiceId: voice, text: 'Step one.');
-        final key2 = ttsCacheKey(voiceId: voice, text: 'Step two.');
+        final key1 = ttsCacheKey(provider: 'openai', voiceId: voice, text: 'Step one.');
+        final key2 = ttsCacheKey(provider: 'openai', voiceId: voice, text: 'Step two.');
         expect(key1, isNot(equals(key2)));
       },
     );
@@ -251,15 +277,15 @@ void main() {
       // app launches.
       for (var i = 0; i < 10; i++) {
         expect(
-          ttsCacheKey(voiceId: 'nova', text: 'Stability check'),
-          equals(ttsCacheKey(voiceId: 'nova', text: 'Stability check')),
+          ttsCacheKey(provider: 'openai', voiceId: 'nova', text: 'Stability check'),
+          equals(ttsCacheKey(provider: 'openai', voiceId: 'nova', text: 'Stability check')),
         );
       }
     });
 
     test('ttsCacheKey handles text longer than 500 characters', () {
       final longText = 'A' * 600;
-      final key = ttsCacheKey(voiceId: 'nova', text: longText);
+      final key = ttsCacheKey(provider: 'openai', voiceId: 'nova', text: longText);
       expect(key.length, 64);
     });
   });
@@ -346,6 +372,64 @@ void main() {
       await expectLater(service.preRenderPlan(plan), completes);
     });
 
+    test('preRenderPlan accepts an optional onProgress callback', () async {
+      final plan = _makePlan();
+      // Should not throw even when a callback is provided.
+      await expectLater(
+        service.preRenderPlan(plan, onProgress: (_, __) {}),
+        completes,
+      );
+    });
+
+    test(
+      'preRenderPlan fires onProgress callbacks in order when simulated steps are set',
+      () async {
+        service.simulatedStepCount = 3;
+        final plan = _makePlan(
+          steps: [
+            _sayStep('Step one'),
+            _sayStep('Step two'),
+            _sayStep('Step three'),
+          ],
+        );
+
+        final received = <({int completed, int total})>[];
+        await service.preRenderPlan(
+          plan,
+          onProgress: (c, t) => received.add((completed: c, total: t)),
+        );
+
+        expect(received, hasLength(3));
+        expect(received[0], (completed: 1, total: 3));
+        expect(received[1], (completed: 2, total: 3));
+        expect(received[2], (completed: 3, total: 3));
+      },
+    );
+
+    test(
+      'preRenderPlan does not fire onProgress when no callback is provided',
+      () async {
+        service.simulatedStepCount = 2;
+        final plan = _makePlan(steps: [_sayStep('A'), _sayStep('B')]);
+        // No callback — should complete without error.
+        await expectLater(service.preRenderPlan(plan), completes);
+        // progressCallbacks list stays empty because no callback was passed.
+        expect(service.progressCallbacks, isEmpty);
+      },
+    );
+
+    test(
+      'preRenderPlan records progress callbacks in the fake',
+      () async {
+        service.simulatedStepCount = 2;
+        final plan = _makePlan(steps: [_sayStep('X'), _sayStep('Y')]);
+        await service.preRenderPlan(plan, onProgress: (c, t) {});
+        expect(service.progressCallbacks, hasLength(2));
+        expect(service.progressCallbacks.last.completed, 2);
+        expect(service.progressCallbacks.last.total, 2);
+      },
+    );
+
     // ── clearCacheForPlan ──────────────────────────────────────────────────
 
     test('clearCacheForPlan records the planId', () async {
@@ -363,7 +447,7 @@ void main() {
     // ── isCached ──────────────────────────────────────────────────────────
 
     test('isCached records textHash and voiceId', () async {
-      final hash = ttsCacheKey(voiceId: 'nova', text: 'Check');
+      final hash = ttsCacheKey(provider: 'backend', voiceId: 'nova', text: 'Check');
       await service.isCached(hash, 'nova');
       expect(service.isCachedCalls.first.textHash, hash);
       expect(service.isCachedCalls.first.voiceId, 'nova');
@@ -479,6 +563,7 @@ void main() {
         TTSServiceImpl(
           db: _NullAppDatabase(),
           audioDirectory: tempDir.path,
+          authService: _StubAuthService(),
           ttsEngine: ttsEngine ?? fakeTtsEngine,
         );
 
@@ -571,16 +656,24 @@ void main() {
       expect(kTtsMaxConcurrent, 5);
     });
 
-    test('kTtsApiUrl points to OpenAI TTS endpoint', () {
-      expect(kTtsApiUrl, 'https://api.openai.com/v1/audio/speech');
+    test('kTtsApiTimeout is 60 seconds', () {
+      expect(kTtsApiTimeout, const Duration(seconds: 60));
     });
 
-    test('kTtsModel is tts-1', () {
-      expect(kTtsModel, 'tts-1');
+    test('kDefaultBackendServerUrl is localhost:3071', () {
+      expect(kDefaultBackendServerUrl, 'http://localhost:3071');
     });
 
-    test('kTtsApiTimeout is 30 seconds', () {
-      expect(kTtsApiTimeout, const Duration(seconds: 30));
+    test('kBackendTtsPath is the backend synthesis endpoint', () {
+      expect(kBackendTtsPath, '/api/tts/synthesize');
+    });
+
+    test('kDefaultBackendServerUrl does not contain api.openai.com', () {
+      expect(kDefaultBackendServerUrl, isNot(contains('openai.com')));
+    });
+
+    test('kDefaultBackendServerUrl does not contain generativelanguage', () {
+      expect(kDefaultBackendServerUrl, isNot(contains('generativelanguage')));
     });
   });
 
@@ -673,4 +766,20 @@ void main() {
 /// project has not yet generated its Drift/Freezed code.
 class _NullAppDatabase extends AppDatabase {
   _NullAppDatabase() : super(NativeDatabase.memory());
+}
+
+/// Stub [AuthService] that always returns `null` for the access token.
+class _StubAuthService extends AuthService {
+  @override
+  Future<AuthResult> requestOtp(String email) =>
+      throw UnimplementedError('not needed in TTS tests');
+  @override
+  Future<AuthResult> verifyOtp(String email, String otp) =>
+      throw UnimplementedError('not needed in TTS tests');
+  @override
+  Future<void> refreshToken() =>
+      throw UnimplementedError('not needed in TTS tests');
+  @override
+  Future<void> logout() =>
+      throw UnimplementedError('not needed in TTS tests');
 }

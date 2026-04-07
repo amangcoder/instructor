@@ -41,19 +41,105 @@ class AppDatabase extends _$AppDatabase {
   /// Constructor used in tests to pass an in-memory executor.
   AppDatabase.forTesting(super.executor);
 
+  /// The absolute path to the `.db` file on disk.
+  ///
+  /// Used by [SyncService] to locate the database file for upload/restore.
+  /// Returns an empty string when running with an in-memory executor (tests).
+  String get dbFilePath {
+    if (_documentsPath.isEmpty) return '';
+    return p.join(_documentsPath, 'instructor.db');
+  }
+
+  /// Runs a WAL checkpoint to merge the WAL file into the main database file.
+  ///
+  /// Must be called before uploading the database to S3 to ensure all pending
+  /// writes are flushed into `instructor.db`.
+  Future<void> walCheckpoint() async {
+    await customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
+  }
+
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (Migrator m) async {
           await m.createAll();
         },
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            // v1 → v2: add provider and speechRate columns to tts_cache.
+            await m.addColumn(ttsCacheTable, ttsCacheTable.provider);
+            await m.addColumn(ttsCacheTable, ttsCacheTable.speechRate);
+
+            // Remap OpenAI voice names → Gemini voice names in plans.
+            const voiceMapping = {
+              'nova': 'aoede',
+              'shimmer': 'leda',
+              'onyx': 'charon',
+              'alloy': 'puck',
+              'echo': 'kore',
+              'fable': 'fenrir',
+            };
+            for (final entry in voiceMapping.entries) {
+              await customStatement(
+                "UPDATE plans SET default_voice = '${entry.value}' "
+                "WHERE default_voice = '${entry.key}'",
+              );
+            }
+
+            // Remap saved voice preference in app_settings too.
+            for (final entry in voiceMapping.entries) {
+              await customStatement(
+                "UPDATE app_settings SET value = '${entry.value}' "
+                "WHERE key = 'default_voice' AND value = '${entry.key}'",
+              );
+            }
+
+            // Clear TTS cache — audio was generated with the old provider
+            // (OpenAI) and old voice IDs, so it's no longer valid.
+            await customStatement('DELETE FROM tts_cache');
+          }
+        },
         beforeOpen: (OpeningDetails details) async {
           // Enable WAL mode for better concurrent read performance.
           await customStatement('PRAGMA journal_mode=WAL');
           // Enable foreign key enforcement.
           await customStatement('PRAGMA foreign_keys=ON');
+
+          // ── Performance indexes ─────────────────────────────────────────
+          //
+          // Drift's schema versioning only tracks structural changes (columns,
+          // tables). Indexes are created idempotently here so they are always
+          // present regardless of which migration path was taken.
+          //
+          // tts_cache: index on plan_id for bulk cache eviction when a plan
+          //   is deleted or its steps are modified.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_tts_cache_plan_id '
+            'ON tts_cache (plan_id)',
+          );
+
+          // plans: index on updated_at for the "recently modified" sort in
+          //   PlanLibraryScreen.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_plans_updated_at '
+            'ON plans (updated_at)',
+          );
+
+          // plans: index on last_used_at for the "recently played" sort.
+          // Column is nullable; NULL rows are placed last automatically in
+          // SQLite ORDER BY … ASC NULLS LAST.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_plans_last_used_at '
+            'ON plans (last_used_at)',
+          );
+
+          // tts_cache: index on created_at for LRU eviction queries.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_tts_cache_created_at '
+            'ON tts_cache (created_at)',
+          );
         },
       );
 }

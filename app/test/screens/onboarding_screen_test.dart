@@ -362,12 +362,12 @@ void main() {
       await tester.pumpAndSettle();
 
       // Tap the first yoga template
-      await tester.tap(find.text('Morning Yoga Flow'));
+      await tester.tap(find.text('108 Surya Namaskar'));
       await tester.pumpAndSettle();
 
       expect(await settings.hasCompletedOnboarding(), isTrue);
       expect(repo.created, hasLength(1));
-      expect(repo.created.first.name, equals('Morning Yoga Flow'));
+      expect(repo.created.first.name, equals('108 Surya Namaskar'));
       expect(repo.created.first.category, equals(PlanCategory.yoga));
     });
 

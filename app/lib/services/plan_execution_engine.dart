@@ -42,6 +42,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
+import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/services/audio_engine.dart';
@@ -170,6 +171,13 @@ abstract class PlanExecutionEngine {
   /// Reactive stream of [ExecutionState] consumed by the Now Playing UI.
   Stream<ExecutionState> get stateStream;
 
+  /// The most recently emitted [ExecutionState], or `null` when idle.
+  ///
+  /// Used by [executionStateProvider] to seed the stream for late subscribers
+  /// (e.g. [NowPlayingScreen] mounting after [startPlan] has already emitted
+  /// the initial state on the broadcast stream).
+  ExecutionState? get currentState;
+
   /// Returns a recoverable session if one exists (for crash recovery on launch).
   ///
   /// Also restores the engine's internal state so that [resume] can be called
@@ -254,8 +262,13 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   final StreamController<ExecutionState> _stateController =
       StreamController<ExecutionState>.broadcast();
 
+  ExecutionState? _lastState;
+
   @override
   Stream<ExecutionState> get stateStream => _stateController.stream;
+
+  @override
+  ExecutionState? get currentState => _lastState;
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -393,6 +406,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     await _clearPersistedState();
 
     _currentPlan = null;
+    _lastState = null;
     _flatSteps = [];
     _currentStepIndex = 0;
     _waitStepElapsedMs = 0;
@@ -552,6 +566,8 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   }) async {
     if (_cancelled) return;
 
+    debugPrint('PlanExecutionEngine: [SAY] starting — text="${text.length > 50 ? '${text.substring(0, 50)}…' : text}", voice=$voiceId');
+
     // Duck ambient proactively while TTS resolves (may need a network call on
     // a cache miss, though pre-rendering at plan save should prevent this).
     try {
@@ -563,26 +579,101 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     if (_cancelled) return;
 
     // Resolve the cached audio file path (or render on a miss).
-    String path;
+    String? path;
     try {
       path = await _ttsService.renderTTS(text: text, voiceId: voiceId);
-    } catch (e) {
-      debugPrint('PlanExecutionEngine: TTS render failed for "$text": $e');
+      debugPrint('PlanExecutionEngine: [SAY] renderTTS succeeded — path=$path');
+    } on TtsFallbackException {
+      // Text was already spoken by the TTS service's platform TTS fallback
+      // (e.g. backend offline / timeout). Just restore ambient and move on.
+      debugPrint('PlanExecutionEngine: [SAY] text spoken via platform TTS fallback');
       try {
         await _audioEngine.restoreAmbient();
       } catch (_) {}
       return;
+    } on TtsApiException catch (e) {
+      if (e.statusCode == 401) {
+        // Session expired — logout already triggered, stop the plan.
+        debugPrint('PlanExecutionEngine: auth expired, stopping plan');
+        await stop();
+        return;
+      }
+      debugPrint('PlanExecutionEngine: TTS API error for "$text": $e');
+      // Last resort: speak directly through the device speaker.
+      debugPrint('PlanExecutionEngine: [SAY] falling back to speakDirect (TtsApiException)');
+      path = await _speakDirectFallback(text);
+      if (path == null) {
+        debugPrint('PlanExecutionEngine: [SAY] speakDirect fallback returned null, skipping playVoice');
+        return;
+      }
+    } catch (e) {
+      debugPrint('PlanExecutionEngine: TTS render failed for "$text": $e');
+      // Last resort: speak directly through the device speaker.
+      debugPrint('PlanExecutionEngine: [SAY] falling back to speakDirect (${e.runtimeType})');
+      path = await _speakDirectFallback(text);
+      if (path == null) {
+        debugPrint('PlanExecutionEngine: [SAY] speakDirect fallback returned null, skipping playVoice');
+        return;
+      }
     }
 
     if (_cancelled) return;
 
+    // Read the user's preferred speech rate before playback.
+    final rateRow = await (_db.select(_db.appSettingsTable)
+          ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
+        .getSingleOrNull();
+    final speed = double.tryParse(rateRow?.value ?? '') ?? 1.0;
+
     // Play voice and wait for completion. AudioEngineImpl.playVoice awaits
     // completion and automatically restores ambient volume when done.
+    debugPrint('PlanExecutionEngine: [SAY] playing voice — path=$path, speed=$speed');
     try {
-      await _audioEngine.playVoice(path);
+      await _audioEngine.playVoice(path, speed: speed);
+      debugPrint('PlanExecutionEngine: [SAY] playVoice completed');
     } catch (e) {
       debugPrint('PlanExecutionEngine: playVoice failed: $e');
+      // Fallback to platform TTS when audio file playback fails.
+      debugPrint('PlanExecutionEngine: [SAY] playVoice failed, trying speakDirect');
+      try {
+        await _ttsService.speakDirect(text, speed: speed);
+        debugPrint('PlanExecutionEngine: [SAY] speakDirect completed');
+      } catch (speakError) {
+        debugPrint(
+          'PlanExecutionEngine: speakDirect fallback also failed: $speakError',
+        );
+      }
+      // Restore ambient in case playVoice failed before its internal
+      // restore handler could run (e.g. setFilePath threw).
+      try {
+        await _audioEngine.restoreAmbient();
+      } catch (_) {}
     }
+    debugPrint('PlanExecutionEngine: [SAY] step done');
+  }
+
+  /// Attempts [speakDirect] as a last-resort fallback and restores ambient.
+  /// Returns `null` to signal the caller should return (skip playVoice).
+  Future<String?> _speakDirectFallback(String text) async {
+    debugPrint('PlanExecutionEngine: [FALLBACK] speakDirect starting — text="${text.length > 50 ? '${text.substring(0, 50)}…' : text}"');
+    try {
+      final rateRow = await (_db.select(_db.appSettingsTable)
+            ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
+          .getSingleOrNull();
+      final speed = double.tryParse(rateRow?.value ?? '') ?? 1.0;
+      debugPrint('PlanExecutionEngine: [FALLBACK] calling speakDirect with speed=$speed');
+      await _ttsService.speakDirect(text, speed: speed);
+      debugPrint('PlanExecutionEngine: [FALLBACK] speakDirect completed successfully');
+    } catch (speakError) {
+      debugPrint(
+        'PlanExecutionEngine: speakDirect also failed: $speakError',
+      );
+    }
+    try {
+      await _audioEngine.restoreAmbient();
+    } catch (_) {}
+    debugPrint('PlanExecutionEngine: [FALLBACK] done, returning null');
+    return null;
   }
 
   Future<void> _executeNotifyStep({
@@ -604,7 +695,18 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   }) async {
     if (_cancelled) return;
     try {
-      await _audioEngine.startAmbient(audioAssetKey, loop: loop, volume: volume);
+      if (loop) {
+        // Looping ambient track — plays continuously on the ambient channel.
+        await _audioEngine.startAmbient(
+          audioAssetKey,
+          loop: true,
+          volume: volume,
+        );
+      } else {
+        // One-shot effect (bell, chime, gong) — plays on the voice channel
+        // so it doesn't replace the active ambient track.
+        await _audioEngine.playEffect(audioAssetKey);
+      }
     } catch (e) {
       debugPrint('PlanExecutionEngine: PlayStep error: $e');
     }
@@ -649,27 +751,53 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     _waitCompleter = Completer<void>();
     _waitStepStartTime = DateTime.now();
 
-    // Main timer: fires when the wait step elapses.
-    _waitTimer = Timer(remaining, () {
-      if (!(_waitCompleter?.isCompleted ?? true)) {
-        _waitCompleter!.complete();
-      }
-      _waitTimer = null;
-    });
+    // Compute the wall-clock deadline so the periodic timer can detect
+    // completion even if the Dart isolate was briefly suspended by the OS.
+    final deadline = _waitStepStartTime!.add(remaining);
 
-    // Periodic 1-second updates so the NowPlayingUI countdown stays in sync.
-    Timer? updateTimer;
-    updateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    debugPrint(
+      'PlanExecutionEngine: WaitStep started — '
+      'duration=${duration.inSeconds}s, '
+      'elapsed=${_waitStepElapsedMs}ms, '
+      'remaining=${remaining.inSeconds}s, '
+      'deadline=$deadline',
+    );
+
+    // Single periodic timer handles both UI updates and completion detection.
+    // Checking wall-clock time each tick is more resilient than a one-shot
+    // Timer(duration) which can misfire when the OS throttles the isolate.
+    _waitTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_cancelled || (_waitCompleter?.isCompleted ?? true)) {
-        updateTimer?.cancel();
+        _waitTimer?.cancel();
+        _waitTimer = null;
         return;
       }
+
+      if (DateTime.now().isAfter(deadline)) {
+        _waitTimer?.cancel();
+        _waitTimer = null;
+        if (!(_waitCompleter?.isCompleted ?? true)) {
+          _waitCompleter!.complete();
+        }
+        return;
+      }
+
+      // Update the foreground notification so the OS sees the service as
+      // actively doing work, preventing process deprioritization / suspension.
+      try {
+        _notificationService.updateForegroundNotification(
+          _stepDisplayText(_flatSteps[_currentStepIndex].step),
+          _computeTimeRemaining(),
+        );
+      } catch (_) {
+        // Best-effort — notification failure should not break execution.
+      }
+
       _emitState();
     });
 
     await _waitCompleter!.future;
 
-    updateTimer.cancel();
     _waitCompleter = null;
     _waitTimer?.cancel();
     _waitTimer = null;
@@ -753,7 +881,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
         ? _flatSteps[_currentStepIndex + 1]
         : null;
 
-    _stateController.add(ExecutionState(
+    final state = ExecutionState(
       plan: _currentPlan!,
       currentStepIndex: _currentStepIndex,
       timeRemaining: _computeTimeRemaining(),
@@ -766,7 +894,9 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       nextStepText:
           nextFlatStep != null ? _stepDisplayText(nextFlatStep.step) : null,
       currentStepType: flatStep?.step.type,
-    ));
+    );
+    _lastState = state;
+    _stateController.add(state);
   }
 
   /// Computes the time remaining for the current step.

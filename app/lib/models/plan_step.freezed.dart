@@ -217,7 +217,9 @@ class _$SayStepImpl extends SayStep {
       this.voiceId,
       this.estimatedDuration,
       final String? $type})
-      : $type = $type ?? 'say',
+      : assert(voiceId == null || voiceId != '',
+            'voiceId must be null or non-empty'),
+        $type = $type ?? 'say',
         super._();
 
   factory _$SayStepImpl.fromJson(Map<String, dynamic> json) =>

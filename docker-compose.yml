@@ -1,0 +1,135 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Instructor – backend services
+#
+# Services:
+#   • server      — NestJS API (port 3071)
+#   • kokoro      — Kokoro TTS Python server (port 3070, localhost-only)
+#
+# Usage:
+#   1. Copy server/.env.example → server/.env and fill in real values.
+#   2. docker compose up --build
+#
+# To run without Kokoro (Gemini-only):
+#   docker compose up server
+#
+# Kokoro model weights (~330 MB) are downloaded at image build time.
+# First build will take several minutes.  Subsequent builds use Docker cache.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Kokoro TTS Python Server ────────────────────────────────────────────────
+  # Standalone FastAPI server hosting the Kokoro ONNX TTS model.
+  # Binds to 127.0.0.1:3070 on the host — NOT internet-exposed.
+  # The NestJS server reaches it via http://kokoro:3070 inside Docker.
+  kokoro:
+    build:
+      context: ./kokoro-server
+      dockerfile: Dockerfile
+    container_name: instructor-kokoro
+    restart: unless-stopped
+    # Expose only to host loopback — prevents direct external access.
+    ports:
+      - "127.0.0.1:3070:3070"
+    environment:
+      KOKORO_HOST: "0.0.0.0"
+      KOKORO_PORT: "3070"
+      KOKORO_MODEL_DIR: "/app/models"
+      # Limit ONNX inference threads to avoid starving the host.
+      OMP_NUM_THREADS: "2"
+    # Resource limits — Kokoro ONNX inference requires ~2 GB RAM.
+    # Adjust cpus if running on constrained hardware.
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+          cpus: "2.0"
+        reservations:
+          memory: 2g
+    volumes:
+      # Persist downloaded model weights across container recreations.
+      # Remove this volume to force a clean re-download of model files.
+      - kokoro_models:/app/models
+    healthcheck:
+      # Waits up to 120s for model to finish loading (can take 30-60s on cold start).
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - >-
+          import urllib.request, sys, json;
+          r = urllib.request.urlopen('http://localhost:3070/health', timeout=5);
+          d = json.loads(r.read());
+          sys.exit(0 if d.get('status') == 'ready' else 1)
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 8
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  # Shared state for distributed rate limiting across server instances.
+  redis:
+    image: redis:7-alpine
+    container_name: instructor-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ── NestJS API Server ────────────────────────────────────────────────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: instructor-server
+    restart: unless-stopped
+    ports:
+      - "3071:3071"
+    env_file:
+      - ./server/.env
+    environment:
+      PORT: "3071"
+      NODE_ENV: production
+      # Point NestJS at the Kokoro service using its Docker service name.
+      # Falls back to disabled (Gemini-only) if KOKORO_SERVER_URL is absent.
+      KOKORO_SERVER_URL: "http://kokoro:3070"
+      # Redis for distributed rate limiting.
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kokoro:
+        condition: service_healthy
+    healthcheck:
+      # POST with empty JSON body → 400 (validation error) proves server is up.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - >-
+          const h=require('http');
+          h.request(
+            {host:'localhost',port:3071,path:'/api/tts/synthesize',method:'POST',
+             headers:{'content-type':'application/json','content-length':'2'}},
+            r=>{process.exit(r.statusCode<500?0:1)}
+          ).on('error',()=>process.exit(1)).end('{}')
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# ── Named Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  kokoro_models:
+    driver: local
+  redis_data:
+    driver: local

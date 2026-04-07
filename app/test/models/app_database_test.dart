@@ -25,8 +25,8 @@ void main() {
       await db.select(db.appSettingsTable).get();
     });
 
-    test('schema version is 1', () {
-      expect(db.schemaVersion, equals(1));
+    test('schema version is 2', () {
+      expect(db.schemaVersion, equals(2));
     });
   });
 

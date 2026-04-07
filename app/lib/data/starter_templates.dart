@@ -11,7 +11,7 @@ class StarterTemplate {
     required this.name,
     required this.category,
     this.description,
-    this.defaultVoice = 'nova',
+    this.defaultVoice = 'aoede',
   });
 
   final String name;
@@ -22,105 +22,63 @@ class StarterTemplate {
   final String defaultVoice;
 }
 
-/// The 15 built-in starter templates, grouped by [PlanCategory].
+/// The 5 built-in starter templates, one per core [PlanCategory].
 ///
-/// Ordered so that all templates for the same category are contiguous,
-/// making it easy to build the grouped list view in [TemplatePickerSheet].
+/// Each template maps to a deeply detailed, step-by-step guided plan
+/// in [starter_plans.dart].
 const List<StarterTemplate> kStarterTemplates = [
-  // ── Yoga (3) ──────────────────────────────────────────────────────────────
+  // ── Yoga ──────────────────────────────────────────────────────────────────
   StarterTemplate(
-    name: 'Morning Yoga Flow',
+    name: '108 Surya Namaskar',
     category: PlanCategory.yoga,
-    description: 'Gentle 20-minute flow to energise your morning.',
-    defaultVoice: 'shimmer',
-  ),
-  StarterTemplate(
-    name: 'Sun Salutation',
-    category: PlanCategory.yoga,
-    description: '12-step sun salutation with timed holds.',
-    defaultVoice: 'shimmer',
-  ),
-  StarterTemplate(
-    name: 'Evening Wind Down',
-    category: PlanCategory.yoga,
-    description: 'Restorative poses to prepare you for restful sleep.',
-    defaultVoice: 'shimmer',
+    description:
+        'The complete 108 Sun Salutation practice — 5 fully guided rounds '
+        'with every pose cued, then 103 self-paced rounds with chime markers, '
+        'hydration breaks, and a closing Savasana.',
+    defaultVoice: 'leda',
   ),
 
-  // ── Meditation (3) ────────────────────────────────────────────────────────
+  // ── Meditation ────────────────────────────────────────────────────────────
   StarterTemplate(
-    name: '5-Minute Calm',
+    name: 'Yoga Nidra',
     category: PlanCategory.meditation,
-    description: 'Quick mindfulness reset for busy days.',
-    defaultVoice: 'shimmer',
-  ),
-  StarterTemplate(
-    name: 'Body Scan',
-    category: PlanCategory.meditation,
-    description: 'Progressive relaxation from head to toe.',
-    defaultVoice: 'shimmer',
-  ),
-  StarterTemplate(
-    name: 'Breathing Focus',
-    category: PlanCategory.meditation,
-    description: 'Box breathing pattern with timed cues.',
-    defaultVoice: 'shimmer',
+    description:
+        'Traditional 30-minute yogic sleep — Sankalpa, full-body rotation of '
+        'consciousness, breath counting, opposite sensations, visualization, '
+        'and gentle externalization.',
+    defaultVoice: 'leda',
   ),
 
-  // ── Workout (3) ───────────────────────────────────────────────────────────
+  // ── Workout ───────────────────────────────────────────────────────────────
   StarterTemplate(
-    name: 'HIIT Circuit',
+    name: 'Full Body Strength Circuit',
     category: PlanCategory.workout,
-    description: '20/10 interval circuit — work, rest, repeat.',
-    defaultVoice: 'onyx',
-  ),
-  StarterTemplate(
-    name: 'Core Strength',
-    category: PlanCategory.workout,
-    description: 'Timed core exercises with rest intervals.',
-    defaultVoice: 'onyx',
-  ),
-  StarterTemplate(
-    name: 'Full Body Warmup',
-    category: PlanCategory.workout,
-    description: 'Dynamic warmup routine before any workout.',
-    defaultVoice: 'onyx',
+    description:
+        'Complete 35-minute session — dynamic warmup, 6 compound exercises '
+        'with detailed form cues and 3 sets each, plus a guided cooldown stretch.',
+    defaultVoice: 'charon',
   ),
 
-  // ── Cooking (2) ───────────────────────────────────────────────────────────
-  StarterTemplate(
-    name: 'Meal Prep Session',
-    category: PlanCategory.cooking,
-    description: 'Guided timer sequence for weekly meal prep.',
-  ),
-  StarterTemplate(
-    name: 'Pasta Perfection',
-    category: PlanCategory.cooking,
-    description: 'Step-by-step timer guide for a perfect pasta dish.',
-  ),
-
-  // ── Routine (2) ───────────────────────────────────────────────────────────
+  // ── Routine ───────────────────────────────────────────────────────────────
   StarterTemplate(
     name: 'Morning Routine',
     category: PlanCategory.routine,
-    description: 'Timed prompts to structure your morning.',
-  ),
-  StarterTemplate(
-    name: 'Evening Routine',
-    category: PlanCategory.routine,
-    description: 'Wind down with a structured evening sequence.',
+    description:
+        'Structured 45-minute morning — hydration, gentle movement, '
+        'cold-water face wash, mindful breakfast, journaling, '
+        'and daily intention setting with guided prompts throughout.',
+    defaultVoice: 'aoede',
   ),
 
-  // ── Focus (2) ─────────────────────────────────────────────────────────────
+  // ── Focus ─────────────────────────────────────────────────────────────────
   StarterTemplate(
-    name: 'Pomodoro Session',
+    name: 'Deep Work Session',
     category: PlanCategory.focus,
-    description: '25-minute focus blocks with 5-minute breaks.',
-  ),
-  StarterTemplate(
-    name: 'Deep Work Block',
-    category: PlanCategory.focus,
-    description: '90-minute focus session with scheduled breaks.',
+    description:
+        '2-hour guided deep work — environment setup ritual, two 50-minute '
+        'focus blocks with a 10-minute active recovery break, progress '
+        'check-ins, and a closing reflection.',
+    defaultVoice: 'puck',
   ),
 ];
 

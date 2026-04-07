@@ -19,15 +19,21 @@ enum PlanCategory {
   custom,
 }
 
-/// Available TTS voice identifiers (OpenAI voices + platform fallback).
+/// Available TTS voice identifiers (Google Gemini voices + platform fallback).
 enum PlanVoice {
-  nova,      // warm, clear — good for general use
-  shimmer,   // soft, calming — good for meditation
-  onyx,      // deep, energetic — good for workouts
-  alloy,     // neutral, professional
-  echo,      // reserved, measured
-  fable,     // expressive
-  platform,  // device platform TTS fallback
+  aoede,    // warm, clear — female (default)
+  leda,     // soft, calming — female
+  charon,   // deep, energetic — male
+  puck,     // neutral — male
+  kore,     // reserved — female
+  fenrir,   // expressive — male
+  platform, // device platform TTS fallback
+}
+
+/// Supported TTS locale / accent options.
+enum TtsLocale {
+  enIN,  // English (India)
+  enGB,  // English (UK)
 }
 
 /// App-wide execution status for the [PlanExecutionEngine].

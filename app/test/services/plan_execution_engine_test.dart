@@ -64,7 +64,7 @@ class _FakeAudioEngine implements AudioEngine {
   Stream<String> get onVoicePlayed => _voiceController.stream;
 
   @override
-  Future<void> playVoice(String filePath) async {
+  Future<void> playVoice(String filePath, {double speed = 1.0}) async {
     voiceFilesPlayed.add(filePath);
     _voiceController.add(filePath);
     // Simulate duck + playback + restore cycle (10 ms total).
@@ -124,6 +124,16 @@ class _FakeAudioEngine implements AudioEngine {
     silenceStopCount++;
   }
 
+  final List<String> effectsPlayed = [];
+
+  @override
+  Future<void> playEffect(String assetKey) async {
+    effectsPlayed.add(assetKey);
+    duckAmbientCount++;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    restoreAmbientCount++;
+  }
+
   @override
   Future<void> dispose() async {
     if (disposed) return;
@@ -149,7 +159,10 @@ class _FakeTTSService implements TTSService {
   }
 
   @override
-  Future<void> preRenderPlan(Plan plan) async {}
+  Future<void> preRenderPlan(
+    Plan plan, {
+    void Function(int completed, int total)? onProgress,
+  }) async {}
 
   @override
   Future<void> clearCacheForPlan(int planId) async {}
@@ -160,6 +173,9 @@ class _FakeTTSService implements TTSService {
   @override
   Future<String> renderWithPlatformTTS(String text) async =>
       '/fake/platform/${text.hashCode}.wav';
+
+  @override
+  Future<void> speakDirect(String text, {double speed = 1.0}) async {}
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1448,7 +1464,7 @@ class _OrderTrackingAudioEngine implements AudioEngine {
   bool _disposed = false;
 
   @override
-  Future<void> playVoice(String filePath) async {
+  Future<void> playVoice(String filePath, {double speed = 1.0}) async {
     _order.add('say');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
@@ -1491,6 +1507,12 @@ class _OrderTrackingAudioEngine implements AudioEngine {
   Future<void> stopSilenceKeepAlive() async {}
 
   @override
+  Future<void> playEffect(String assetKey) async {
+    _order.add('effect');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+
+  @override
   Future<void> dispose() async {
     _disposed = true;
   }
@@ -1507,7 +1529,10 @@ class _OrderTrackingTTSService implements TTSService {
   }
 
   @override
-  Future<void> preRenderPlan(Plan plan) async {}
+  Future<void> preRenderPlan(
+    Plan plan, {
+    void Function(int completed, int total)? onProgress,
+  }) async {}
 
   @override
   Future<void> clearCacheForPlan(int planId) async {}
@@ -1517,6 +1542,9 @@ class _OrderTrackingTTSService implements TTSService {
 
   @override
   Future<String> renderWithPlatformTTS(String text) async => '/fake/platform.wav';
+
+  @override
+  Future<void> speakDirect(String text, {double speed = 1.0}) async {}
 }
 
 /// [NotificationService] fake that records 'notify' to the shared order list.

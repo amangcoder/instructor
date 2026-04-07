@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:instructor/data/starter_plans.dart';
 import 'package:instructor/data/starter_templates.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
@@ -17,15 +18,12 @@ import 'package:instructor/services/app_settings.dart';
 ///
 /// This function also writes [AppSettingsKeys.hasCompletedOnboarding] to the
 /// database and navigates to the Plan Editor before returning.
-Future<void> showTemplatePickerSheet(
-  BuildContext context,
-  WidgetRef ref,
-) {
+Future<void> showTemplatePickerSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => TemplatePickerSheet(parentRef: ref),
+    builder: (_) => const TemplatePickerSheet(),
   );
 }
 
@@ -41,11 +39,7 @@ Future<void> showTemplatePickerSheet(
 /// 1. Writes [AppSettingsKeys.hasCompletedOnboarding] = `'true'`.
 /// 2. Navigates to `/editor/new` (blank editor).
 class TemplatePickerSheet extends ConsumerStatefulWidget {
-  const TemplatePickerSheet({super.key, required this.parentRef});
-
-  /// The [WidgetRef] from the parent screen — used to read providers that
-  /// must survive the bottom sheet's context being torn down.
-  final WidgetRef parentRef;
+  const TemplatePickerSheet({super.key});
 
   @override
   ConsumerState<TemplatePickerSheet> createState() =>
@@ -62,17 +56,22 @@ class _TemplatePickerSheetState extends ConsumerState<TemplatePickerSheet> {
     setState(() => _isLoading = true);
 
     try {
-      final repo = widget.parentRef.read(planRepositoryProvider);
-      final settings = widget.parentRef.read(appSettingsProvider);
+      final repo = ref.read(planRepositoryProvider);
+      final settings = ref.read(appSettingsProvider);
       final now = DateTime.now();
+
+      // Look up the matching seeded plan to pre-fill steps. Falls back to an
+      // empty plan (user builds from scratch in the editor) when no match.
+      final seeded = buildStarterPlanForTemplate(template.name, now);
 
       final newId = await repo.createPlan(
         Plan(
           id: 0, // auto-incremented by Drift — value ignored on insert
-          name: template.name,
-          description: template.description,
+          name: seeded?.name ?? template.name,
+          description: seeded?.description ?? template.description,
           category: template.category,
           defaultVoice: template.defaultVoice,
+          steps: seeded?.steps ?? const [],
           createdAt: now,
           updatedAt: now,
         ),
@@ -99,7 +98,7 @@ class _TemplatePickerSheetState extends ConsumerState<TemplatePickerSheet> {
     setState(() => _isLoading = true);
 
     try {
-      final settings = widget.parentRef.read(appSettingsProvider);
+      final settings = ref.read(appSettingsProvider);
       await settings.setHasCompletedOnboarding();
 
       if (!mounted) return;

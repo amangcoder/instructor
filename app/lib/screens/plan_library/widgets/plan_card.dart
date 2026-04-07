@@ -103,9 +103,9 @@ class PlanCard extends StatelessWidget {
     super.key,
     required this.plan,
     required this.onTap,
-    required this.onEdit,
-    required this.onDuplicate,
-    required this.onDelete,
+    this.onEdit,
+    this.onDuplicate,
+    this.onDelete,
   });
 
   final Plan plan;
@@ -114,13 +114,14 @@ class PlanCard extends StatelessWidget {
   final VoidCallback onTap;
 
   /// Called when the user selects Edit from the popup menu.
-  final VoidCallback onEdit;
+  /// When null the overflow menu is hidden (e.g. for non-authenticated users).
+  final VoidCallback? onEdit;
 
   /// Called when the user selects Duplicate from the popup menu.
-  final VoidCallback onDuplicate;
+  final VoidCallback? onDuplicate;
 
   /// Called when the user selects Delete from the popup menu.
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -166,14 +167,15 @@ class PlanCard extends StatelessWidget {
                   ),
                 ),
 
-                // Overflow menu
-                ExcludeSemantics(
-                  child: _OverflowMenu(
-                    onEdit: onEdit,
-                    onDuplicate: onDuplicate,
-                    onDelete: onDelete,
+                // Overflow menu (hidden for non-authenticated users)
+                if (onEdit != null || onDuplicate != null || onDelete != null)
+                  ExcludeSemantics(
+                    child: _OverflowMenu(
+                      onEdit: onEdit!,
+                      onDuplicate: onDuplicate!,
+                      onDelete: onDelete!,
+                    ),
                   ),
-                ),
               ],
             ),
           ),

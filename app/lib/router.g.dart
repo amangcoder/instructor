@@ -6,23 +6,9 @@ part of 'router.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$routerHash() => r'41d09e0678527368fe75e68233181c76c84c6404';
+String _$routerHash() => r'6e32e45e0787653082751e3beb18fc534511d8da';
 
-/// Global GoRouter provider.
-///
-/// Defined with [riverpod_annotation] so it can be overridden in tests.
-///
-/// ## Onboarding redirect guard
-/// On every navigation event the `redirect` callback queries the
-/// [AppSettings.hasCompletedOnboarding] flag:
-/// - If `false` and the user is **not** on `/onboarding`, redirect there.
-/// - If `true` and the user **is** on `/onboarding`, redirect to the library.
-///
-/// Because [OnboardingScreen] awaits [AppSettings.setHasCompletedOnboarding]
-/// before calling `context.go(...)`, the flag is guaranteed to be written
-/// before the redirect check runs on the subsequent navigation.
-///
-/// Copied from [router].
+/// See also [router].
 @ProviderFor(router)
 final routerProvider = Provider<GoRouter>.internal(
   router,

@@ -208,9 +208,11 @@ Future<InstructorAudioHandler> initializeBackgroundService({
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.instructor.app.audio',
       androidNotificationChannelName: 'Instructor',
-      androidNotificationOngoing: true,
-      // Keep foreground service alive during wait steps (no audio playing).
-      androidStopForegroundOnPause: true,
+      // androidStopForegroundOnPause: false keeps the foreground service alive
+      // even during wait steps (no audio playing), so androidNotificationOngoing
+      // is unnecessary — the notification persists as long as the service runs.
+      androidNotificationOngoing: false,
+      androidStopForegroundOnPause: false,
     ),
   );
 

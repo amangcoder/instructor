@@ -11,7 +11,7 @@ part 'settings_providers.g.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Default TTS voice used when no preference has been saved.
-const PlanVoice kDefaultVoice = PlanVoice.nova;
+const PlanVoice kDefaultVoice = PlanVoice.aoede;
 
 /// Default ambient audio master volume (70%).
 const double kDefaultAmbientVolume = 0.7;
@@ -24,6 +24,15 @@ const bool kDefaultNotificationSound = true;
 
 /// Default vibration enabled state.
 const bool kDefaultVibration = true;
+
+/// Default speech playback speed (1.0 = normal).
+const double kDefaultSpeechRate = 1.0;
+
+/// Default TTS locale / accent.
+const TtsLocale kDefaultTtsLocale = TtsLocale.enIN;
+
+/// Default backend server URL.
+const String kDefaultBackendServerUrl = 'http://localhost:3071';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stream providers — one per user-facing setting
@@ -89,6 +98,45 @@ Stream<bool> vibrationSetting(Ref ref) {
   return settings.watch(AppSettingsKeys.vibration).map((raw) {
     if (raw == null) return kDefaultVibration;
     return raw == 'true';
+  });
+}
+
+/// Reactive stream of the speech playback speed (0.5–2.0).
+///
+/// Emits [kDefaultSpeechRate] when the key is absent or unparseable.
+@riverpod
+Stream<double> speechRateSetting(Ref ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.watch(AppSettingsKeys.speechRate).map((raw) {
+    if (raw == null) return kDefaultSpeechRate;
+    return double.tryParse(raw)?.clamp(0.5, 2.0) ?? kDefaultSpeechRate;
+  });
+}
+
+/// Reactive stream of the selected TTS locale / accent.
+///
+/// Emits [kDefaultTtsLocale] when the key is absent or unrecognised.
+@riverpod
+Stream<TtsLocale> ttsLocaleSetting(Ref ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.watch(AppSettingsKeys.ttsLocale).map((raw) {
+    if (raw == null) return kDefaultTtsLocale;
+    return TtsLocale.values.firstWhere(
+      (v) => v.name == raw,
+      orElse: () => kDefaultTtsLocale,
+    );
+  });
+}
+
+/// Reactive stream of the backend server URL.
+///
+/// Emits [kDefaultBackendServerUrl] when the key is absent.
+@riverpod
+Stream<String> backendServerUrlSetting(Ref ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.watch(AppSettingsKeys.backendServerUrl).map((raw) {
+    if (raw == null || raw.isEmpty) return kDefaultBackendServerUrl;
+    return raw;
   });
 }
 

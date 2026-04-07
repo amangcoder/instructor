@@ -17,6 +17,8 @@ sealed class PlanStep with _$PlanStep {
   const PlanStep._();
 
   /// A step that speaks [text] aloud using TTS.
+  @Assert("voiceId == null || voiceId != ''",
+      'voiceId must be null or non-empty')
   const factory PlanStep.say({
     required String id,
     required String text,

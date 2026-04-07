@@ -6,6 +6,7 @@ import 'package:instructor/database/app_database.dart';
 import 'package:instructor/database/tables/plans_table.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/models/plan_step.dart';
 
 part 'plan_repository.g.dart';
 
@@ -42,6 +43,12 @@ abstract class PlanRepository {
 
   /// Updates the [Plan.lastUsedAt] timestamp to now.
   Future<void> updateLastUsed(int id);
+
+  /// Remaps all plan voices using the given [voiceMap].
+  ///
+  /// For each plan, maps [defaultVoice] and every [SayStep.voiceId] through
+  /// [voiceMap]. Voices not in the map are left unchanged.
+  Future<void> remapPlanVoices(Map<String, String> voiceMap);
 }
 
 // ---------------------------------------------------------------------------
@@ -186,6 +193,59 @@ class DriftPlanRepository implements PlanRepository {
     await (_db.update(_db.plansTable)
           ..where((t) => t.id.equals(id)))
         .write(PlansTableCompanion(lastUsedAt: Value(DateTime.now())));
+  }
+
+  // -------------------------------------------------------------------------
+  // Voice remapping
+  // -------------------------------------------------------------------------
+
+  @override
+  Future<void> remapPlanVoices(Map<String, String> voiceMap) async {
+    if (voiceMap.isEmpty) return;
+
+    final allRows = await _db.select(_db.plansTable).get();
+    for (final row in allRows) {
+      final plan = _rowToPlan(row);
+      final newDefaultVoice =
+          voiceMap[plan.defaultVoice] ?? plan.defaultVoice;
+      final newSteps = _remapSteps(plan.steps, voiceMap);
+
+      // Only update if something actually changed.
+      if (newDefaultVoice == plan.defaultVoice && newSteps == null) continue;
+
+      final updated = plan.copyWith(
+        defaultVoice: newDefaultVoice,
+        steps: newSteps ?? plan.steps,
+      );
+      await updatePlan(row.id, updated);
+    }
+  }
+
+  /// Recursively remaps voiceId in SaySteps and RepeatStep children.
+  /// Returns null if no step was changed.
+  List<PlanStep>? _remapSteps(
+      List<PlanStep> steps, Map<String, String> voiceMap) {
+    var changed = false;
+    final result = steps.map((step) {
+      return switch (step) {
+        SayStep(:final voiceId) when voiceId != null &&
+            voiceMap.containsKey(voiceId) =>
+          () {
+            changed = true;
+            return (step as SayStep).copyWith(voiceId: voiceMap[voiceId]);
+          }(),
+        RepeatStep(:final children) => () {
+            final remapped = _remapSteps(children, voiceMap);
+            if (remapped != null) {
+              changed = true;
+              return (step as RepeatStep).copyWith(children: remapped);
+            }
+            return step;
+          }(),
+        _ => step,
+      };
+    }).toList();
+    return changed ? result : null;
   }
 
   // -------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,14 +49,21 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   // ── Loading / saving state ────────────────────────────────────────────────
   bool _isLoading = false;
   bool _isSaving = false;
+  bool _isDownloading = false;
   String? _loadError;
+
+  // ── Download progress state ───────────────────────────────────────────────
+  int _downloadedCount = 0;
+  int _downloadTotal = 0;
+  bool _downloadComplete = false;
+  Timer? _downloadCompleteTimer;
 
   // ── Plan metadata ─────────────────────────────────────────────────────────
   String _name = '';
   String _description = '';
   PlanCategory _category = PlanCategory.custom;
   List<String> _tags = [];
-  String _defaultVoice = 'nova';
+  String _defaultVoice = 'aoede';
 
   // Original timestamps (preserved when editing an existing plan)
   DateTime? _originalCreatedAt;
@@ -82,6 +91,12 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     if (widget.planId != null) _loadPlan();
   }
 
+  @override
+  void dispose() {
+    _downloadCompleteTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadPlan() async {
     setState(() {
       _isLoading = true;
@@ -96,7 +111,9 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           _description = plan.description ?? '';
           _category = plan.category;
           _tags = List<String>.from(plan.tags);
-          _defaultVoice = plan.defaultVoice;
+          _defaultVoice = PlanVoice.values.map((v) => v.name).contains(plan.defaultVoice)
+              ? plan.defaultVoice
+              : 'aoede';
           _steps = List<PlanStep>.from(plan.steps);
           _originalCreatedAt = plan.createdAt;
           _originalLastUsedAt = plan.lastUsedAt;
@@ -264,6 +281,75 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Download voices
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Pre-renders and caches all TTS voice audio for the current plan.
+  ///
+  /// Shows a determinate circular progress indicator (with N / M counter)
+  /// while downloading.  On completion a checkmark is shown for 2 seconds
+  /// before reverting to the download icon.
+  Future<void> _downloadVoices() async {
+    if (_steps.isEmpty) return;
+    setState(() {
+      _isDownloading = true;
+      _downloadedCount = 0;
+      _downloadTotal = 0;
+      _downloadComplete = false;
+    });
+    try {
+      final tts = ref.read(ttsServiceProvider);
+      final now = DateTime.now();
+      final plan = Plan(
+        id: widget.planId ?? 0,
+        name: _name.trim().isEmpty ? 'Download' : _name.trim(),
+        description:
+            _description.trim().isEmpty ? null : _description.trim(),
+        category: _category,
+        tags: List<String>.unmodifiable(_tags),
+        defaultVoice: _defaultVoice,
+        steps: List<PlanStep>.unmodifiable(_steps),
+        createdAt: _originalCreatedAt ?? now,
+        updatedAt: now,
+        lastUsedAt: _originalLastUsedAt,
+      );
+      await tts.preRenderPlan(
+        plan,
+        onProgress: (completed, total) {
+          if (mounted) {
+            setState(() {
+              _downloadedCount = completed;
+              _downloadTotal = total;
+            });
+          }
+        },
+      );
+      if (mounted) {
+        // Transition to checkmark state.
+        _downloadCompleteTimer?.cancel();
+        setState(() {
+          _isDownloading = false;
+          _downloadComplete = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All voices downloaded ✓')),
+        );
+        // Revert to download icon after 2 seconds.
+        _downloadCompleteTimer = Timer(const Duration(seconds: 2), () {
+          if (mounted) setState(() => _downloadComplete = false);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isDownloading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Voice download failed: $e')),
+        );
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Save
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -304,11 +390,15 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       }
 
       // Fire-and-forget: pre-render TTS for all say steps.
-      unawaited(
-        tts.preRenderPlan(plan.copyWith(id: savedId)).catchError((_) {
-          // Pre-render is best-effort; do not surface errors to the user.
-        }),
-      );
+      // preRenderPlan already skips cached steps and deduplicates in-flight
+      // requests, so this is safe even if _downloadVoices() just ran.
+      if (!_isDownloading) {
+        unawaited(
+          tts.preRenderPlan(plan.copyWith(id: savedId)).catchError((_) {
+            // Pre-render is best-effort; do not surface errors to the user.
+          }),
+        );
+      }
 
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -397,6 +487,56 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
                 tooltip: 'Preview at 4x speed',
                 onPressed: _startPreview,
               ),
+            ),
+          // Download all voices
+          if (_steps.isNotEmpty)
+            Semantics(
+              button: true,
+              label: _isDownloading
+                  ? 'Downloading voices: $_downloadedCount of $_downloadTotal'
+                  : _downloadComplete
+                      ? 'Voices downloaded'
+                      : 'Download all voices',
+              child: _isDownloading
+                  ? Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              value: _downloadTotal > 0
+                                  ? _downloadedCount / _downloadTotal
+                                  : null,
+                            ),
+                            if (_downloadTotal > 0)
+                              Text(
+                                '$_downloadedCount\n$_downloadTotal',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 6,
+                                  height: 1.1,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : IconButton(
+                      icon: Icon(
+                        _downloadComplete
+                            ? Icons.check_circle
+                            : Icons.download_outlined,
+                      ),
+                      tooltip: _downloadComplete
+                          ? 'Voices downloaded'
+                          : 'Download all voices',
+                      onPressed: _downloadComplete ? null : _downloadVoices,
+                    ),
             ),
           // Edit metadata
           Semantics(

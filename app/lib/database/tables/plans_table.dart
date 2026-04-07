@@ -25,7 +25,7 @@ class PlansTable extends Table {
       text().map(const StringListConverter()).withDefault(const Constant('[]'))();
 
   /// Voice identifier string (OpenAI voice name or 'platform').
-  TextColumn get defaultVoice => text().withDefault(const Constant('nova'))();
+  TextColumn get defaultVoice => text().withDefault(const Constant('aoede'))();
 
   /// JSON-encoded list of [PlanStep] objects.
   TextColumn get steps =>

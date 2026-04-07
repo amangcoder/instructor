@@ -19,7 +19,7 @@ abstract final class AppSettingsKeys {
 
   /// The default TTS voice name (a [PlanVoice] enum `.name` string).
   ///
-  /// Defaults to `'nova'` when absent.
+  /// Defaults to `'aoede'` when absent.
   static const String defaultVoice = 'default_voice';
 
   /// Ambient audio master volume as a decimal string in [0.0, 1.0].
@@ -42,10 +42,56 @@ abstract final class AppSettingsKeys {
   /// Defaults to `'true'` when absent.
   static const String vibration = 'vibration';
 
+  /// Speech playback speed as a decimal string in [0.5, 2.0].
+  ///
+  /// Defaults to `'1.0'` (normal speed) when absent.
+  static const String speechRate = 'speech_rate';
+
+  /// The TTS locale / accent (a [TtsLocale] enum `.name` string).
+  ///
+  /// Defaults to `'enIN'` (English India) when absent.
+  static const String ttsLocale = 'tts_locale';
+
   /// Set to `'true'` once the battery-optimisation prompt has been dismissed.
   ///
   /// Prevents the per-OEM instructions card from appearing again.
   static const String batteryPromptDismissed = 'battery_prompt_dismissed';
+
+  /// Backend server base URL for TTS synthesis requests.
+  ///
+  /// Defaults to `'http://localhost:3071'` when absent.
+  static const String backendServerUrl = 'backend_server_url';
+
+  /// Backend x-api-key for authenticating TTS synthesis requests.
+  ///
+  /// Sent as the `x-api-key` header in POST /api/tts/synthesize requests.
+  /// When absent the header is omitted (useful for dev servers without auth).
+  static const String backendApiKey = 'backend_api_key';
+
+  // ── TTS Provider Settings ───────────────────────────────────────────────
+
+  /// The selected TTS provider identifier (e.g. 'gemini', 'kokoro').
+  ///
+  /// Defaults to `'gemini'` when absent.
+  static const String ttsProvider = 'tts_provider';
+
+  // ── Sync Metadata ───────────────────────────────────────────────────────
+
+  /// ISO-8601 timestamp string of the last successful database sync to S3.
+  ///
+  /// Null / absent when the database has never been synced.
+  static const String lastSyncAt = 'last_sync_at';
+
+  /// Size in bytes of the last uploaded database file, stored as a string.
+  ///
+  /// Null / absent when the database has never been synced.
+  static const String lastSyncSizeBytes = 'last_sync_size_bytes';
+
+  /// SHA-256 hex digest of the last uploaded database file.
+  ///
+  /// Used by [SyncService] to avoid redundant uploads when the file hasn't
+  /// changed since the last sync.
+  static const String lastSyncHash = 'last_sync_hash';
 }
 
 /// High-level interface for reading and writing app-wide settings stored in
@@ -83,13 +129,37 @@ class AppSettings {
         .map((row) => row?.value);
   }
 
+  /// Keys whose values must be non-empty when written.
+  static const _nonEmptyKeys = {
+    AppSettingsKeys.defaultVoice,
+    AppSettingsKeys.ttsLocale,
+    AppSettingsKeys.ttsProvider,
+  };
+
   /// Writes (upserts) [value] for [key].
+  ///
+  /// Throws [ArgumentError] if [key] is a voice, locale, or provider setting
+  /// and [value] is empty, preventing silent data corruption.
   Future<void> write(String key, String value) async {
-    await _db.into(_db.appSettingsTable).insertOnConflictUpdate(
+    if (_nonEmptyKeys.contains(key) && value.trim().isEmpty) {
+      throw ArgumentError.value(
+        value,
+        'value',
+        'Setting "$key" must not be empty',
+      );
+    }
+    await _db.into(_db.appSettingsTable).insert(
           AppSettingsTableCompanion(
             key: Value(key),
             value: Value(value),
             updatedAt: Value(DateTime.now()),
+          ),
+          onConflict: DoUpdate(
+            (old) => AppSettingsTableCompanion(
+              value: Value(value),
+              updatedAt: Value(DateTime.now()),
+            ),
+            target: [_db.appSettingsTable.key],
           ),
         );
   }

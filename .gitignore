@@ -2,3 +2,17 @@
 # Orchestrator runtime artifacts
 .knowledge/
 workspace/
+node_modules
+dist
+.env
+
+# Server TTS audio cache
+tts-cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Modal
+.modal/
