@@ -44,3 +44,20 @@ enum ExecutionStatus {
   completed,
   error,
 }
+
+/// Sub-phase within the currently executing step.
+///
+/// Used by the Now Playing UI to show contextual overlays (e.g. a loading
+/// spinner while TTS audio is being fetched from the backend).
+enum StepPhase {
+  /// The step is actively executing (default for all step types).
+  active,
+
+  /// TTS audio is being fetched from the backend (cache miss).
+  /// The UI should show a loading indicator overlay.
+  loadingTts,
+
+  /// An ambient sound just started playing. The UI displays the ambient
+  /// track info for a brief period before advancing to the next step.
+  ambientDisplay,
+}

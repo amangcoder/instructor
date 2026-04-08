@@ -40,6 +40,8 @@ import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/services/app_settings.dart';
+import 'package:instructor/models/auth_models.dart';
 import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/utils/hash_utils.dart';
@@ -129,6 +131,9 @@ class _FakeTTSService implements TTSService {
 
   @override
   Future<void> speakDirect(String text, {double speed = 1.0}) async {}
+
+  @override
+  Future<void> stopSpeaking() async {}
 }
 
 /// A fake [PlatformTtsEngine] that writes a small binary placeholder file
@@ -146,7 +151,8 @@ class _FakePlatformTtsEngine implements PlatformTtsEngine {
   int stopCount = 0;
 
   @override
-  Future<bool> synthesizeToFile(String text, String filePath) async {
+  Future<bool> synthesizeToFile(String text, String filePath,
+      {double speed = 1.0}) async {
     synthesizeCalls.add(text);
     if (!shouldSucceed) return false;
     // Write a small placeholder to simulate TTS output.
@@ -660,20 +666,20 @@ void main() {
       expect(kTtsApiTimeout, const Duration(seconds: 60));
     });
 
-    test('kDefaultBackendServerUrl is localhost:3071', () {
-      expect(kDefaultBackendServerUrl, 'http://localhost:3071');
+    test('kBackendUrl is localhost:3071', () {
+      expect(kBackendUrl, 'http://localhost:3071');
     });
 
     test('kBackendTtsPath is the backend synthesis endpoint', () {
       expect(kBackendTtsPath, '/api/tts/synthesize');
     });
 
-    test('kDefaultBackendServerUrl does not contain api.openai.com', () {
-      expect(kDefaultBackendServerUrl, isNot(contains('openai.com')));
+    test('kBackendUrl does not contain api.openai.com', () {
+      expect(kBackendUrl, isNot(contains('openai.com')));
     });
 
-    test('kDefaultBackendServerUrl does not contain generativelanguage', () {
-      expect(kDefaultBackendServerUrl, isNot(contains('generativelanguage')));
+    test('kBackendUrl does not contain generativelanguage', () {
+      expect(kBackendUrl, isNot(contains('generativelanguage')));
     });
   });
 
@@ -771,7 +777,16 @@ class _NullAppDatabase extends AppDatabase {
 /// Stub [AuthService] that always returns `null` for the access token.
 class _StubAuthService extends AuthService {
   @override
-  Future<AuthResult> requestOtp(String email) =>
+  bool get isAuthenticated => false;
+  @override
+  AuthUser? getUser() => null;
+  @override
+  Stream<AuthState> get authStateStream => const Stream.empty();
+  @override
+  Future<void> requestOtp(String email) =>
+      throw UnimplementedError('not needed in TTS tests');
+  @override
+  Future<void> requestOtpWithAuth(String email) =>
       throw UnimplementedError('not needed in TTS tests');
   @override
   Future<AuthResult> verifyOtp(String email, String otp) =>

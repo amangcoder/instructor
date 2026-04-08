@@ -30,12 +30,12 @@
 /// respect API rate limits while still parallelising work.
 ///
 /// ## Backend URL
-/// Configure via Settings → Backend Server URL (stored in [AppSettingsKeys.backendServerUrl]).
-/// Defaults to `http://localhost:3071`.
+/// Configured at build time via `--dart-define=BACKEND_URL=<url>` (see [kBackendUrl]).
 library tts_service;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -95,9 +95,14 @@ final class TtsFallbackException implements Exception {
 abstract class PlatformTtsEngine {
   /// Synthesises [text] to [filePath] using the platform's on-device TTS.
   ///
+  /// [speed] is applied as the platform speech rate (clamped to [0.0, 1.0])
+  /// so that platform-fallback files match the user's configured speed,
+  /// consistent with the backend API path which also applies [speechRate].
+  ///
   /// Returns `true` on success, `false` if the platform does not support file
   /// output.
-  Future<bool> synthesizeToFile(String text, String filePath);
+  Future<bool> synthesizeToFile(String text, String filePath,
+      {double speed = 1.0});
 
   /// Speaks [text] directly through the device speaker (no file output).
   ///
@@ -115,16 +120,34 @@ final class FlutterTtsEngine implements PlatformTtsEngine {
 
   final FlutterTts _tts;
 
+  /// Timeout for [synthesizeToFile] — if the platform TTS engine never fires
+  /// its completion callback (common on some Android devices), this prevents
+  /// hanging the execution loop forever.
+  static const _kSynthesizeTimeout = Duration(seconds: 15);
+
   @override
-  Future<bool> synthesizeToFile(String text, String filePath) async {
+  Future<bool> synthesizeToFile(String text, String filePath,
+      {double speed = 1.0}) async {
     await _tts.setLanguage('en-US');
+    // Apply the user's configured speech rate so platform-fallback files are
+    // synthesised at the same speed as backend TTS files. Without this the
+    // device default rate was always used.
+    await _tts.setSpeechRate(speed.clamp(0.0, 1.0));
     // Wait for the file to actually be written before returning.
     await _tts.awaitSynthCompletion(true);
     // isFullPath: true bypasses MediaStore on Android 30+ and writes directly
     // to our path. Without it, the file ends up in MediaStore and never appears
     // at the expected location.
     //
-    final result = await _tts.synthesizeToFile(text, filePath, true);
+    final result = await _tts
+        .synthesizeToFile(text, filePath, true)
+        .timeout(_kSynthesizeTimeout, onTimeout: () {
+      debugPrint(
+        'FlutterTtsEngine: synthesizeToFile timed out after '
+        '${_kSynthesizeTimeout.inSeconds} s — completion callback never fired',
+      );
+      return 0; // Treat as failure so the caller falls through to speakDirect.
+    });
     return result == 1;
   }
 
@@ -227,15 +250,15 @@ abstract class TTSService {
   ///
   /// Use this when both backend TTS and [renderWithPlatformTTS] fail.
   /// Completes when the utterance finishes.
-  Future<void> speakDirect(String text, {double speed});
+  Future<void> speakDirect(String text, {double speed = 0.5});
+
+  /// Stops any in-progress platform TTS speech immediately.
+  Future<void> stopSpeaking();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants
 // ────────────────────────────────────────────────────────────────────────────
-
-/// Default backend server base URL.
-const String kDefaultBackendServerUrl = 'http://localhost:3071';
 
 /// Backend TTS synthesis endpoint path.
 const String kBackendTtsPath = '/api/tts/synthesize';
@@ -294,15 +317,26 @@ class TTSServiceImpl implements TTSService {
       throw ArgumentError.value(voiceId, 'voiceId', 'must not be empty');
     }
 
+    debugPrint('TTSService.renderTTS: ENTER voice=$voiceId, text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}"');
     final provider = await _readTtsProvider();
-    final hash = ttsCacheKey(
+    debugPrint('TTSService.renderTTS: provider=$provider');
+    final locale = await _currentLocale();
+    debugPrint('TTSService.renderTTS: locale=$locale');
+    final speechRate = await _readSpeechRate();
+    debugPrint('TTSService.renderTTS: speechRate=$speechRate');
+    final hash = fullParamCacheKey(
       provider: provider,
-      voiceId: voiceId,
+      voice: voiceId,
       text: text,
+      locale: locale.name,
+      speechRate: speechRate.toString(),
     );
+    debugPrint('TTSService.renderTTS: hash=${hash.substring(0, 8)}…');
 
     // Fast path: check cache before any I/O.
+    debugPrint('TTSService.renderTTS: checking cache…');
     final cached = await _findCachedPath(hash);
+    debugPrint('TTSService.renderTTS: cache result=${cached != null ? "HIT" : "MISS"}, inflight keys=${_inflight.keys.map((k) => k.substring(0, 8)).toList()}');
     if (cached != null) {
       debugPrint('TTSService: cache hit for voice=$voiceId');
       return cached;
@@ -311,20 +345,32 @@ class TTSServiceImpl implements TTSService {
     // Deduplicate: if this exact request is already in-flight, await it.
     final existing = _inflight[hash];
     if (existing != null) {
-      debugPrint('TTSService: joining in-flight request for voice=$voiceId');
+      debugPrint('TTSService: joining in-flight request for voice=$voiceId (hash=${hash.substring(0, 8)}…)');
+      // debugger(message: 'JOINING INFLIGHT — this future may never resolve if preRender already failed');
       return existing;
     }
 
     debugPrint('TTSService: cache miss — rendering via backend, voice=$voiceId');
+    // Use try/finally instead of .whenComplete() to ensure errors propagate
+    // cleanly through the async function's own stack frame.
     final future = _renderAndSave(
       text: text,
       voiceId: voiceId,
       hash: hash,
       provider: provider,
       planId: null,
-    ).whenComplete(() => _inflight.remove(hash));
+    );
     _inflight[hash] = future;
-    return future;
+    try {
+      final result = await future;
+      debugPrint('TTSService.renderTTS: _renderAndSave OK — $result');
+      return result;
+    } catch (e) {
+      debugPrint('TTSService.renderTTS: _renderAndSave THREW ${e.runtimeType}: $e');
+      rethrow;
+    } finally {
+      unawaited(_inflight.remove(hash));
+    }
   }
 
   @override
@@ -336,15 +382,19 @@ class TTSServiceImpl implements TTSService {
     final allSaySteps = _collectSaySteps(plan.steps, plan.defaultVoice);
 
     final provider = await _readTtsProvider();
+    final locale = await _currentLocale();
+    final speechRate = await _readSpeechRate();
 
     // Deduplicate by cache key to skip redundant API calls within one Plan.
     final seen = <String>{};
     final uniqueSteps = <({String text, String voiceId})>[];
     for (final step in allSaySteps) {
-      final key = ttsCacheKey(
+      final key = fullParamCacheKey(
         provider: provider,
-        voiceId: step.voiceId,
+        voice: step.voiceId,
         text: step.text,
+        locale: locale.name,
+        speechRate: speechRate.toString(),
       );
       if (seen.add(key)) {
         uniqueSteps.add(step);
@@ -357,10 +407,12 @@ class TTSServiceImpl implements TTSService {
     // report an accurate total to the caller before processing begins.
     final uncachedSteps = <({String text, String voiceId})>[];
     for (final step in uniqueSteps) {
-      final hash = ttsCacheKey(
+      final hash = fullParamCacheKey(
         provider: provider,
-        voiceId: step.voiceId,
+        voice: step.voiceId,
         text: step.text,
+        locale: locale.name,
+        speechRate: speechRate.toString(),
       );
       final cached = await _findCachedPath(hash);
       if (cached == null) {
@@ -379,7 +431,7 @@ class TTSServiceImpl implements TTSService {
       final chunk = uncachedSteps.skip(i).take(kTtsMaxConcurrent).toList();
       await Future.wait(
         chunk.map((step) async {
-          await _preRenderStep(step, plan.id, provider);
+          await _preRenderStep(step, plan.id, provider, locale.name, speechRate.toString());
           // Increment and report after every individual step (success or
           // failure — _preRenderStep never throws).
           completed++;
@@ -447,7 +499,12 @@ class TTSServiceImpl implements TTSService {
     // Return immediately if already synthesised.
     if (await File(filePath).exists()) return filePath;
 
-    final success = await _ttsEngine.synthesizeToFile(text, filePath);
+    // Platform TTS uses a fixed speed of 0.5 for natural-sounding fallback
+    // output, independent of the user's configured speech rate (which applies
+    // to backend-generated TTS files played via the audio engine).
+    const speed = 0.5;
+    final success =
+        await _ttsEngine.synthesizeToFile(text, filePath, speed: speed);
     if (!success || !await File(filePath).exists()) {
       throw TtsFallbackException(
         'Platform TTS failed to synthesise audio to file. '
@@ -458,9 +515,14 @@ class TTSServiceImpl implements TTSService {
   }
 
   @override
-  Future<void> speakDirect(String text, {double speed = 1.0}) async {
-    debugPrint('TTSService: using speakDirect (last-resort fallback)');
+  Future<void> speakDirect(String text, {double speed = 0.5}) async {
+    debugPrint('TTSService: using speakDirect (last-resort fallback), speed=$speed');
     await _ttsEngine.speak(text, speed: speed);
+  }
+
+  @override
+  Future<void> stopSpeaking() async {
+    await _ttsEngine.stop();
   }
 
   // ── Private helpers ────────────────────────────────────────────────────
@@ -471,11 +533,15 @@ class TTSServiceImpl implements TTSService {
     ({String text, String voiceId}) step,
     int planId,
     String provider,
+    String locale,
+    String speechRate,
   ) async {
-    final hash = ttsCacheKey(
+    final hash = fullParamCacheKey(
       provider: provider,
-      voiceId: step.voiceId,
+      voice: step.voiceId,
       text: step.text,
+      locale: locale,
+      speechRate: speechRate,
     );
     try {
       final cached = await _findCachedPath(hash);
@@ -536,6 +602,9 @@ class TTSServiceImpl implements TTSService {
           voiceId: voiceId,
           provider: provider,
         );
+        debugPrint(
+          'TTSService: received ${bytes.length} bytes from backend',
+        );
         const ext = 'wav'; // Backend returns WAV audio
         final filePath = p.join(_audioDirectory, '$hash.$ext');
 
@@ -549,35 +618,55 @@ class TTSServiceImpl implements TTSService {
           await raf.close();
         }
 
-        // Cache DB entry (INSERT OR IGNORE — concurrent pre-renders are safe).
-        await _insertCacheEntry(
-          hash: hash,
-          voiceId: voiceId,
-          filePath: filePath,
-          fileSizeBytes: bytes.length,
-          planId: planId,
+        // Verify the file was written correctly.
+        final writtenSize = await File(filePath).length();
+        debugPrint(
+          'TTSService: wrote $writtenSize bytes to $filePath',
         );
 
+        // Cache DB entry (INSERT OR IGNORE — concurrent pre-renders are safe).
+        // Wrapped in try-catch so a DB error does not prevent playback —
+        // the audio file is already on disk and can be played regardless.
+        try {
+          await _insertCacheEntry(
+            hash: hash,
+            voiceId: voiceId,
+            filePath: filePath,
+            fileSizeBytes: bytes.length,
+            planId: planId,
+          );
+        } catch (e) {
+          debugPrint('TTSService: cache insert failed (non-fatal): $e');
+        }
+
+        debugPrint('TTSService: _renderAndSave returning path=$filePath');
         return filePath;
       } on SocketException {
-        // Network unavailable — speak directly via platform TTS so the
-        // user hears something immediately, then signal the caller.
+        // Network unavailable — signal the caller so the engine can handle
+        // the fallback (e.g. render via platform TTS to a file).
         debugPrint(
-          'TTSService: backend unreachable, speaking via platform TTS',
+          'TTSService: backend unreachable (SocketException), signalling fallback',
         );
-        await speakDirect(text);
-        throw const TtsFallbackException('Spoken via platform TTS (offline)');
+        // debugger(message: 'TTS: SocketException → TtsFallbackException');
+        throw const TtsFallbackException('Backend unreachable (offline)');
+      } on http.ClientException {
+        // The http package wraps SocketException in ClientException when the
+        // connection is refused or the host is unreachable.
+        debugPrint(
+          'TTSService: backend unreachable (ClientException), signalling fallback',
+        );
+        // debugger(message: 'TTS: ClientException → TtsFallbackException');
+        throw const TtsFallbackException('Backend unreachable (offline)');
       } on TimeoutException {
         debugPrint(
-          'TTSService: backend timed out, speaking via platform TTS',
+          'TTSService: backend timed out, signalling fallback to caller',
         );
-        await speakDirect(text);
-        throw const TtsFallbackException('Spoken via platform TTS (timeout)');
+        throw const TtsFallbackException('Backend timed out');
       } on TtsApiException catch (e) {
         if (e.statusCode == 401) {
-          // Auth failure — logout already triggered in _callBackendApi,
-          // which will redirect to login. Rethrow so plan execution stops.
-          rethrow;
+          // Auth failure — logout already triggered in _callBackendApi.
+          // Fall back to platform TTS so the current session isn't interrupted.
+          throw const TtsFallbackException('Auth expired (401)');
         }
         lastApiError = e;
         if (attempt < _kMaxApiRetries) {
@@ -591,13 +680,13 @@ class TTSServiceImpl implements TTSService {
     }
 
     // All retries exhausted — rethrow so the caller can use speakDirect.
+    // debugger(message: 'TTS: retries exhausted — throwing TtsApiException: $lastApiError');
     throw lastApiError ?? const TtsApiException('Backend TTS failed');
   }
 
   /// POSTs to the backend TTS endpoint and returns the raw WAV bytes.
   ///
-  /// Reads the backend server URL from [AppSettingsKeys.backendServerUrl]
-  /// (default: [kDefaultBackendServerUrl]) and the API key from
+  /// Uses the build-time [kBackendUrl] and the API key from
   /// [AppSettingsKeys.backendApiKey].
   ///
   /// Throws [TtsApiException] for non-200 responses.
@@ -610,10 +699,7 @@ class TTSServiceImpl implements TTSService {
     assert(text.trim().isNotEmpty, 'text must not be empty');
     assert(voiceId.trim().isNotEmpty, 'voiceId must not be empty');
 
-    final serverUrlRow = await (_db.select(_db.appSettingsTable)
-          ..where((t) => t.key.equals(AppSettingsKeys.backendServerUrl)))
-        .getSingleOrNull();
-    final serverUrl = serverUrlRow?.value ?? kDefaultBackendServerUrl;
+    const serverUrl = kBackendUrl;
 
     final apiKeyRow = await (_db.select(_db.appSettingsTable)
           ..where((t) => t.key.equals(AppSettingsKeys.backendApiKey)))
@@ -691,6 +777,16 @@ class TTSServiceImpl implements TTSService {
     return response.bodyBytes;
   }
 
+  /// Reads the user's preferred speech rate from [AppSettingsTable].
+  ///
+  /// Returns `1.0` when the key is absent or unparseable.
+  Future<double> _readSpeechRate() async {
+    final row = await (_db.select(_db.appSettingsTable)
+          ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
+        .getSingleOrNull();
+    return double.tryParse(row?.value ?? '') ?? 1.0;
+  }
+
   /// Reads the selected TTS provider from [AppSettingsTable].
   ///
   /// Returns `'gemini'` when the key is absent or empty.
@@ -728,10 +824,12 @@ class TTSServiceImpl implements TTSService {
   /// Returns the cached file path, or `null` on a cache miss or stale entry.
   /// Stale entries (row exists but file is missing) are deleted automatically.
   Future<String?> _findCachedPath(String hash) async {
+    debugPrint('TTSService._findCachedPath: querying DB for hash=${hash.substring(0, 8)}…');
     final entry = await (
       _db.select(_db.ttsCacheTable)
         ..where((t) => t.textHash.equals(hash))
     ).getSingleOrNull();
+    debugPrint('TTSService._findCachedPath: query returned ${entry != null ? "entry" : "null"}');
 
     if (entry == null) return null;
 

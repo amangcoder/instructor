@@ -39,10 +39,6 @@ class SettingsScreen extends ConsumerWidget {
           _SectionHeader(title: 'Sync'),
           const SyncSection(),
 
-          // ── Server ────────────────────────────────────────────────────────
-          _SectionHeader(title: 'Server'),
-          const _ServerUrlTile(),
-
           // ── TTS Provider ─────────────────────────────────────────────────
           _SectionHeader(title: 'TTS Provider'),
           const _ProviderSelector(),
@@ -102,84 +98,6 @@ class _SectionHeader extends StatelessWidget {
               fontWeight: FontWeight.w700,
               letterSpacing: 0.6,
             ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Server section
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ServerUrlTile extends ConsumerWidget {
-  const _ServerUrlTile();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final urlAsync = ref.watch(backendServerUrlSettingProvider);
-
-    return urlAsync.when(
-      data: (currentUrl) => ListTile(
-        title: const Text('Backend Server URL'),
-        subtitle: Text(currentUrl),
-        trailing: const Icon(Icons.edit_outlined),
-        onTap: () => _showEditDialog(context, ref, currentUrl),
-      ),
-      loading: () => const ListTile(
-        title: Text('Backend Server URL'),
-        subtitle: LinearProgressIndicator(),
-      ),
-      error: (_, __) => const ListTile(title: Text('Backend Server URL')),
-    );
-  }
-
-  void _showEditDialog(BuildContext context, WidgetRef ref, String currentUrl) {
-    final controller = TextEditingController(text: currentUrl);
-
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Backend Server URL'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Enter the base URL for the Instructor backend server.',
-              style: Theme.of(dialogContext).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                hintText: kDefaultBackendServerUrl,
-                border: const OutlineInputBorder(),
-                labelText: 'Server URL',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = controller.text.trim();
-              if (value.isNotEmpty) {
-                ref
-                    .read(appSettingsProvider)
-                    .write(AppSettingsKeys.backendServerUrl, value);
-              }
-              Navigator.pop(dialogContext);
-            },
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
   }

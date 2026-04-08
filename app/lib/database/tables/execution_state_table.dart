@@ -30,6 +30,13 @@ class ExecutionStateTable extends Table {
   IntColumn get ambientPositionMs =>
       integer().withDefault(const Constant(0))();
 
+  /// Asset key of the ambient track that was playing when the session was
+  /// paused (e.g. 'ambient_rain'). Null when no ambient track was active.
+  ///
+  /// Persisted alongside [ambientPositionMs] so that crash recovery can
+  /// restart the correct track before seeking to the saved position.
+  TextColumn get ambientAssetKey => text().nullable()();
+
   /// [ExecutionStatus] name string.
   TextColumn get status => text().withDefault(const Constant('paused'))();
 

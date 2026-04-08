@@ -82,10 +82,12 @@ describe('JwtAuthGuard', () => {
       expect(req.user).toMatchObject({ sub: 'user-123', email: 'user@example.com' });
     });
 
-    it('calls JwtService.verify with the extracted token and secret options', async () => {
+    it('calls JwtService.verify with the extracted token', async () => {
       const ctx = createMockContext({ authorization: bearer(VALID_TOKEN) });
       await guard.canActivate(ctx);
-      expect(mockJwtService.verify).toHaveBeenCalledWith(VALID_TOKEN, expect.objectContaining({ secret: expect.any(String) }));
+      // The guard calls jwt.verify(token) with no extra options —
+      // the secret is already bound via JwtModule.registerAsync in AuthModule.
+      expect(mockJwtService.verify).toHaveBeenCalledWith(VALID_TOKEN);
     });
 
     it('requires exact-case "Bearer " prefix (case-sensitive)', async () => {

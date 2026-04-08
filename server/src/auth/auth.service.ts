@@ -1,3 +1,15 @@
+/**
+ * AuthService — email + OTP authentication with JWT token issuance.
+ *
+ * Migrated from:
+ *   DatabaseService (SQLite/Drizzle) → DynamoDBService
+ *   Nodemailer SMTP               → SESEmailService
+ *   Redis RateLimitService        → DynamoDBRateLimitService
+ *
+ * onModuleInit is intentionally removed — all dependencies are lazy
+ * (DynamoDB/SES clients connect on first use) so cold start is fast.
+ */
+
 import {
   HttpException,
   HttpStatus,
@@ -7,12 +19,10 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomInt, createHmac, createHash, timingSafeEqual } from 'crypto';
-import * as nodemailer from 'nodemailer';
-import { eq, and, gt, lt } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { DatabaseService } from '../database/database.service';
-import { RateLimitService } from '../redis/rate-limit.service';
-import { users, otpRecords, refreshTokens } from '../database/schema';
+import { DynamoDBService } from '../dynamodb/dynamodb.service';
+import { SESEmailService } from '../email/ses-email.service';
+import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -36,100 +46,43 @@ export interface AuthResult {
   user: { id: string; email: string };
 }
 
+// ── Service ──────────────────────────────────────────────────────────────────
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  private transporter!: nodemailer.Transporter;
-
   constructor(
-    private readonly db: DatabaseService,
+    private readonly db: DynamoDBService,
+    private readonly ses: SESEmailService,
+    private readonly rateLimit: DynamoDBRateLimitService,
     private readonly jwt: JwtService,
-    private readonly rateLimit: RateLimitService,
   ) {}
-
-  async onModuleInit(): Promise<void> {
-    await this.initMailTransporter();
-  }
-
-  // ── Mail setup ────────────────────────────────────────────────────────────
-
-  private async initMailTransporter(): Promise<void> {
-    const host = process.env.SMTP_HOST;
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-
-    if (host && user && pass) {
-      this.transporter = nodemailer.createTransport({
-        host,
-        port: parseInt(process.env.SMTP_PORT ?? '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: { user, pass },
-      });
-      this.logger.log(`Mail transporter configured via ${host}`);
-    } else {
-      // Fallback to Ethereal test account for development / CI.
-      const testAccount = await nodemailer.createTestAccount();
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: { user: testAccount.user, pass: testAccount.pass },
-      });
-      this.logger.warn(
-        `SMTP not configured — using Ethereal test account: ${testAccount.user}`,
-      );
-    }
-
-    // Verify SMTP connection at startup so misconfiguration surfaces early
-    // rather than silently failing on the first OTP send.
-    try {
-      await this.transporter.verify();
-      this.logger.log('SMTP connection verified successfully');
-    } catch (err: any) {
-      this.logger.error(`SMTP verification failed — email delivery will not work: ${err.message}`);
-      // Do not throw; allow the server to start (OTP send errors are logged per-request).
-    }
-  }
 
   // ── OTP request ───────────────────────────────────────────────────────────
 
   async requestOtp(email: string): Promise<{ message: string }> {
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Enforce rate limit: 3 per 5 minutes per email (Redis-backed).
+    // Enforce rate limit: 3 per 5 minutes per email (DynamoDB-backed, atomic).
     await this.checkOtpRateLimit(normalizedEmail);
 
     const code = this.generateOtp();
     const hashedCode = this.hashOtp(code);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
-    // Invalidate all previous unused OTPs for this email (cleanup).
-    await this.db.db
-      .update(otpRecords)
-      .set({ used: true })
-      .where(
-        and(
-          eq(otpRecords.email, normalizedEmail),
-          eq(otpRecords.used, false),
-        ),
+    // Invalidate all previous unused OTPs for this email (single-active-OTP invariant).
+    await this.db.invalidateOtpsForEmail(normalizedEmail);
+
+    // Store new OTP record — the hash, never plaintext.
+    await this.db.createOtp(normalizedEmail, hashedCode, expiresAt);
+
+    // Send plaintext code via SES (fire-and-forget — don't block the response).
+    this.ses
+      .sendOtpEmail(normalizedEmail, code)
+      .catch((err: Error) =>
+        this.logger.error(`Failed to send OTP email to ${normalizedEmail}: ${err.message}`),
       );
-
-    // Insert new OTP record — store the hash, never the plaintext.
-    await this.db.db.insert(otpRecords).values({
-      email: normalizedEmail,
-      code: hashedCode,
-      expiresAt,
-      attempts: 0,
-      used: false,
-      createdAt: now,
-    });
-
-    // Send plaintext code via email (fire-and-forget for latency, but log errors).
-    this.sendOtpEmail(normalizedEmail, code).catch((err: Error) =>
-      this.logger.error(`Failed to send OTP email to ${normalizedEmail}: ${err.message}`),
-    );
 
     this.logger.log(`OTP requested for ${normalizedEmail}`);
     return { message: 'OTP sent' };
@@ -139,53 +92,34 @@ export class AuthService {
 
   async verifyOtp(email: string, otp: string): Promise<AuthResult> {
     const normalizedEmail = email.toLowerCase().trim();
-    const now = new Date();
 
-    // Find the most recent valid OTP for this email.
-    const records = await this.db.db
-      .select()
-      .from(otpRecords)
-      .where(
-        and(
-          eq(otpRecords.email, normalizedEmail),
-          eq(otpRecords.used, false),
-          gt(otpRecords.expiresAt, now),
-        ),
-      )
-      .orderBy(otpRecords.id)
-      .all();
+    // Retrieve all active (unused, non-expired) OTP records for this email.
+    const records = await this.db.getActiveOtps(normalizedEmail);
 
-    // Use the most recently inserted record.
-    const record = records[records.length - 1];
+    // Use the most recently created record (highest sort key = most recent ISO timestamp).
+    const record = records.length > 0 ? records[records.length - 1] : null;
 
     if (!record) {
-      // Either no OTP was sent or it already expired.
       throw new UnauthorizedException('OTP expired or not found. Please request a new one.');
     }
 
-    // Check attempt count BEFORE validating to prevent brute-force.
+    // Brute-force guard: check attempt count BEFORE validating.
     if (record.attempts >= OTP_MAX_ATTEMPTS) {
       throw new UnauthorizedException(
         'Too many failed attempts. Please request a new OTP.',
       );
     }
 
-    // Hash the submitted OTP and compare against the stored hash using a
-    // timing-safe comparison to prevent timing side-channel attacks.
+    // Timing-safe hash comparison (prevents timing side-channel attacks).
     const hashedSubmitted = this.hashOtp(otp);
     const storedHash = record.code;
-    // Both are hex strings of equal length (64 chars) — safe to compare with timingSafeEqual.
     const otpMatch = timingSafeEqual(
       Buffer.from(storedHash, 'hex'),
       Buffer.from(hashedSubmitted, 'hex'),
     );
 
     if (!otpMatch) {
-      // Increment attempts.
-      await this.db.db
-        .update(otpRecords)
-        .set({ attempts: record.attempts + 1 })
-        .where(eq(otpRecords.id, record.id));
+      await this.db.incrementOtpAttempts(normalizedEmail, record.sk, record.attempts);
 
       const remaining = OTP_MAX_ATTEMPTS - (record.attempts + 1);
       throw new UnauthorizedException(
@@ -194,30 +128,23 @@ export class AuthService {
     }
 
     // Mark OTP as used (single-use enforcement).
-    await this.db.db
-      .update(otpRecords)
-      .set({ used: true })
-      .where(eq(otpRecords.id, record.id));
+    await this.db.markOtpUsed(normalizedEmail, record.sk);
 
-    // Upsert user record (create on first login).
-    let user = await this.db.db
-      .select()
-      .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .get();
+    // Upsert user record (create on first successful login).
+    let user = await this.db.getUserByEmail(normalizedEmail);
 
     if (!user) {
       const newUser = {
         id: uuidv4(),
         email: normalizedEmail,
-        createdAt: now,
+        createdAt: new Date(),
       };
-      await this.db.db.insert(users).values(newUser);
+      await this.db.createUser(newUser);
       user = newUser;
       this.logger.log(`New user created: ${normalizedEmail} (id=${newUser.id})`);
     }
 
-    // Issue tokens.
+    // Issue access token + refresh token.
     const tokens = await this.issueTokens(user.id, user.email);
     this.logger.log(`OTP verified for ${normalizedEmail}`);
     return { ...tokens, user: { id: user.id, email: user.email } };
@@ -228,47 +155,48 @@ export class AuthService {
   async refreshAccessToken(
     token: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    const now = new Date();
-
-    // Look up the refresh token by its SHA-256 hash (tokens are stored hashed).
     const hashedToken = this.hashRefreshToken(token);
-    const record = await this.db.db
-      .select()
-      .from(refreshTokens)
-      .where(
-        and(
-          eq(refreshTokens.token, hashedToken),
-          eq(refreshTokens.revoked, false),
-          gt(refreshTokens.expiresAt, now),
-        ),
-      )
-      .get();
 
-    if (!record) {
+    // Look up the refresh token by its hash.
+    const record = await this.db.getRefreshToken(hashedToken);
+
+    if (!record || record.revoked || record.expiresAt <= new Date()) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    const user = await this.db.db
-      .select()
-      .from(users)
-      .where(eq(users.id, record.userId))
-      .get();
-
+    const user = await this.db.getUserById(record.userId);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
 
-    // Revoke the current refresh token (token rotation — limits blast radius of theft).
-    await this.db.db
-      .update(refreshTokens)
-      .set({ revoked: true })
-      .where(eq(refreshTokens.id, record.id));
+    // Revoke the current token (token rotation — limits blast radius of theft).
+    await this.db.revokeRefreshToken(record.userId, hashedToken);
 
-    // Issue a brand-new access token AND a new refresh token.
+    // Issue a fresh access token AND a new refresh token.
     const tokens = await this.issueTokens(user.id, user.email);
 
     this.logger.log(`Tokens rotated for user ${user.id}`);
     return tokens;
+  }
+
+  // ── Logout / token revocation ─────────────────────────────────────────────
+
+  /**
+   * Revoke a single refresh token (e.g. logout from one device).
+   * Silently succeeds if the token is already revoked or doesn't exist.
+   */
+  async revokeRefreshToken(token: string): Promise<void> {
+    const hashedToken = this.hashRefreshToken(token);
+    // The DynamoDB update is a no-op if the item doesn't exist or is already revoked.
+    await this.db.revokeRefreshToken('', hashedToken);
+  }
+
+  /**
+   * Revoke all refresh tokens for a user (logout-all / security reset).
+   */
+  async revokeAllRefreshTokens(userId: string): Promise<void> {
+    await this.db.revokeAllRefreshTokens(userId);
+    this.logger.log(`All refresh tokens revoked for user ${userId}`);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -283,24 +211,16 @@ export class AuthService {
     );
 
     const refreshToken = uuidv4();
-    // Store a SHA-256 hash of the token — the raw UUID is returned to the client only.
     const hashedRefreshToken = this.hashRefreshToken(refreshToken);
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
 
-    await this.db.db.insert(refreshTokens).values({
-      id: uuidv4(),
-      userId,
-      token: hashedRefreshToken,
-      expiresAt,
-      revoked: false,
-    });
+    await this.db.createRefreshToken(userId, hashedRefreshToken, expiresAt);
 
     return { accessToken, refreshToken };
   }
 
   private generateOtp(): string {
-    // Use crypto.randomInt for a cryptographically secure 6-digit OTP.
-    // randomInt(min, max) returns an integer in [min, max).
+    // Cryptographically secure 6-digit OTP.
     return randomInt(100_000, 1_000_000).toString().padStart(6, '0');
   }
 
@@ -313,7 +233,7 @@ export class AuthService {
     if (!salt) {
       throw new Error(
         'OTP_SALT must be set to a secure random value — ' +
-          'do not leave it unset. Generate one with: openssl rand -hex 32',
+          'generate one with: openssl rand -hex 32',
       );
     }
     return createHmac('sha256', salt).update(code).digest('hex');
@@ -342,72 +262,5 @@ export class AuthService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-  }
-
-  private async sendOtpEmail(email: string, code: string): Promise<void> {
-    const info = await this.transporter.sendMail({
-      from: process.env.SMTP_FROM ?? '"Instructor App" <noreply@instructor.app>',
-      to: email,
-      subject: 'Your Instructor App verification code',
-      text: `Your verification code is: ${code}\n\nThis code expires in 5 minutes.`,
-      html: `
-        <p>Your Instructor App verification code is:</p>
-        <h2 style="letter-spacing:0.3em">${code}</h2>
-        <p>This code expires in 5 minutes.</p>
-        <p>If you did not request this, please ignore this email.</p>
-      `,
-    });
-
-    // Log Ethereal preview URL (dev only).
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) {
-      this.logger.log(`OTP email preview: ${previewUrl}`);
-    }
-  }
-
-  // ── Logout / token revocation ──────────────────────────────────────────────
-
-  /**
-   * Revoke a single refresh token (e.g. on logout from one device).
-   * Silently succeeds if the token is already revoked or doesn't exist.
-   */
-  async revokeRefreshToken(token: string): Promise<void> {
-    const hashedToken = this.hashRefreshToken(token);
-    await this.db.db
-      .update(refreshTokens)
-      .set({ revoked: true })
-      .where(
-        and(
-          eq(refreshTokens.token, hashedToken),
-          eq(refreshTokens.revoked, false),
-        ),
-      );
-  }
-
-  /**
-   * Revoke all refresh tokens for a user (e.g. logout-all / password reset).
-   */
-  async revokeAllRefreshTokens(userId: string): Promise<void> {
-    await this.db.db
-      .update(refreshTokens)
-      .set({ revoked: true })
-      .where(
-        and(
-          eq(refreshTokens.userId, userId),
-          eq(refreshTokens.revoked, false),
-        ),
-      );
-    this.logger.log(`All refresh tokens revoked for user ${userId}`);
-  }
-
-  /**
-   * Cleanup expired OTP records older than 1 hour (call periodically).
-   * Not strictly required but keeps the table small.
-   */
-  async pruneExpiredOtps(): Promise<void> {
-    const cutoff = new Date(Date.now() - 60 * 60 * 1000);
-    await this.db.db
-      .delete(otpRecords)
-      .where(lt(otpRecords.expiresAt, cutoff));
   }
 }

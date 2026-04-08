@@ -1,27 +1,12 @@
-import type { Config } from 'drizzle-kit';
-import { join } from 'path';
-
 /**
- * Drizzle Kit configuration for generating and running migrations.
+ * Drizzle ORM has been removed from this project as part of the AWS Lambda migration.
+ * The SQLite database layer has been replaced by Amazon DynamoDB (single-table design).
  *
- * Usage:
- *   npx drizzle-kit generate   — generate SQL migration files from schema changes
- *   npx drizzle-kit migrate    — apply pending migrations to the database
- *   npx drizzle-kit studio     — open the Drizzle Studio UI
+ * This file is kept as a placeholder to document the migration.
+ * It is excluded from TypeScript compilation via tsconfig.build.json.
  *
- * The database file location honours the DATABASE_DIR env variable so that
- * local dev, Docker, and CI all point to the right file without code changes.
+ * @see server/src/dynamodb/dynamodb.service.ts — new DynamoDB data access layer
+ * @see server/src/dynamodb/entities.ts        — DynamoDB entity type definitions
  */
-const dataDir = process.env.DATABASE_DIR ?? join(process.cwd(), 'data');
-const dbUrl = join(dataDir, 'server.db');
 
-export default {
-  schema: './src/database/schema.ts',
-  out: './src/database/migrations',
-  dialect: 'sqlite',
-  dbCredentials: {
-    url: dbUrl,
-  },
-  verbose: true,
-  strict: true,
-} satisfies Config;
+export default {};

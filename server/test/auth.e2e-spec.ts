@@ -1,76 +1,262 @@
+/**
+ * E2E auth flow tests (migrated to DynamoDB + SES + DynamoDBRateLimiter).
+ *
+ * These tests exercise the full HTTP layer end-to-end without hitting real
+ * AWS services. All dependencies (SES email, DynamoDB, rate limiter, JWT)
+ * use in-memory implementations so tests run deterministically without
+ * any network access.
+ *
+ * Endpoints tested:
+ *   POST /api/auth/request-otp
+ *   POST /api/auth/verify-otp
+ *   POST /api/auth/refresh
+ *   POST /api/auth/logout
+ *   Protected endpoints requiring valid JWT
+ *
+ * OTP capture strategy:
+ *   SESEmailService.sendOtpEmail is replaced with an in-memory mock that
+ *   captures the 6-digit OTP for each email address. Tests then use the
+ *   captured OTP to call verify-otp, mirroring real user behaviour.
+ */
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe, HttpStatus } from '@nestjs/common';
 import * as request from 'supertest';
 import { App } from 'supertest/types';
 
 // ---------------------------------------------------------------------------
-// E2E auth flow tests
+// In-memory DynamoDBService implementation
 //
-// These tests exercise the full HTTP layer end-to-end without hitting real
-// external services. All dependencies (mail, database, JWT signing) are
-// either in-memory or mocked so tests run deterministically without network.
-//
-// Modules tested (must be implemented per TASK-001, TASK-002, TASK-003):
-//   POST /api/auth/request-otp
-//   POST /api/auth/verify-otp
-//   POST /api/auth/refresh
-//   Protected endpoints requiring valid JWT
+// Provides stateful entity storage without any real AWS calls.
+// Implements the full DynamoDBService interface used by AuthService/SyncService.
 // ---------------------------------------------------------------------------
 
+class InMemoryDynamoDBService {
+  private users = new Map<string, { id: string; email: string; createdAt: Date }>();
+  private usersByEmail = new Map<string, { id: string; email: string; createdAt: Date }>();
+  private otps = new Map<
+    string,
+    Array<{ email: string; code: string; attempts: number; used: boolean; expiresAt: Date; sk: string }>
+  >();
+  private refreshTokens = new Map<
+    string,
+    { userId: string; tokenHash: string; revoked: boolean; expiresAt: Date; sk: string }
+  >();
+  private syncMetadata = new Map<string, { userId: string; lastSyncAt: Date | null; sizeBytes: number | null }>();
+
+  async getUserById(userId: string) {
+    return this.users.get(userId) ?? null;
+  }
+
+  async getUserByEmail(email: string) {
+    return this.usersByEmail.get(email) ?? null;
+  }
+
+  async createUser(user: { id: string; email: string; createdAt: Date }) {
+    this.users.set(user.id, user);
+    this.usersByEmail.set(user.email, user);
+  }
+
+  async createOtp(email: string, codeHash: string, expiresAt: Date) {
+    const existing = this.otps.get(email) ?? [];
+    existing.push({
+      email,
+      code: codeHash,
+      attempts: 0,
+      used: false,
+      expiresAt,
+      sk: `${new Date().toISOString()}#${Math.random().toString(36).slice(2)}`,
+    });
+    this.otps.set(email, existing);
+  }
+
+  async getActiveOtps(email: string) {
+    const records = this.otps.get(email) ?? [];
+    const now = new Date();
+    return records.filter((r) => !r.used && r.expiresAt > now);
+  }
+
+  async markOtpUsed(email: string, sk: string) {
+    const records = this.otps.get(email) ?? [];
+    const record = records.find((r) => r.sk === sk);
+    if (record) record.used = true;
+  }
+
+  async incrementOtpAttempts(email: string, sk: string, currentAttempts: number) {
+    const records = this.otps.get(email) ?? [];
+    const record = records.find((r) => r.sk === sk);
+    if (record) record.attempts = currentAttempts + 1;
+  }
+
+  async invalidateOtpsForEmail(email: string) {
+    const records = this.otps.get(email) ?? [];
+    records.forEach((r) => {
+      r.used = true;
+    });
+  }
+
+  async createRefreshToken(userId: string, tokenHash: string, expiresAt: Date) {
+    this.refreshTokens.set(tokenHash, { userId, tokenHash, revoked: false, expiresAt, sk: 'TOKEN' });
+  }
+
+  async getRefreshToken(tokenHash: string) {
+    const token = this.refreshTokens.get(tokenHash);
+    if (!token || token.revoked || token.expiresAt < new Date()) return null;
+    return token;
+  }
+
+  async revokeRefreshToken(_userId: string, tokenHash: string) {
+    const token = this.refreshTokens.get(tokenHash);
+    if (token) token.revoked = true;
+  }
+
+  async revokeAllRefreshTokens(userId: string) {
+    for (const token of this.refreshTokens.values()) {
+      if (token.userId === userId) token.revoked = true;
+    }
+  }
+
+  async getSyncMetadata(userId: string) {
+    return this.syncMetadata.get(userId) ?? null;
+  }
+
+  async upsertSyncMetadata(userId: string, lastSyncAt: Date, sizeBytes?: number) {
+    this.syncMetadata.set(userId, { userId, lastSyncAt, sizeBytes: sizeBytes ?? null });
+  }
+
+  clear() {
+    this.users.clear();
+    this.usersByEmail.clear();
+    this.otps.clear();
+    this.refreshTokens.clear();
+    this.syncMetadata.clear();
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Mock nodemailer at module level.
-// AuthService uses nodemailer directly (not via DI), so we must mock the module
-// so that createTransport() returns a fake transporter whose sendMail captures
-// OTPs from email bodies — enabling e2e tests to verify OTPs without real SMTP.
+// In-memory DynamoDBRateLimitService (fixed-window counter)
 // ---------------------------------------------------------------------------
 
-/** OTPs captured from email bodies: email → 6-digit code. */
+class InMemoryRateLimiter {
+  private counters = new Map<string, { count: number; expiresAt: number }>();
+
+  async consume(namespace: string, identifier: string, limit: number, windowSec: number) {
+    const key = `${namespace}:${identifier}`;
+    const now = Math.floor(Date.now() / 1000);
+    const entry = this.counters.get(key);
+
+    if (!entry || entry.expiresAt <= now) {
+      this.counters.set(key, { count: 1, expiresAt: now + windowSec });
+      return { allowed: true, current: 1, retryAfterSec: 0 };
+    }
+
+    if (entry.count >= limit) {
+      return { allowed: false, current: entry.count, retryAfterSec: entry.expiresAt - now };
+    }
+
+    entry.count++;
+    return { allowed: true, current: entry.count, retryAfterSec: 0 };
+  }
+
+  async peek(namespace: string, identifier: string, limit: number) {
+    const key = `${namespace}:${identifier}`;
+    const now = Math.floor(Date.now() / 1000);
+    const entry = this.counters.get(key);
+    const count = entry && entry.expiresAt > now ? entry.count : 0;
+    const allowed = count < limit;
+    return {
+      allowed,
+      current: count,
+      retryAfterSec: allowed ? 0 : Math.max(0, (entry?.expiresAt ?? 0) - now),
+    };
+  }
+
+  async increment(namespace: string, identifier: string, windowSec: number) {
+    const key = `${namespace}:${identifier}`;
+    const now = Math.floor(Date.now() / 1000);
+    const entry = this.counters.get(key);
+
+    if (!entry || entry.expiresAt <= now) {
+      this.counters.set(key, { count: 1, expiresAt: now + windowSec });
+    } else {
+      entry.count++;
+    }
+  }
+
+  clear() {
+    this.counters.clear();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-memory SESEmailService — captures OTPs for test inspection
+// ---------------------------------------------------------------------------
+
+/** OTPs captured from sendOtpEmail calls: email → latest 6-digit code. */
 const capturedOtps = new Map<string, string>();
 
-const mockSendMail = jest.fn(
-  async (opts: { to: string; text?: string; html?: string }) => {
-    const body = opts.text ?? opts.html ?? '';
-    const match = body.match(/\b(\d{6})\b/);
-    if (match) capturedOtps.set(opts.to, match[1]);
-    return { messageId: '<test@ethereal.email>' };
-  },
-);
+const mockSendOtpEmail = jest.fn(async (email: string, code: string) => {
+  capturedOtps.set(email, code);
+});
 
-jest.mock('nodemailer', () => ({
-  createTransport: jest.fn().mockReturnValue({ sendMail: mockSendMail }),
-  createTestAccount: jest.fn().mockResolvedValue({
-    user: 'test@ethereal.email',
-    pass: 'ethereal-pass',
-  }),
-  getTestMessageUrl: jest.fn().mockReturnValue(null),
-}));
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
 
 describe('Auth (e2e)', () => {
   let app: INestApplication<App>;
+  let inMemoryDynamo: InMemoryDynamoDBService;
+  let inMemoryRateLimiter: InMemoryRateLimiter;
 
   beforeAll(async () => {
-    // Import the AppModule lazily so the test file compiles even before the
-    // auth module exists.
     let AppModule: new () => object;
-    let AuthModule: new () => object;
+    let DynamoDBService: unknown;
+    let SESEmailService: unknown;
+    let DynamoDBRateLimitService: unknown;
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       ({ AppModule } = require('../src/app.module'));
     } catch {
-      // AppModule not yet available — skip all tests gracefully
-      console.warn('[auth.e2e] AppModule not found — tests will be skipped until TASK-001/002/003 are implemented');
+      console.warn(
+        '[auth.e2e] AppModule not found — tests will be skipped until TASK-004/005/006/007 are implemented',
+      );
       return;
     }
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ DynamoDBService } = require('../src/dynamodb/dynamodb.service'));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ SESEmailService } = require('../src/email/ses-email.service'));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ DynamoDBRateLimitService } = require('../src/ratelimit/dynamodb-ratelimit.service'));
+    } catch {
+      console.warn('[auth.e2e] New service classes not yet available');
+    }
+
+    inMemoryDynamo = new InMemoryDynamoDBService();
+    inMemoryRateLimiter = new InMemoryRateLimiter();
+
+    let builder = Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    });
+
+    if (DynamoDBService) {
+      builder = builder.overrideProvider(DynamoDBService).useValue(inMemoryDynamo);
+    }
+    if (SESEmailService) {
+      builder = builder.overrideProvider(SESEmailService).useValue({ sendOtpEmail: mockSendOtpEmail });
+    }
+    if (DynamoDBRateLimitService) {
+      builder = builder.overrideProvider(DynamoDBRateLimitService).useValue(inMemoryRateLimiter);
+    }
+
+    const moduleFixture: TestingModule = await builder.compile();
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     app.setGlobalPrefix('api');
-
     await app.init();
   });
 
@@ -80,10 +266,11 @@ describe('Auth (e2e)', () => {
 
   beforeEach(() => {
     capturedOtps.clear();
-    mockSendMail.mockClear();
+    mockSendOtpEmail.mockClear();
+    inMemoryDynamo?.clear();
+    inMemoryRateLimiter?.clear();
   });
 
-  // Utility: skip test gracefully when app hasn't been initialised
   function skipIfNoApp() {
     if (!app) pending('Auth module not implemented yet');
   }
@@ -103,18 +290,16 @@ describe('Auth (e2e)', () => {
       expect(res.body).toHaveProperty('message');
     });
 
-    it('sends OTP to the provided email address (verifiable via mock sendMail)', async () => {
+    it('sends OTP to the provided email address (verifiable via mock sendOtpEmail)', async () => {
       skipIfNoApp();
       await request(app.getHttpServer())
         .post('/api/auth/request-otp')
         .send({ email })
         .expect(HttpStatus.OK);
 
-      // Wait a tick for the fire-and-forget sendMail promise to settle
+      // Allow fire-and-forget email to settle
       await new Promise((r) => setImmediate(r));
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({ to: email }),
-      );
+      expect(mockSendOtpEmail).toHaveBeenCalledWith(email, expect.stringMatching(/^\d{6}$/));
     });
 
     it('returns 400 for an invalid email format', async () => {
@@ -160,7 +345,7 @@ describe('Auth (e2e)', () => {
           .send({ email: 'new-user@example.com' }),
         request(app.getHttpServer())
           .post('/api/auth/request-otp')
-          .send({ email: email }),
+          .send({ email }),
       ]);
       expect(r1.status).toBe(HttpStatus.OK);
       expect(r2.status).toBe(HttpStatus.OK);
@@ -175,11 +360,9 @@ describe('Auth (e2e)', () => {
 
     beforeEach(async () => {
       if (!app) return;
-      // Request a fresh OTP before each verification test
       await request(app.getHttpServer())
         .post('/api/auth/request-otp')
         .send({ email });
-      // Wait for the fire-and-forget sendMail to settle so capturedOtps is populated
       await new Promise((r) => setImmediate(r));
       otp = capturedOtps.get(email) ?? '';
     });
@@ -196,6 +379,11 @@ describe('Auth (e2e)', () => {
         refreshToken: expect.any(String),
         user: { email },
       });
+    });
+
+    it('OTP is exactly 6 digits', async () => {
+      skipIfNoApp();
+      expect(otp).toMatch(/^\d{6}$/);
     });
 
     it('returns 401 for incorrect OTP', async () => {
@@ -221,11 +409,6 @@ describe('Auth (e2e)', () => {
         .expect(HttpStatus.UNAUTHORIZED);
     });
 
-    it('OTP is exactly 6 digits', async () => {
-      skipIfNoApp();
-      expect(otp).toMatch(/^\d{6}$/);
-    });
-
     it('returns 400 for missing required fields', async () => {
       skipIfNoApp();
       await request(app.getHttpServer())
@@ -244,6 +427,7 @@ describe('Auth (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/auth/request-otp')
         .send({ email });
+      await new Promise((r) => setImmediate(r));
       const otp = capturedOtps.get(email) ?? '';
       const res = await request(app.getHttpServer())
         .post('/api/auth/verify-otp')
@@ -318,7 +502,6 @@ describe('Auth (e2e)', () => {
         .send({ refreshToken })
         .expect(HttpStatus.OK);
 
-      // Attempt to use the revoked refresh token
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken })
@@ -327,11 +510,21 @@ describe('Auth (e2e)', () => {
 
     it('revokes all tokens when JWT is provided (logout-all)', async () => {
       skipIfNoApp();
-      // Create two sessions
       const session1 = await getTokens();
-      const session2 = await getTokens();
 
-      // Logout with JWT from session1 — should revoke ALL tokens for the user
+      // Need a second session: re-request OTP for same email
+      capturedOtps.delete(email);
+      await request(app.getHttpServer())
+        .post('/api/auth/request-otp')
+        .send({ email });
+      await new Promise((r) => setImmediate(r));
+      const otp2 = capturedOtps.get(email) ?? '';
+      const session2Res = await request(app.getHttpServer())
+        .post('/api/auth/verify-otp')
+        .send({ email, otp: otp2 });
+      const session2 = session2Res.body as { accessToken: string; refreshToken: string };
+
+      // Logout all via JWT bearer
       await request(app.getHttpServer())
         .post('/api/auth/logout')
         .set('Authorization', `Bearer ${session1.accessToken}`)
@@ -357,23 +550,6 @@ describe('Auth (e2e)', () => {
         .send({})
         .expect(HttpStatus.OK);
     });
-
-    it('returns 200 for an already-revoked token (idempotent)', async () => {
-      skipIfNoApp();
-      const { refreshToken } = await getTokens();
-
-      // Revoke once
-      await request(app.getHttpServer())
-        .post('/api/auth/logout')
-        .send({ refreshToken })
-        .expect(HttpStatus.OK);
-
-      // Revoke again — should still succeed
-      await request(app.getHttpServer())
-        .post('/api/auth/logout')
-        .send({ refreshToken })
-        .expect(HttpStatus.OK);
-    });
   });
 
   // ── Full auth flow + protected endpoint ────────────────────────────────────
@@ -385,6 +561,7 @@ describe('Auth (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/auth/request-otp')
         .send({ email });
+      await new Promise((r) => setImmediate(r));
       const otp = capturedOtps.get(email) ?? '';
       const res = await request(app.getHttpServer())
         .post('/api/auth/verify-otp')
@@ -396,7 +573,6 @@ describe('Auth (e2e)', () => {
       skipIfNoApp();
       const accessToken = await loginAndGetToken();
 
-      // POST /api/plans/generate is protected by JwtAuthGuard (TASK-006)
       const res = await request(app.getHttpServer())
         .post('/api/plans/generate')
         .set('Authorization', `Bearer ${accessToken}`)
@@ -421,6 +597,63 @@ describe('Auth (e2e)', () => {
         .set('Authorization', 'Bearer invalid.jwt.token')
         .send({ prompt: 'test' })
         .expect(HttpStatus.UNAUTHORIZED);
+    });
+  });
+
+  // ── Rate limiting (3 OTP requests per 5 minutes) ────────────────────────────
+
+  describe('OTP rate limiting', () => {
+    it('allows 3 OTP requests for the same email within the window', async () => {
+      skipIfNoApp();
+      const email = 'rl-test@example.com';
+
+      for (let i = 0; i < 3; i++) {
+        await request(app.getHttpServer())
+          .post('/api/auth/request-otp')
+          .send({ email })
+          .expect(HttpStatus.OK);
+      }
+    });
+
+    it('blocks the 4th OTP request with 429 Too Many Requests', async () => {
+      skipIfNoApp();
+      const email = 'rl-block@example.com';
+
+      for (let i = 0; i < 3; i++) {
+        await request(app.getHttpServer())
+          .post('/api/auth/request-otp')
+          .send({ email })
+          .expect(HttpStatus.OK);
+      }
+
+      await request(app.getHttpServer())
+        .post('/api/auth/request-otp')
+        .send({ email })
+        .expect(HttpStatus.TOO_MANY_REQUESTS);
+    });
+
+    it('rate limit is per-email — different emails have independent quotas', async () => {
+      skipIfNoApp();
+      const email1 = 'rl-independent-a@example.com';
+      const email2 = 'rl-independent-b@example.com';
+
+      // Exhaust email1
+      for (let i = 0; i < 3; i++) {
+        await request(app.getHttpServer())
+          .post('/api/auth/request-otp')
+          .send({ email: email1 })
+          .expect(HttpStatus.OK);
+      }
+      await request(app.getHttpServer())
+        .post('/api/auth/request-otp')
+        .send({ email: email1 })
+        .expect(HttpStatus.TOO_MANY_REQUESTS);
+
+      // email2 should still be allowed
+      await request(app.getHttpServer())
+        .post('/api/auth/request-otp')
+        .send({ email: email2 })
+        .expect(HttpStatus.OK);
     });
   });
 });

@@ -1,0 +1,554 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Deploy — Lambda (dev → staging → prod)
+#
+# Triggered on every push to `main`.  Deploys via AWS CDK (NodejsFunction +
+# API Gateway HTTP API).  Production requires manual approval via GitHub
+# Environments (configure required reviewers in repo Settings → Environments).
+#
+# Pipeline stages:
+#   1. typecheck      — TS type checks for server + infra (parallel, <2 min)
+#   2. tests          — unit tests → e2e tests (sequential); CDK tests (parallel)
+#   3. cdk-synth      — validate all three CloudFormation templates (matrix)
+#   4. deploy-dev     — auto-deploy; smoke test /api/health
+#   5. deploy-staging — auto-deploy after dev; smoke test /api/health
+#   6. deploy-prod    — manual approval gate; smoke test /api/health
+#
+# Required GitHub Secrets (repo level):
+#   AWS_ACCOUNT_ID          — 12-digit AWS account ID
+#
+# Required GitHub Secrets (per Environment: dev / staging / prod):
+#   AWS_DEPLOY_ROLE_ARN     — IAM role ARN for OIDC assumption
+#                             e.g. arn:aws:iam::<account>:role/github-deploy-<env>
+#
+# OIDC trust policy the IAM role needs (one-time setup):
+#   aws iam create-role --role-name github-deploy-<env> \
+#     --assume-role-policy-document file://oidc-trust.json
+#   # trust.json: subject = repo:<org>/<repo>:environment:<env>
+#
+# CDK bootstrap (one-time per account/region, already idempotent):
+#   npx cdk bootstrap aws://<account>/ap-south-1
+# ──────────────────────────────────────────────────────────────────────────────
+
+name: Deploy — Lambda (dev / staging / prod)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Re-deploy when server code, infra, or this workflow changes.
+      # Avoids burning deploy minutes on Flutter/kokoro-only commits.
+      - 'server/**'
+      - 'infra/**'
+      - '.github/workflows/deploy.yml'
+
+  # Allow a manual re-run targeting a specific environment without a code push.
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment (deploys up to and including this env)'
+        required: true
+        default: 'dev'
+        type: choice
+        options: [dev, staging, prod]
+
+# ── Concurrency ───────────────────────────────────────────────────────────────
+# NEVER cancel in-progress deploy runs — cancelling mid-CDK-deploy can leave
+# the stack in a partial/broken state.  Queue instead.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+# ── Global env ────────────────────────────────────────────────────────────────
+env:
+  NODE_VERSION: '20'
+  AWS_REGION: ap-south-1
+  # CDK_DEFAULT_REGION is picked up by the CDK bin; matches the region above.
+  CDK_DEFAULT_REGION: ap-south-1
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE 1 — Fast Feedback (parallel, <2 min each)
+# Cheapest checks first; fail fast before spinning up test/deploy runners.
+# ══════════════════════════════════════════════════════════════════════════════
+
+jobs:
+  # ── 1a. TypeScript type-check — NestJS server ─────────────────────────────
+  typecheck-server:
+    name: TypeCheck — Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: TypeScript type check (no emit)
+        run: npx tsc --noEmit
+        working-directory: server
+
+  # ── 1b. TypeScript type-check — CDK infra ────────────────────────────────
+  typecheck-infra:
+    name: TypeCheck — Infra (CDK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install infra dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: TypeScript type check (no emit)
+        run: npx tsc --noEmit
+        working-directory: infra
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # STAGE 2 — Tests
+  # Unit → E2E (sequential, fail fast).  CDK tests run in parallel with unit.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # ── 2a. Backend unit tests ────────────────────────────────────────────────
+  test-unit:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [typecheck-server]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Run unit tests
+        run: npm run test:unit
+        working-directory: server
+        env:
+          # Stub values — tests mock all AWS/external clients
+          JWT_SECRET: test-jwt-secret-for-ci
+          GEMINI_API_KEY: test-gemini-key
+          AWS_S3_BUCKET: test-bucket
+          AWS_REGION: ap-south-1
+          AWS_ACCESS_KEY_ID: test-key-id
+          AWS_SECRET_ACCESS_KEY: test-secret-key
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage-deploy-${{ github.run_id }}
+          path: server/coverage/
+          retention-days: 14
+
+  # ── 2b. Backend E2E tests (runs after unit to save minutes on failure) ────
+  test-e2e:
+    name: Backend E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [test-unit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        working-directory: server
+        env:
+          JWT_SECRET: test-jwt-secret-for-ci
+          GEMINI_API_KEY: test-gemini-key
+          AWS_S3_BUCKET: test-bucket
+          AWS_REGION: ap-south-1
+          AWS_ACCESS_KEY_ID: test-key-id
+          AWS_SECRET_ACCESS_KEY: test-secret-key
+          # In-memory SQLite so E2E tests need no filesystem state
+          DATABASE_PATH: ':memory:'
+
+  # ── 2c. CDK infrastructure unit tests (parallel with backend tests) ───────
+  test-infra:
+    name: CDK Infrastructure Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [typecheck-infra]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install infra dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Run CDK stack tests
+        run: npm test
+        working-directory: infra
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # STAGE 3 — CDK Synth (validates CloudFormation templates for all stages)
+  #
+  # NodejsFunction bundles via esbuild at synth time → server/node_modules
+  # must be installed so esbuild can resolve @nestjs/* and other imports.
+  #
+  # Uses a matrix to validate dev / staging / prod templates in parallel.
+  # CDK_DEFAULT_ACCOUNT is intentionally not set — CDK falls back to
+  # { "Ref": "AWS::AccountId" } pseudo-parameters, which is correct for
+  # template validation without real AWS credentials.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  cdk-synth:
+    name: CDK Synth — ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test-e2e, test-infra]
+    strategy:
+      fail-fast: false          # validate all envs even if one fails
+      matrix:
+        env: [dev, staging, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          # Install both lockfiles; setup-node caches both dirs
+          cache-dependency-path: |
+            infra/package-lock.json
+            server/package-lock.json
+
+      - name: Install infra dependencies
+        run: npm ci
+        working-directory: infra
+
+      # Server node_modules are required by NodejsFunction/esbuild during synth
+      - name: Install server dependencies (for esbuild bundling)
+        run: npm ci
+        working-directory: server
+
+      - name: CDK synth — ${{ matrix.env }} (validates CloudFormation template)
+        run: npx cdk synth --context env=${{ matrix.env }} --quiet
+        working-directory: infra
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # STAGE 4 — Deploy dev
+  #
+  # Auto-deploys on every qualifying push to main.
+  # Uses OIDC (no long-lived AWS credentials stored in GitHub).
+  # Post-deploy smoke test retries 3× to handle Lambda cold starts.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  deploy-dev:
+    name: Deploy — dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [cdk-synth]
+    # Skip deployment for manual workflow_dispatch targeting only dev
+    # (deployment proceeds normally for push events and workflow_dispatch prod/staging)
+    environment: dev
+    permissions:
+      id-token: write   # required for OIDC JWT
+      contents: read
+    outputs:
+      api_url: ${{ steps.extract-url.outputs.api_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            infra/package-lock.json
+            server/package-lock.json
+
+      - name: Install infra dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Install server dependencies (for esbuild bundling)
+        run: npm ci
+        working-directory: server
+
+      # ── AWS authentication via OIDC (no stored secret keys) ─────────────
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # CDK bootstrap is idempotent — safe to run on every deploy.
+      # Skips automatically if the bootstrap stack is already up to date.
+      - name: CDK bootstrap (idempotent)
+        run: |
+          npx cdk bootstrap \
+            aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }} \
+            --context env=dev
+        working-directory: infra
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: CDK deploy — dev
+        run: |
+          npx cdk deploy InstructorStack-dev \
+            --context env=dev \
+            --require-approval never \
+            --outputs-file cdk-outputs-dev.json \
+            --progress events
+        working-directory: infra
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Extract API URL from CDK outputs
+        id: extract-url
+        run: |
+          API_URL=$(jq -r '."InstructorStack-dev".ApiUrl' infra/cdk-outputs-dev.json)
+          echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Dev API URL::${API_URL}"
+
+      # ── Post-deployment smoke test ─────────────────────────────────────
+      # Retries 3× with 15 s delay to accommodate Lambda cold starts.
+      - name: Smoke test — GET /api/health → 200
+        run: |
+          API_URL="${{ steps.extract-url.outputs.api_url }}"
+          HEALTH_URL="${API_URL}/api/health"
+          echo "Smoke testing: ${HEALTH_URL}"
+
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /tmp/health-response.json \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "${HEALTH_URL}" || echo "000")
+
+            echo "Attempt ${attempt}/3 → HTTP ${HTTP_STATUS}"
+
+            if [ "${HTTP_STATUS}" = "200" ]; then
+              echo "✅ Smoke test passed (dev)"
+              cat /tmp/health-response.json || true
+              exit 0
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 15 s..."
+              sleep 15
+            fi
+          done
+
+          echo "❌ Smoke test FAILED — /api/health returned HTTP ${HTTP_STATUS}"
+          cat /tmp/health-response.json || true
+          exit 1
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # STAGE 5 — Deploy staging (auto, after dev succeeds)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  deploy-staging:
+    name: Deploy — staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [deploy-dev]
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      api_url: ${{ steps.extract-url.outputs.api_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            infra/package-lock.json
+            server/package-lock.json
+
+      - name: Install infra dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Install server dependencies (for esbuild bundling)
+        run: npm ci
+        working-directory: server
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK deploy — staging
+        run: |
+          npx cdk deploy InstructorStack-staging \
+            --context env=staging \
+            --require-approval never \
+            --outputs-file cdk-outputs-staging.json \
+            --progress events
+        working-directory: infra
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Extract API URL from CDK outputs
+        id: extract-url
+        run: |
+          API_URL=$(jq -r '."InstructorStack-staging".ApiUrl' infra/cdk-outputs-staging.json)
+          echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Staging API URL::${API_URL}"
+
+      - name: Smoke test — GET /api/health → 200
+        run: |
+          API_URL="${{ steps.extract-url.outputs.api_url }}"
+          HEALTH_URL="${API_URL}/api/health"
+          echo "Smoke testing: ${HEALTH_URL}"
+
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /tmp/health-response.json \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "${HEALTH_URL}" || echo "000")
+
+            echo "Attempt ${attempt}/3 → HTTP ${HTTP_STATUS}"
+
+            if [ "${HTTP_STATUS}" = "200" ]; then
+              echo "✅ Smoke test passed (staging)"
+              cat /tmp/health-response.json || true
+              exit 0
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 15 s..."
+              sleep 15
+            fi
+          done
+
+          echo "❌ Smoke test FAILED — /api/health returned HTTP ${HTTP_STATUS}"
+          cat /tmp/health-response.json || true
+          exit 1
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # STAGE 6 — Deploy prod (MANUAL APPROVAL REQUIRED)
+  #
+  # Configure required reviewers in:
+  #   GitHub repo → Settings → Environments → prod → Required reviewers
+  #
+  # The job will pause here until an approver clicks "Approve and deploy"
+  # in the Actions UI.  Times out after 30 days if not approved.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  deploy-prod:
+    name: Deploy — prod (manual approval)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [deploy-staging]
+    environment: prod   # ← protected environment; requires reviewer approval
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      api_url: ${{ steps.extract-url.outputs.api_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            infra/package-lock.json
+            server/package-lock.json
+
+      - name: Install infra dependencies
+        run: npm ci
+        working-directory: infra
+
+      - name: Install server dependencies (for esbuild bundling)
+        run: npm ci
+        working-directory: server
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK deploy — prod
+        run: |
+          npx cdk deploy InstructorStack-prod \
+            --context env=prod \
+            --require-approval never \
+            --outputs-file cdk-outputs-prod.json \
+            --progress events
+        working-directory: infra
+        env:
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Extract API URL from CDK outputs
+        id: extract-url
+        run: |
+          API_URL=$(jq -r '."InstructorStack-prod".ApiUrl' infra/cdk-outputs-prod.json)
+          echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Production API URL::${API_URL}"
+
+      - name: Smoke test — GET /api/health → 200
+        run: |
+          API_URL="${{ steps.extract-url.outputs.api_url }}"
+          HEALTH_URL="${API_URL}/api/health"
+          echo "Smoke testing: ${HEALTH_URL}"
+
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /tmp/health-response.json \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "${HEALTH_URL}" || echo "000")
+
+            echo "Attempt ${attempt}/3 → HTTP ${HTTP_STATUS}"
+
+            if [ "${HTTP_STATUS}" = "200" ]; then
+              echo "✅ Smoke test passed (prod)"
+              cat /tmp/health-response.json || true
+              exit 0
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 15 s..."
+              sleep 15
+            fi
+          done
+
+          echo "❌ Smoke test FAILED — /api/health returned HTTP ${HTTP_STATUS}"
+          cat /tmp/health-response.json || true
+          exit 1

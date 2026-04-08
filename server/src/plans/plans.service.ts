@@ -1,14 +1,14 @@
 import {
-  HttpException,
-  HttpStatus,
   Injectable,
   Logger,
+  HttpException,
+  HttpStatus,
   UnprocessableEntityException,
   ServiceUnavailableException,
   BadGatewayException,
 } from '@nestjs/common';
 import { validatePlan } from './validators/plan.validator';
-import { RateLimitService } from '../redis/rate-limit.service';
+import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ Keep plans practical, well-structured, and achievable.`;
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
 
-  constructor(private readonly rateLimit: RateLimitService) {}
+  constructor(private readonly rateLimit: DynamoDBRateLimitService) {}
 
   async generatePlan(
     prompt: string,
@@ -118,7 +118,9 @@ export class PlansService {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new ServiceUnavailableException('Plan generation service is not configured');
+      throw new ServiceUnavailableException(
+        'GEMINI_API_KEY is not set — plan generation is not configured',
+      );
     }
 
     const userPrompt = category

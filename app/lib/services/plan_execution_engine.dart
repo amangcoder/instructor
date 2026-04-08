@@ -34,6 +34,7 @@ library plan_execution_engine;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -89,9 +90,13 @@ class ExecutionState {
     required this.status,
     this.repeatCounters = const {},
     this.ambientPositionMs = 0,
+    this.ambientAssetKey,
     this.currentStepText,
     this.nextStepText,
     this.currentStepType,
+    this.currentStepDuration = Duration.zero,
+    this.nextStepType,
+    this.stepPhase = StepPhase.active,
   });
 
   /// The plan currently being executed.
@@ -112,6 +117,13 @@ class ExecutionState {
   /// Ambient audio position in milliseconds (for crash recovery seek).
   final int ambientPositionMs;
 
+  /// The asset key of the ambient track currently playing, or `null`.
+  ///
+  /// Populated from [AudioEngine.currentAmbientAssetKey] in [_emitState] and
+  /// [getRecoverableSession]. Surfaces the ambient asset key to UI consumers
+  /// and lock screen handlers, and aids crash-recovery debugging.
+  final String? ambientAssetKey;
+
   /// User-facing display text for the currently executing flattened step.
   ///
   /// Populated from the engine's internal flattened step list so that plans
@@ -125,6 +137,26 @@ class ExecutionState {
   /// The [StepType] of the currently executing flattened step (for UI colour
   /// coding). Never [StepType.repeat] since repeat blocks are expanded.
   final StepType? currentStepType;
+
+  /// Full duration of the current step.
+  ///
+  /// For [WaitStep] this is the complete wait duration (not the remaining
+  /// time). For all other step types it is [PlanStep.estimatedStepDuration].
+  /// Used by [StepCountdownTimer] to compute a stable arc fraction from
+  /// `timeRemaining / currentStepDuration`.
+  final Duration currentStepDuration;
+
+  /// The [StepType] of the *next* flattened step, or `null` when the current
+  /// step is the last one. Used by [NextUpPreview] to display the correct
+  /// step-type icon and colour.
+  final StepType? nextStepType;
+
+  /// Sub-phase within the current step. Defaults to [StepPhase.active].
+  ///
+  /// Set to [StepPhase.loadingTts] while a TTS cache miss is being resolved
+  /// via the backend API, and to [StepPhase.ambientDisplay] during the
+  /// 2-second ambient info pause after a [PlayStep] starts.
+  final StepPhase stepPhase;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -222,6 +254,9 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   /// Current lifecycle status.
   ExecutionStatus _status = ExecutionStatus.idle;
 
+  /// Sub-phase within the currently executing step (for UI loading states).
+  StepPhase _currentStepPhase = StepPhase.active;
+
   // ── Wait step tracking ────────────────────────────────────────────────────
 
   /// The timer that fires when the current [WaitStep] elapses.
@@ -256,6 +291,23 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
 
   /// Set to [true] to break the execution loop (pause / stop / skip).
   bool _cancelled = false;
+
+  /// Completed by [_cancelCurrentStep] to unblock any `Future.any` in
+  /// [_executeSayStep] that is waiting on a long-running async op (e.g. an
+  /// HTTP TTS call).  A new completer is created at the start of each step.
+  Completer<void>? _stepCancelCompleter;
+
+  // ── Loop guard mutex ───────────────────────────────────────────────────────
+
+  /// True while [_runFromCurrentStep] is executing.
+  bool _loopRunning = false;
+
+  /// Completed (and set to null) when the current [_runFromCurrentStep]
+  /// invocation exits via its try/finally block. Awaited by [skipForward],
+  /// [skipBackward], and [resume] before resetting [_cancelled] and starting a
+  /// new loop, ensuring that long-running async ops (like [renderTTS] over the
+  /// network) from the old loop cannot continue after the new loop starts.
+  Completer<void>? _loopDoneCompleter;
 
   // ── State stream ──────────────────────────────────────────────────────────
 
@@ -312,6 +364,13 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       _waitStepStartTime = null;
     }
 
+    // Capture ambient state BEFORE stopAll() clears it — stopAll() sets
+    // currentAmbientPosition/currentAmbientAssetKey to null, so we must
+    // snapshot them here for crash recovery / resume.
+    final ambientPositionMs =
+        _audioEngine.currentAmbientPosition?.inMilliseconds ?? 0;
+    final ambientAssetKey = _audioEngine.currentAmbientAssetKey;
+
     _cancelled = true;
     _status = ExecutionStatus.paused;
 
@@ -325,27 +384,61 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     // Stop all audio — this also unblocks any pending playVoice() awaiter.
     await _audioEngine.stopAll();
 
+    // Stop any in-progress platform TTS speech (speakDirect fallback).
+    // Without this, platform TTS can continue speaking for up to 30 s after
+    // the user pauses when _executeSayStep fell back to _speakDirectFallback.
+    await _ttsService.stopSpeaking();
+
     _emitState();
-    await _persistState();
+    await _persistState(
+      ambientPositionMsOverride: ambientPositionMs,
+      ambientAssetKeyOverride: ambientAssetKey,
+    );
   }
 
   @override
   Future<void> resume() async {
     if (_status != ExecutionStatus.paused) return;
 
+    // Wait for any in-progress execution loop to exit before starting a new one.
+    // This ensures the old loop's long-running async ops (e.g. renderTTS) have
+    // fully unwound before we reset _cancelled and launch a new loop.
+    await _loopDoneCompleter?.future;
+
     _cancelled = false;
     _status = ExecutionStatus.running;
 
-    // Seek ambient audio to the position it was at when we paused, so that
-    // the listener doesn't notice a gap on resume.
+    // Restore the ambient track that was playing when we paused, then seek
+    // to the persisted position so the listener hears a seamless resume.
     final rows = await (_db.select(_db.executionStateTable)
           ..where((t) => t.planId.equals(_currentPlan!.id))
           ..limit(1))
         .get();
 
-    if (rows.isNotEmpty && rows.first.ambientPositionMs > 0) {
-      await _audioEngine
-          .seekAmbient(Duration(milliseconds: rows.first.ambientPositionMs));
+    if (rows.isNotEmpty) {
+      final row = rows.first;
+      if (row.ambientAssetKey != null) {
+        // Restart the ambient track that was playing before the pause.
+        try {
+          await _audioEngine.startAmbient(row.ambientAssetKey!);
+          if (row.ambientPositionMs > 0) {
+            await _audioEngine
+                .seekAmbient(Duration(milliseconds: row.ambientPositionMs));
+          }
+        } catch (e) {
+          debugPrint(
+            'PlanExecutionEngine: ambient restore on resume failed: $e',
+          );
+        }
+      } else if (row.ambientPositionMs > 0) {
+        // Legacy rows without assetKey: best-effort seek only.
+        try {
+          await _audioEngine
+              .seekAmbient(Duration(milliseconds: row.ambientPositionMs));
+        } catch (e) {
+          debugPrint('PlanExecutionEngine: seekAmbient on resume failed: $e');
+        }
+      }
     }
 
     _emitState();
@@ -357,6 +450,17 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   Future<void> skipForward() async {
     if (_status == ExecutionStatus.idle) return;
     await _cancelCurrentStep();
+    // Stop audio BEFORE resetting _cancelled so the old execution loop's
+    // pending playVoice() is unblocked and can observe _cancelled == true
+    // and exit cleanly — preventing two concurrent execution loops.
+    await _audioEngine.stopAll();
+
+    // Wait for the old execution loop to exit completely.
+    // _cancelCurrentStep() sets _cancelled=true and yields once with
+    // Future.delayed(Duration.zero), which is insufficient when renderTTS is
+    // awaiting a long-running network call. This mutex await serialises the
+    // old loop's exit with the new loop's start.
+    await _loopDoneCompleter?.future;
 
     if (_currentStepIndex < _flatSteps.length - 1) {
       _currentStepIndex++;
@@ -376,6 +480,17 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   Future<void> skipBackward() async {
     if (_status == ExecutionStatus.idle) return;
     await _cancelCurrentStep();
+    // Stop audio BEFORE resetting _cancelled so the old execution loop's
+    // pending playVoice() is unblocked and can observe _cancelled == true
+    // and exit cleanly — preventing two concurrent execution loops.
+    await _audioEngine.stopAll();
+
+    // Wait for the old execution loop to exit completely.
+    // _cancelCurrentStep() sets _cancelled=true and yields once with
+    // Future.delayed(Duration.zero), which is insufficient when renderTTS is
+    // awaiting a long-running network call. This mutex await serialises the
+    // old loop's exit with the new loop's start.
+    await _loopDoneCompleter?.future;
 
     if (_currentStepIndex > 0) {
       _currentStepIndex--;
@@ -400,6 +515,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
 
     await Future.wait([
       _audioEngine.stopAll(),
+      _ttsService.stopSpeaking(),
       _notificationService.cancelAll(),
     ]);
 
@@ -489,12 +605,17 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       status: ExecutionStatus.paused,
       repeatCounters: repeatCounters,
       ambientPositionMs: row.ambientPositionMs,
+      ambientAssetKey: row.ambientAssetKey,
       currentStepText: currentFlatStep != null
           ? _stepDisplayText(currentFlatStep.step)
           : null,
       nextStepText:
           nextFlatStep != null ? _stepDisplayText(nextFlatStep.step) : null,
       currentStepType: currentFlatStep?.step.type,
+      currentStepDuration: currentFlatStep != null
+          ? _computeStepDuration(currentFlatStep.step)
+          : Duration.zero,
+      nextStepType: nextFlatStep?.step.type,
     );
   }
 
@@ -504,26 +625,41 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   ///
   /// Exits when the plan completes, [_cancelled] is set to true, or an
   /// unrecoverable error occurs.
+  ///
+  /// A try/finally block sets [_loopRunning] on entry and completes
+  /// [_loopDoneCompleter] on exit, forming the loop guard mutex. This ensures
+  /// that callers awaiting [_loopDoneCompleter] are unblocked even when the
+  /// loop exits via an exception.
   Future<void> _runFromCurrentStep() async {
-    while (_currentStepIndex < _flatSteps.length && !_cancelled) {
-      final flatStep = _flatSteps[_currentStepIndex];
+    _loopRunning = true;
+    _loopDoneCompleter = Completer<void>();
+    try {
+      while (_currentStepIndex < _flatSteps.length && !_cancelled) {
+        final flatStep = _flatSteps[_currentStepIndex];
 
-      await _executeStep(flatStep);
+        await _executeStep(flatStep);
 
-      if (_cancelled) break;
+        if (_cancelled) break;
 
-      _currentStepIndex++;
+        _currentStepIndex++;
 
-      // Persist and emit before the next step (unless we just advanced past
-      // the last step, in which case _complete() handles the final state).
-      if (_currentStepIndex < _flatSteps.length) {
-        _emitState();
-        await _persistState();
+        // Persist and emit before the next step (unless we just advanced past
+        // the last step, in which case _complete() handles the final state).
+        if (_currentStepIndex < _flatSteps.length) {
+          _emitState();
+          await _persistState();
+        }
       }
-    }
 
-    if (!_cancelled && _status == ExecutionStatus.running) {
-      await _complete();
+      if (!_cancelled && _status == ExecutionStatus.running) {
+        await _complete();
+      }
+    } finally {
+      _loopRunning = false;
+      if (!_loopDoneCompleter!.isCompleted) {
+        _loopDoneCompleter!.complete();
+      }
+      _loopDoneCompleter = null;
     }
   }
 
@@ -576,86 +712,187 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       debugPrint('PlanExecutionEngine: duckAmbient failed: $e');
     }
 
-    if (_cancelled) return;
+    // Single try/finally guarantees restoreAmbient on every exit path.
+    // playVoice internally restores ambient on success; we track this to
+    // avoid a redundant second restore in the happy path.
+    // Create a fresh cancel signal for this step so that pause/stop/skip can
+    // unblock a long-running renderTTS HTTP call immediately.
+    _stepCancelCompleter = Completer<void>();
 
-    // Resolve the cached audio file path (or render on a miss).
-    String? path;
+    var voicePlayedSuccessfully = false;
     try {
-      path = await _ttsService.renderTTS(text: text, voiceId: voiceId);
-      debugPrint('PlanExecutionEngine: [SAY] renderTTS succeeded — path=$path');
-    } on TtsFallbackException {
-      // Text was already spoken by the TTS service's platform TTS fallback
-      // (e.g. backend offline / timeout). Just restore ambient and move on.
-      debugPrint('PlanExecutionEngine: [SAY] text spoken via platform TTS fallback');
+      if (_cancelled) return;
+
+      // Signal UI: TTS is loading (visible on cache miss, instant on hit).
+      _currentStepPhase = StepPhase.loadingTts;
+      _emitState();
+
+      // Resolve the cached audio file path (or render on a miss).
+      // Future.any races the TTS call against the cancel signal so that
+      // pause/stop/skip unblock immediately instead of waiting for the HTTP
+      // timeout (up to 60 s).
+      String? path;
       try {
-        await _audioEngine.restoreAmbient();
-      } catch (_) {}
-      return;
-    } on TtsApiException catch (e) {
-      if (e.statusCode == 401) {
-        // Session expired — logout already triggered, stop the plan.
-        debugPrint('PlanExecutionEngine: auth expired, stopping plan');
-        await stop();
-        return;
-      }
-      debugPrint('PlanExecutionEngine: TTS API error for "$text": $e');
-      // Last resort: speak directly through the device speaker.
-      debugPrint('PlanExecutionEngine: [SAY] falling back to speakDirect (TtsApiException)');
-      path = await _speakDirectFallback(text);
-      if (path == null) {
-        debugPrint('PlanExecutionEngine: [SAY] speakDirect fallback returned null, skipping playVoice');
-        return;
-      }
-    } catch (e) {
-      debugPrint('PlanExecutionEngine: TTS render failed for "$text": $e');
-      // Last resort: speak directly through the device speaker.
-      debugPrint('PlanExecutionEngine: [SAY] falling back to speakDirect (${e.runtimeType})');
-      path = await _speakDirectFallback(text);
-      if (path == null) {
-        debugPrint('PlanExecutionEngine: [SAY] speakDirect fallback returned null, skipping playVoice');
-        return;
-      }
-    }
+        // Start TTS rendering. If the step is cancelled while the network
+        // call is in-flight, we still wait for renderTTS to finish so that
+        // errors (SocketException, timeout, etc.) are surfaced and the
+        // fallback chain can run. Without this, cancellation would swallow
+        // the TTS error and skip the fallback entirely.
+        final ttsFuture =
+            _ttsService.renderTTS(text: text, voiceId: voiceId);
 
-    if (_cancelled) return;
-
-    // Read the user's preferred speech rate before playback.
-    final rateRow = await (_db.select(_db.appSettingsTable)
-          ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
-        .getSingleOrNull();
-    final speed = double.tryParse(rateRow?.value ?? '') ?? 1.0;
-
-    // Play voice and wait for completion. AudioEngineImpl.playVoice awaits
-    // completion and automatically restores ambient volume when done.
-    debugPrint('PlanExecutionEngine: [SAY] playing voice — path=$path, speed=$speed');
-    try {
-      await _audioEngine.playVoice(path, speed: speed);
-      debugPrint('PlanExecutionEngine: [SAY] playVoice completed');
-    } catch (e) {
-      debugPrint('PlanExecutionEngine: playVoice failed: $e');
-      // Fallback to platform TTS when audio file playback fails.
-      debugPrint('PlanExecutionEngine: [SAY] playVoice failed, trying speakDirect');
-      try {
-        await _ttsService.speakDirect(text, speed: speed);
-        debugPrint('PlanExecutionEngine: [SAY] speakDirect completed');
-      } catch (speakError) {
-        debugPrint(
-          'PlanExecutionEngine: speakDirect fallback also failed: $speakError',
+        // Also listen for the cancel signal so we know if pause/stop/skip
+        // was requested, but do NOT let it short-circuit error handling.
+        var cancelled = false;
+        unawaited(
+          _stepCancelCompleter!.future.then((_) {
+            cancelled = true;
+          }),
         );
+
+        String ttsResult;
+        try {
+          debugPrint('PlanExecutionEngine: [SAY] awaiting ttsFuture…');
+          ttsResult = await ttsFuture;
+          debugPrint('PlanExecutionEngine: [SAY] ttsFuture resolved OK');
+        } catch (e) {
+          debugPrint('PlanExecutionEngine: [SAY] ttsFuture threw ${e.runtimeType}: $e');
+          // debugger(message: 'ttsFuture THREW ${e.runtimeType} — cancelled=$_cancelled');
+          rethrow;
+        }
+
+        if (_cancelled || cancelled) return;
+        path = ttsResult;
+        debugPrint('PlanExecutionEngine: [SAY] renderTTS succeeded — path=$path');
+      } on TtsFallbackException catch (e) {
+        // debugger(message: 'CATCH TtsFallbackException — cancelled=$_cancelled — $e');
+        if (_cancelled) return;
+        // Backend offline/timeout — render via platform TTS to a file and
+        // play through the audio engine. Does NOT cache in the TTS DB.
+        debugPrint('PlanExecutionEngine: [SAY] backend unavailable, using platform TTS file fallback');
+        // debugger(message: 'FALLBACK: TtsFallbackException — $e');
+        _currentStepPhase = StepPhase.active;
+        _emitState();
+        voicePlayedSuccessfully = await _platformTtsFallback(text);
+        return;
+      } on TtsApiException catch (e) {
+        // debugger(message: 'CATCH TtsApiException — cancelled=$_cancelled — $e');
+        if (_cancelled) return;
+        if (e.statusCode == 401) {
+          debugPrint('PlanExecutionEngine: auth expired, stopping plan');
+          await stop();
+          return;
+        }
+        debugPrint('PlanExecutionEngine: TTS API error for "$text": $e');
+        // debugger(message: 'FALLBACK: TtsApiException status=${e.statusCode} — $e');
+        _currentStepPhase = StepPhase.active;
+        _emitState();
+        voicePlayedSuccessfully = await _platformTtsFallback(text);
+        return;
+      } catch (e) {
+        // debugger(message: 'CATCH generic — cancelled=$_cancelled — ${e.runtimeType}: $e');
+        if (_cancelled) return;
+        debugPrint('PlanExecutionEngine: TTS render failed for "$text": $e');
+        _currentStepPhase = StepPhase.active;
+        _emitState();
+        voicePlayedSuccessfully = await _platformTtsFallback(text);
+        return;
       }
-      // Restore ambient in case playVoice failed before its internal
-      // restore handler could run (e.g. setFilePath threw).
+
+      if (_cancelled) return;
+
+      // TTS file is ready — switch back to active phase before playback.
+      _currentStepPhase = StepPhase.active;
+      _emitState();
+
+      // Read the user's preferred speech rate before playback.
+      final rateRow = await (_db.select(_db.appSettingsTable)
+            ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
+          .getSingleOrNull();
+      final speed = double.tryParse(rateRow?.value ?? '') ?? 1.0;
+
+      // Play voice and wait for completion. AudioEngineImpl.playVoice awaits
+      // completion and automatically restores ambient volume when done.
+      debugPrint('PlanExecutionEngine: [SAY] playing voice — path=$path, speed=$speed');
+      // debugger(message: 'BEFORE playVoice — path=$path, speed=$speed, cancelled=$_cancelled');
       try {
-        await _audioEngine.restoreAmbient();
-      } catch (_) {}
+        await _audioEngine.playVoice(path, speed: speed);
+        debugPrint('PlanExecutionEngine: [SAY] playVoice completed');
+        voicePlayedSuccessfully = true;
+      } catch (e) {
+        debugPrint('PlanExecutionEngine: playVoice failed: $e');
+        if (e is StoppedByUserException || _cancelled) {
+          return;
+        }
+        // Fallback to platform TTS file when audio file playback fails.
+        debugPrint('PlanExecutionEngine: [SAY] playVoice failed, trying platform TTS file fallback');
+        voicePlayedSuccessfully = await _platformTtsFallback(text);
+      }
+    } finally {
+      // Always clear the loading phase and notify the UI — without this the
+      // Now Playing screen would stay stuck on the spinner if any code path
+      // above returns early (e.g. _cancelled, fallback, error).
+      if (_currentStepPhase != StepPhase.active) {
+        _currentStepPhase = StepPhase.active;
+        _emitState();
+      }
+      // Guarantee ambient is restored on every exit path.  Skip only when
+      // playVoice already handled restoration internally (happy path).
+      if (!voicePlayedSuccessfully) {
+        try {
+          await _audioEngine.restoreAmbient();
+        } catch (e) {
+          debugPrint(
+            'PlanExecutionEngine: restoreAmbient failed (non-fatal): $e',
+          );
+        }
+      }
     }
     debugPrint('PlanExecutionEngine: [SAY] step done');
   }
 
-  /// Attempts [speakDirect] as a last-resort fallback and restores ambient.
-  /// Returns `null` to signal the caller should return (skip playVoice).
-  Future<String?> _speakDirectFallback(String text) async {
+  /// Renders [text] to a file via platform TTS and plays it through the audio
+  /// engine. Does NOT cache the result in the TTS cache database.
+  ///
+  /// Returns `true` if the voice was played successfully through the audio
+  /// engine (meaning ambient was already restored by playVoice internally).
+  ///
+  /// Falls back to [_speakDirectFallback] if file synthesis or playback fails.
+  Future<bool> _platformTtsFallback(String text) async {
+    if (_cancelled) return false;
+    debugPrint('PlanExecutionEngine: [FALLBACK] platformTts starting — text="${text.length > 50 ? '${text.substring(0, 50)}…' : text}"');
+    // debugger(message: 'PLATFORM TTS FALLBACK entry — text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}"');
+    try {
+      final path = await _ttsService.renderWithPlatformTTS(text);
+      if (_cancelled) return false;
+      final rateRow = await (_db.select(_db.appSettingsTable)
+            ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
+          .getSingleOrNull();
+      final speed = double.tryParse(rateRow?.value ?? '') ?? 1.0;
+      debugPrint('PlanExecutionEngine: [FALLBACK] playing platform TTS file — path=$path, speed=$speed');
+      await _audioEngine.playVoice(path, speed: speed);
+      debugPrint('PlanExecutionEngine: [FALLBACK] platform TTS playback completed');
+      return true;
+    } catch (e) {
+      debugPrint('PlanExecutionEngine: platform TTS file fallback failed: $e');
+      // debugger(message: 'PLATFORM TTS FAILED — ${e.runtimeType}: $e → falling to speakDirect');
+      if (e is StoppedByUserException || _cancelled) return false;
+      // Last resort: speak directly through the device speaker.
+      await _speakDirectFallback(text);
+      return false;
+    }
+  }
+
+  /// Speaks [text] directly via [TTSService.speakDirect] as a last-resort
+  /// fallback when both backend TTS and platform TTS file synthesis fail.
+  ///
+  /// Ambient restoration is handled by the caller's try/finally block in
+  /// [_executeSayStep], so this method intentionally does NOT call
+  /// [AudioEngine.restoreAmbient].
+  Future<void> _speakDirectFallback(String text) async {
+    if (_cancelled) return;
     debugPrint('PlanExecutionEngine: [FALLBACK] speakDirect starting — text="${text.length > 50 ? '${text.substring(0, 50)}…' : text}"');
+    // debugger(message: 'SPEAK DIRECT (last resort) entry');
     try {
       final rateRow = await (_db.select(_db.appSettingsTable)
             ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
@@ -669,11 +906,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
         'PlanExecutionEngine: speakDirect also failed: $speakError',
       );
     }
-    try {
-      await _audioEngine.restoreAmbient();
-    } catch (_) {}
-    debugPrint('PlanExecutionEngine: [FALLBACK] done, returning null');
-    return null;
+    debugPrint('PlanExecutionEngine: [FALLBACK] done');
   }
 
   Future<void> _executeNotifyStep({
@@ -709,6 +942,32 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       }
     } catch (e) {
       debugPrint('PlanExecutionEngine: PlayStep error: $e');
+    }
+
+    // Hold on this step for 2 seconds so the UI displays the ambient track
+    // info before advancing. Only for looping ambient tracks — one-shot effects
+    // (bell, chime) don't need a visual pause. Uses the same
+    // _waitCompleter/_waitTimer pattern as _executeWaitStep so pause/skip can
+    // interrupt the display period.
+    if (_cancelled || !loop) return;
+
+    _currentStepPhase = StepPhase.ambientDisplay;
+    _emitState();
+
+    try {
+      _waitCompleter = Completer<void>();
+      _waitTimer = Timer(const Duration(seconds: 2), () {
+        if (!(_waitCompleter?.isCompleted ?? true)) {
+          _waitCompleter!.complete();
+        }
+      });
+
+      await _waitCompleter!.future;
+      _waitCompleter = null;
+      _waitTimer?.cancel();
+      _waitTimer = null;
+    } finally {
+      _currentStepPhase = StepPhase.active;
     }
   }
 
@@ -837,6 +1096,8 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   /// Sets [_cancelled], completes the [_waitCompleter] (unblocking a WaitStep),
   /// and gives the event loop a turn so the step's cancellation check fires.
   Future<void> _cancelCurrentStep() async {
+    debugPrint('PlanExecutionEngine: _cancelCurrentStep() called');
+    // debugger(message: '_cancelCurrentStep called — check call stack');
     // Capture elapsed time within a WaitStep before cancelling.
     if (_waitStepStartTime != null) {
       _waitStepElapsedMs +=
@@ -845,6 +1106,13 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     }
 
     _cancelled = true;
+
+    // Unblock any Future.any in _executeSayStep waiting on renderTTS / platform
+    // TTS so the old loop can exit promptly instead of hanging until the HTTP
+    // timeout fires.
+    if (_stepCancelCompleter != null && !_stepCancelCompleter!.isCompleted) {
+      _stepCancelCompleter!.complete();
+    }
 
     _waitCompleter?.complete();
     _waitCompleter = null;
@@ -889,11 +1157,17 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       repeatCounters: flatStep?.repeatCounters ?? const {},
       ambientPositionMs:
           _audioEngine.currentAmbientPosition?.inMilliseconds ?? 0,
+      ambientAssetKey: _audioEngine.currentAmbientAssetKey,
       currentStepText:
           flatStep != null ? _stepDisplayText(flatStep.step) : null,
       nextStepText:
           nextFlatStep != null ? _stepDisplayText(nextFlatStep.step) : null,
       currentStepType: flatStep?.step.type,
+      currentStepDuration: flatStep != null
+          ? _computeStepDuration(flatStep.step)
+          : Duration.zero,
+      nextStepType: nextFlatStep?.step.type,
+      stepPhase: _currentStepPhase,
     );
     _lastState = state;
     _stateController.add(state);
@@ -920,12 +1194,30 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     return step.estimatedStepDuration;
   }
 
+  /// Returns the full duration of [step] for use as [ExecutionState.currentStepDuration].
+  ///
+  /// For [WaitStep] this is the total wait duration (not remaining time) so
+  /// that [StepCountdownTimer] can compute a stable arc from
+  /// `timeRemaining / currentStepDuration`.
+  /// For all other leaf step types the value is [PlanStep.estimatedStepDuration].
+  Duration _computeStepDuration(PlanStep step) {
+    if (step is WaitStep) return step.duration;
+    return step.estimatedStepDuration;
+  }
+
   /// Writes the current execution state to the [ExecutionStateTable].
   ///
   /// Uses DELETE + INSERT rather than an upsert because [ExecutionStateTable]
   /// does not have a UNIQUE constraint on [planId] (only the PK `id` is
   /// unique, which is auto-assigned).
-  Future<void> _persistState() async {
+  ///
+  /// [ambientPositionMsOverride] and [ambientAssetKeyOverride] allow callers
+  /// (e.g. [pause]) to supply values captured *before* [AudioEngine.stopAll]
+  /// clears the engine's live position/key fields.
+  Future<void> _persistState({
+    int? ambientPositionMsOverride,
+    String? ambientAssetKeyOverride,
+  }) async {
     final plan = _currentPlan;
     if (plan == null) return;
 
@@ -934,8 +1226,12 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
         : null;
 
     final repeatCountersJson = jsonEncode(flatStep?.repeatCounters ?? {});
-    final ambientPositionMs =
-        _audioEngine.currentAmbientPosition?.inMilliseconds ?? 0;
+
+    // Use caller-supplied values if provided (e.g. captured before stopAll).
+    final ambientPositionMs = ambientPositionMsOverride ??
+        (_audioEngine.currentAmbientPosition?.inMilliseconds ?? 0);
+    final ambientAssetKey =
+        ambientAssetKeyOverride ?? _audioEngine.currentAmbientAssetKey;
 
     // Compute elapsed ms within the current WaitStep.
     var waitElapsedMs = _waitStepElapsedMs;
@@ -958,6 +1254,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
           repeatCounters: Value(repeatCountersJson),
           elapsedMs: Value(waitElapsedMs),
           ambientPositionMs: Value(ambientPositionMs),
+          ambientAssetKey: Value(ambientAssetKey),
           status: Value(_status.name),
         ),
       );

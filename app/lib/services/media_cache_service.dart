@@ -16,6 +16,7 @@
 library media_cache_service;
 
 import 'dart:convert';
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:drift/drift.dart';
@@ -131,6 +132,7 @@ class MediaCacheServiceImpl implements MediaCacheService {
     required String provider,
     required String speechRate,
   }) {
+    
     return fullParamCacheKey(
       text: text,
       voice: voice,
@@ -166,6 +168,7 @@ class MediaCacheServiceImpl implements MediaCacheService {
 
     debugPrint(
         'MediaCacheService: cache miss — fetching from backend (provider=$provider)');
+    // debugger(message: 'CACHE MISS — text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}", provider=$provider, voice=$voice');
 
     // Call the backend TTS API.
     final bytes = await _synthesize(
@@ -268,13 +271,10 @@ class MediaCacheServiceImpl implements MediaCacheService {
     required String provider,
     required String speechRate,
   }) async {
-    final serverUrl =
-        await _settings.read(AppSettingsKeys.backendServerUrl) ??
-            kDefaultBackendServerUrl;
     final apiKey =
         await _settings.read(AppSettingsKeys.backendApiKey) ?? '';
 
-    final uri = Uri.parse('$serverUrl/api/tts/synthesize');
+    final uri = Uri.parse('$kBackendUrl/api/tts/synthesize');
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (apiKey.isNotEmpty) headers['x-api-key'] = apiKey;
 
@@ -298,6 +298,7 @@ class MediaCacheServiceImpl implements MediaCacheService {
         )
         .timeout(kSynthesisTimeout);
 
+    // debugger(message: 'API response — status=${response.statusCode}, bodyBytes=${response.bodyBytes.length}');
     if (response.statusCode != 200) {
       throw Exception(
           'TTS synthesis failed (HTTP ${response.statusCode}): ${response.body}');

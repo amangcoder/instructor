@@ -1058,6 +1058,12 @@ class $ExecutionStateTableTable extends ExecutionStateTable
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _ambientAssetKeyMeta =
+      const VerificationMeta('ambientAssetKey');
+  @override
+  late final GeneratedColumn<String> ambientAssetKey = GeneratedColumn<String>(
+      'ambient_asset_key', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -1081,6 +1087,7 @@ class $ExecutionStateTableTable extends ExecutionStateTable
         repeatCounters,
         elapsedMs,
         ambientPositionMs,
+        ambientAssetKey,
         status,
         savedAt
       ];
@@ -1126,6 +1133,12 @@ class $ExecutionStateTableTable extends ExecutionStateTable
           ambientPositionMs.isAcceptableOrUnknown(
               data['ambient_position_ms']!, _ambientPositionMsMeta));
     }
+    if (data.containsKey('ambient_asset_key')) {
+      context.handle(
+          _ambientAssetKeyMeta,
+          ambientAssetKey.isAcceptableOrUnknown(
+              data['ambient_asset_key']!, _ambientAssetKeyMeta));
+    }
     if (data.containsKey('status')) {
       context.handle(_statusMeta,
           status.isAcceptableOrUnknown(data['status']!, _statusMeta));
@@ -1156,6 +1169,8 @@ class $ExecutionStateTableTable extends ExecutionStateTable
           .read(DriftSqlType.int, data['${effectivePrefix}elapsed_ms'])!,
       ambientPositionMs: attachedDatabase.typeMapping.read(
           DriftSqlType.int, data['${effectivePrefix}ambient_position_ms'])!,
+      ambientAssetKey: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}ambient_asset_key']),
       status: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}status'])!,
       savedAt: attachedDatabase.typeMapping
@@ -1186,6 +1201,10 @@ class ExecutionStateTableData extends DataClass
   /// Ambient audio playback position in milliseconds for resume-after-interrupt.
   final int ambientPositionMs;
 
+  /// Asset key of the ambient track that was playing when the session was
+  /// paused (null when no ambient track was active).
+  final String? ambientAssetKey;
+
   /// [ExecutionStatus] name string.
   final String status;
   final DateTime savedAt;
@@ -1196,6 +1215,7 @@ class ExecutionStateTableData extends DataClass
       required this.repeatCounters,
       required this.elapsedMs,
       required this.ambientPositionMs,
+      this.ambientAssetKey,
       required this.status,
       required this.savedAt});
   @override
@@ -1207,6 +1227,9 @@ class ExecutionStateTableData extends DataClass
     map['repeat_counters'] = Variable<String>(repeatCounters);
     map['elapsed_ms'] = Variable<int>(elapsedMs);
     map['ambient_position_ms'] = Variable<int>(ambientPositionMs);
+    if (!nullToAbsent || ambientAssetKey != null) {
+      map['ambient_asset_key'] = Variable<String>(ambientAssetKey);
+    }
     map['status'] = Variable<String>(status);
     map['saved_at'] = Variable<DateTime>(savedAt);
     return map;
@@ -1220,6 +1243,9 @@ class ExecutionStateTableData extends DataClass
       repeatCounters: Value(repeatCounters),
       elapsedMs: Value(elapsedMs),
       ambientPositionMs: Value(ambientPositionMs),
+      ambientAssetKey: ambientAssetKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ambientAssetKey),
       status: Value(status),
       savedAt: Value(savedAt),
     );
@@ -1235,6 +1261,7 @@ class ExecutionStateTableData extends DataClass
       repeatCounters: serializer.fromJson<String>(json['repeatCounters']),
       elapsedMs: serializer.fromJson<int>(json['elapsedMs']),
       ambientPositionMs: serializer.fromJson<int>(json['ambientPositionMs']),
+      ambientAssetKey: serializer.fromJson<String?>(json['ambientAssetKey']),
       status: serializer.fromJson<String>(json['status']),
       savedAt: serializer.fromJson<DateTime>(json['savedAt']),
     );
@@ -1249,6 +1276,7 @@ class ExecutionStateTableData extends DataClass
       'repeatCounters': serializer.toJson<String>(repeatCounters),
       'elapsedMs': serializer.toJson<int>(elapsedMs),
       'ambientPositionMs': serializer.toJson<int>(ambientPositionMs),
+      'ambientAssetKey': serializer.toJson<String?>(ambientAssetKey),
       'status': serializer.toJson<String>(status),
       'savedAt': serializer.toJson<DateTime>(savedAt),
     };
@@ -1261,6 +1289,7 @@ class ExecutionStateTableData extends DataClass
           String? repeatCounters,
           int? elapsedMs,
           int? ambientPositionMs,
+          Value<String?> ambientAssetKey = const Value.absent(),
           String? status,
           DateTime? savedAt}) =>
       ExecutionStateTableData(
@@ -1270,6 +1299,8 @@ class ExecutionStateTableData extends DataClass
         repeatCounters: repeatCounters ?? this.repeatCounters,
         elapsedMs: elapsedMs ?? this.elapsedMs,
         ambientPositionMs: ambientPositionMs ?? this.ambientPositionMs,
+        ambientAssetKey:
+            ambientAssetKey.present ? ambientAssetKey.value : this.ambientAssetKey,
         status: status ?? this.status,
         savedAt: savedAt ?? this.savedAt,
       );
@@ -1287,6 +1318,9 @@ class ExecutionStateTableData extends DataClass
       ambientPositionMs: data.ambientPositionMs.present
           ? data.ambientPositionMs.value
           : this.ambientPositionMs,
+      ambientAssetKey: data.ambientAssetKey.present
+          ? data.ambientAssetKey.value
+          : this.ambientAssetKey,
       status: data.status.present ? data.status.value : this.status,
       savedAt: data.savedAt.present ? data.savedAt.value : this.savedAt,
     );
@@ -1301,6 +1335,7 @@ class ExecutionStateTableData extends DataClass
           ..write('repeatCounters: $repeatCounters, ')
           ..write('elapsedMs: $elapsedMs, ')
           ..write('ambientPositionMs: $ambientPositionMs, ')
+          ..write('ambientAssetKey: $ambientAssetKey, ')
           ..write('status: $status, ')
           ..write('savedAt: $savedAt')
           ..write(')'))
@@ -1309,7 +1344,7 @@ class ExecutionStateTableData extends DataClass
 
   @override
   int get hashCode => Object.hash(id, planId, currentStepIndex, repeatCounters,
-      elapsedMs, ambientPositionMs, status, savedAt);
+      elapsedMs, ambientPositionMs, ambientAssetKey, status, savedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1320,6 +1355,7 @@ class ExecutionStateTableData extends DataClass
           other.repeatCounters == this.repeatCounters &&
           other.elapsedMs == this.elapsedMs &&
           other.ambientPositionMs == this.ambientPositionMs &&
+          other.ambientAssetKey == this.ambientAssetKey &&
           other.status == this.status &&
           other.savedAt == this.savedAt);
 }
@@ -1332,6 +1368,7 @@ class ExecutionStateTableCompanion
   final Value<String> repeatCounters;
   final Value<int> elapsedMs;
   final Value<int> ambientPositionMs;
+  final Value<String?> ambientAssetKey;
   final Value<String> status;
   final Value<DateTime> savedAt;
   const ExecutionStateTableCompanion({
@@ -1341,6 +1378,7 @@ class ExecutionStateTableCompanion
     this.repeatCounters = const Value.absent(),
     this.elapsedMs = const Value.absent(),
     this.ambientPositionMs = const Value.absent(),
+    this.ambientAssetKey = const Value.absent(),
     this.status = const Value.absent(),
     this.savedAt = const Value.absent(),
   });
@@ -1351,6 +1389,7 @@ class ExecutionStateTableCompanion
     this.repeatCounters = const Value.absent(),
     this.elapsedMs = const Value.absent(),
     this.ambientPositionMs = const Value.absent(),
+    this.ambientAssetKey = const Value.absent(),
     this.status = const Value.absent(),
     this.savedAt = const Value.absent(),
   }) : planId = Value(planId);
@@ -1361,6 +1400,7 @@ class ExecutionStateTableCompanion
     Expression<String>? repeatCounters,
     Expression<int>? elapsedMs,
     Expression<int>? ambientPositionMs,
+    Expression<String>? ambientAssetKey,
     Expression<String>? status,
     Expression<DateTime>? savedAt,
   }) {
@@ -1371,6 +1411,7 @@ class ExecutionStateTableCompanion
       if (repeatCounters != null) 'repeat_counters': repeatCounters,
       if (elapsedMs != null) 'elapsed_ms': elapsedMs,
       if (ambientPositionMs != null) 'ambient_position_ms': ambientPositionMs,
+      if (ambientAssetKey != null) 'ambient_asset_key': ambientAssetKey,
       if (status != null) 'status': status,
       if (savedAt != null) 'saved_at': savedAt,
     });
@@ -1383,6 +1424,7 @@ class ExecutionStateTableCompanion
       Value<String>? repeatCounters,
       Value<int>? elapsedMs,
       Value<int>? ambientPositionMs,
+      Value<String?>? ambientAssetKey,
       Value<String>? status,
       Value<DateTime>? savedAt}) {
     return ExecutionStateTableCompanion(
@@ -1392,6 +1434,7 @@ class ExecutionStateTableCompanion
       repeatCounters: repeatCounters ?? this.repeatCounters,
       elapsedMs: elapsedMs ?? this.elapsedMs,
       ambientPositionMs: ambientPositionMs ?? this.ambientPositionMs,
+      ambientAssetKey: ambientAssetKey ?? this.ambientAssetKey,
       status: status ?? this.status,
       savedAt: savedAt ?? this.savedAt,
     );
@@ -1418,6 +1461,9 @@ class ExecutionStateTableCompanion
     if (ambientPositionMs.present) {
       map['ambient_position_ms'] = Variable<int>(ambientPositionMs.value);
     }
+    if (ambientAssetKey.present) {
+      map['ambient_asset_key'] = Variable<String>(ambientAssetKey.value);
+    }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
@@ -1436,6 +1482,7 @@ class ExecutionStateTableCompanion
           ..write('repeatCounters: $repeatCounters, ')
           ..write('elapsedMs: $elapsedMs, ')
           ..write('ambientPositionMs: $ambientPositionMs, ')
+          ..write('ambientAssetKey: $ambientAssetKey, ')
           ..write('status: $status, ')
           ..write('savedAt: $savedAt')
           ..write(')'))

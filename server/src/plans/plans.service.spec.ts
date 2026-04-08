@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   UnprocessableEntityException,
-  TooManyRequestsException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { PlansService } from './plans.service';
+import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,14 +89,90 @@ function makeGeminiInvalidPlanResponse(): Record<string, unknown> {
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Mock DynamoDBRateLimitService factory
+// ---------------------------------------------------------------------------
+
+function createMockRateLimiter() {
+  let callCounts: Map<string, number> = new Map();
+  let windowExpiresAt: Map<string, number> = new Map();
+
+  return {
+    consume: jest.fn().mockImplementation(
+      async (namespace: string, identifier: string, limit: number, windowSec: number) => {
+        const key = `${namespace}:${identifier}`;
+        const now = Math.floor(Date.now() / 1000);
+        const expiry = windowExpiresAt.get(key) ?? 0;
+
+        if (expiry <= now) {
+          // New window
+          callCounts.set(key, 1);
+          windowExpiresAt.set(key, now + windowSec);
+          return { allowed: true, current: 1, retryAfterSec: 0 };
+        }
+
+        const count = (callCounts.get(key) ?? 0);
+        if (count >= limit) {
+          return { allowed: false, current: count, retryAfterSec: expiry - now };
+        }
+
+        callCounts.set(key, count + 1);
+        return { allowed: true, current: count + 1, retryAfterSec: 0 };
+      },
+    ),
+    peek: jest.fn().mockImplementation(
+      async (namespace: string, identifier: string, limit: number) => {
+        const key = `${namespace}:${identifier}`;
+        const now = Math.floor(Date.now() / 1000);
+        const expiry = windowExpiresAt.get(key) ?? 0;
+        const count = expiry > now ? (callCounts.get(key) ?? 0) : 0;
+        const allowed = count < limit;
+        return {
+          allowed,
+          current: count,
+          retryAfterSec: allowed ? 0 : Math.max(0, expiry - now),
+        };
+      },
+    ),
+    increment: jest.fn().mockImplementation(
+      async (namespace: string, identifier: string, windowSec: number) => {
+        const key = `${namespace}:${identifier}`;
+        const now = Math.floor(Date.now() / 1000);
+        const expiry = windowExpiresAt.get(key) ?? 0;
+
+        if (expiry <= now) {
+          callCounts.set(key, 1);
+          windowExpiresAt.set(key, now + windowSec);
+        } else {
+          callCounts.set(key, (callCounts.get(key) ?? 0) + 1);
+        }
+      },
+    ),
+    _reset: () => {
+      callCounts = new Map();
+      windowExpiresAt = new Map();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe('PlansService', () => {
   let service: PlansService;
+  let mockRateLimiter: ReturnType<typeof createMockRateLimiter>;
 
   beforeEach(async () => {
     process.env.GEMINI_API_KEY = GEMINI_API_KEY;
 
+    mockRateLimiter = createMockRateLimiter();
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [PlansService],
+      providers: [
+        PlansService,
+        { provide: DynamoDBRateLimitService, useValue: mockRateLimiter },
+      ],
     }).compile();
 
     service = module.get<PlansService>(PlansService);
@@ -103,6 +181,7 @@ describe('PlansService', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.useRealTimers();
+    mockRateLimiter._reset();
     delete process.env.GEMINI_API_KEY;
   });
 
@@ -324,7 +403,7 @@ describe('PlansService', () => {
     });
   });
 
-  // ── In-memory rate limiting (10 per hour per user) ─────────────────────────
+  // ── Rate limiting via DynamoDBRateLimitService (10 per hour per user) ────────
 
   describe('rate limiting', () => {
     beforeEach(() => {
@@ -346,7 +425,7 @@ describe('PlansService', () => {
         await service.generatePlan(`prompt ${i}`, 'user-rl');
       }
       await expect(service.generatePlan('overflow', 'user-rl')).rejects.toThrow(
-        TooManyRequestsException,
+        HttpException,
       );
     });
 
@@ -369,7 +448,7 @@ describe('PlansService', () => {
 
       // user-a is blocked
       await expect(service.generatePlan('overflow', 'user-a')).rejects.toThrow(
-        TooManyRequestsException,
+        HttpException,
       );
 
       // user-b should still be allowed
@@ -383,7 +462,7 @@ describe('PlansService', () => {
         await service.generatePlan(`prompt ${i}`, 'user-timer');
       }
       await expect(service.generatePlan('overflow', 'user-timer')).rejects.toThrow(
-        TooManyRequestsException,
+        HttpException,
       );
 
       // Advance past the 1-hour window

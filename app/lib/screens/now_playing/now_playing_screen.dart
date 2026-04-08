@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,6 +53,27 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   // ── Completion handling ──────────────────────────────────────────────────────
 
   bool _completionHandled = false;
+
+  // ── Gesture debounce ─────────────────────────────────────────────────────────
+
+  /// Timestamp of the last accepted gesture command. Used to collapse rapid
+  /// taps (e.g. pause then immediately resume) into a single command.
+  DateTime? _lastCommandTime;
+
+  /// Returns `true` and records [_lastCommandTime] if at least 300 ms have
+  /// elapsed since the previous accepted command. Returns `false` (no-op) if
+  /// called within the debounce window.
+  static const _commandDebounce = Duration(milliseconds: 300);
+
+  bool _tryAcquireDebounce() {
+    final now = DateTime.now();
+    if (_lastCommandTime != null &&
+        now.difference(_lastCommandTime!) < _commandDebounce) {
+      return false;
+    }
+    _lastCommandTime = now;
+    return true;
+  }
 
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -111,6 +133,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   // ── Gesture handlers ────────────────────────────────────────────────────────
 
   Future<void> _togglePause() async {
+    if (!_tryAcquireDebounce()) return;
     final engine = ref.read(planExecutionEngineProvider);
     final stateAsync = ref.read(executionStateProvider);
     final state = stateAsync.valueOrNull;
@@ -124,11 +147,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   }
 
   Future<void> _skipForward() async {
+    if (!_tryAcquireDebounce()) return;
     final engine = ref.read(planExecutionEngineProvider);
     await engine.skipForward();
   }
 
   Future<void> _skipBackward() async {
+    if (!_tryAcquireDebounce()) return;
     final engine = ref.read(planExecutionEngineProvider);
     await engine.skipBackward();
   }
@@ -170,14 +195,21 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
   void _handleCompletion(BuildContext context, ExecutionState state) {
     if (_completionHandled) return;
+    // Set synchronously — before the post-frame callback is scheduled — so that
+    // multiple rapid state emissions (e.g. engine emits 'completed' twice before
+    // the frame fires) cannot stack up two dialogs.
     _completionHandled = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await _showCompletionSummary(state);
-      if (mounted) {
-        context.go(AppRoutes.library);
-      }
+      // Guard: the widget may have been disposed while the completion dialog was
+      // visible (e.g. the user navigated to the library via another route). Skip
+      // navigation when that happens to prevent operating on a dead element.
+      if (!mounted) return;
+      // Use this.context (the State's BuildContext) rather than the parameter
+      // captured in the closure, which could be a stale reference after rebuild.
+      this.context.go(AppRoutes.library);
     });
   }
 
@@ -221,6 +253,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         ],
       ),
     );
+
+    // Guard: navigation to the library (or any other route change) could have
+    // disposed this widget while the dialog was open. The caller checks mounted
+    // too, but an explicit guard here keeps this method self-contained and safe.
+    if (!mounted) return;
   }
 
   String _formatDuration(Duration d) {
@@ -278,10 +315,52 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                     .titleMedium
                     ?.copyWith(color: Colors.white),
               ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => context.go(AppRoutes.library),
-                child: const Text('Return to Library'),
+              // Show the raw error in debug builds so developers can diagnose
+              // without needing to attach a debugger.
+              if (kDebugMode) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    e.toString(),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.red.shade300,
+                          fontFamily: 'monospace',
+                        ),
+                    textAlign: TextAlign.center,
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              // Retry re-subscribes to the execution state stream and
+              // attempts to resume from a recoverable session.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      ref.invalidate(executionStateProvider);
+                      final engine = ref.read(planExecutionEngineProvider);
+                      final session = await engine.getRecoverableSession();
+                      if (session != null) {
+                        await engine.resume();
+                      }
+                    },
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Retry'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  TextButton(
+                    onPressed: () => context.go(AppRoutes.library),
+                    child: const Text('Return to Library'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -342,14 +421,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
                       const Spacer(),
 
-                      // ── Countdown timer ───────────────────────────────
-                      StepCountdownTimer(
-                        timeRemaining: state.timeRemaining,
-                        totalDuration: state.timeRemaining.inSeconds > 0
-                            ? state.timeRemaining
-                            : const Duration(minutes: 1),
-                        color: stepColor,
-                      ),
+                      // ── Countdown timer / loading indicator ────────────
+                      // Show a loading spinner while TTS is being fetched
+                      // from the backend on a cache miss. Otherwise show
+                      // the countdown timer arc.
+                      if (state.stepPhase == StepPhase.loadingTts)
+                        _TtsLoadingIndicator(color: stepColor)
+                      else
+                        StepCountdownTimer(
+                          timeRemaining: state.timeRemaining,
+                          totalDuration: state.currentStepDuration,
+                          isPaused: isPaused,
+                          color: stepColor,
+                        ),
 
                       const SizedBox(height: 32),
 
@@ -368,7 +452,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       // ── Next-up preview ───────────────────────────────
                       NextUpPreview(
                         nextStepText: nextStepText,
-                        nextStepType: stepType,
+                        nextStepType: state.nextStepType,
                       ),
 
                       const Spacer(),
@@ -404,6 +488,37 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
               },
               child: const SizedBox(width: 80, height: 80),
             ),
+          ),
+        ),
+
+        // ── Accessible skip-forward button for screen readers ────────────
+        // Visually invisible but reachable via VoiceOver/TalkBack focus
+        // traversal. The physical swipe gesture (handled by
+        // SessionGestureDetector) conflicts with screen-reader navigation
+        // gestures, so these semantic buttons provide an accessible path for
+        // motor- and vision-impaired users — satisfying WCAG 2.1 AA.
+        Positioned(
+          bottom: 96,
+          right: 40,
+          child: Semantics(
+            button: true,
+            label: 'Skip forward to next step',
+            hint: 'Activates to advance to the next plan step',
+            onTap: _skipForward,
+            child: const SizedBox(width: 64, height: 80),
+          ),
+        ),
+
+        // ── Accessible skip-backward button for screen readers ───────────
+        Positioned(
+          bottom: 96,
+          left: 40,
+          child: Semantics(
+            button: true,
+            label: 'Go back to previous step',
+            hint: 'Activates to return to the previous plan step',
+            onTap: _skipBackward,
+            child: const SizedBox(width: 64, height: 80),
           ),
         ),
 
@@ -456,26 +571,33 @@ class _TopBar extends StatelessWidget {
           ),
         ),
         if (isPaused)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.pause, size: 14, color: Colors.white.withValues(alpha: 0.8)),
-                const SizedBox(width: 4),
-                Text(
-                  'Paused',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+          // Merge the icon + text into one coherent announcement for screen
+          // readers. Without this, VoiceOver/TalkBack announce the pause icon
+          // and 'Paused' as two separate (confusing) elements.
+          Semantics(
+            label: 'Session paused',
+            excludeSemantics: true,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.pause, size: 14, color: Colors.white.withValues(alpha: 0.8)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Paused',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         const SizedBox(width: 8),
@@ -575,6 +697,45 @@ class _CurrentStepCard extends StatelessWidget {
       };
 }
 
+/// Indeterminate loading spinner shown while TTS audio is being fetched from
+/// the backend on a cache miss. Matches the size of [StepCountdownTimer].
+class _TtsLoadingIndicator extends StatelessWidget {
+  const _TtsLoadingIndicator({required this.color});
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 220,
+      height: 220,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: CircularProgressIndicator(
+                strokeWidth: 4,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Loading audio...',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Small hint text at the bottom explaining available gestures.
 class _GestureHint extends StatelessWidget {
   const _GestureHint({required this.isPaused});
@@ -590,7 +751,9 @@ class _GestureHint extends StatelessWidget {
     return Text(
       hintText,
       style: TextStyle(
-        color: Colors.white.withValues(alpha: 0.35),
+        // alpha 0.60 → ~5:1 contrast on black, meeting WCAG 2.1 AA (4.5:1
+        // minimum for 12 sp text). The previous 0.35 produced ~2:1.
+        color: Colors.white.withValues(alpha: 0.60),
         fontSize: 12,
         letterSpacing: 0.3,
       ),

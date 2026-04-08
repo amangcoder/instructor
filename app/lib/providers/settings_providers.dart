@@ -31,9 +31,6 @@ const double kDefaultSpeechRate = 1.0;
 /// Default TTS locale / accent.
 const TtsLocale kDefaultTtsLocale = TtsLocale.enIN;
 
-/// Default backend server URL.
-const String kDefaultBackendServerUrl = 'http://localhost:3071';
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Stream providers — one per user-facing setting
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,18 +122,6 @@ Stream<TtsLocale> ttsLocaleSetting(Ref ref) {
       (v) => v.name == raw,
       orElse: () => kDefaultTtsLocale,
     );
-  });
-}
-
-/// Reactive stream of the backend server URL.
-///
-/// Emits [kDefaultBackendServerUrl] when the key is absent.
-@riverpod
-Stream<String> backendServerUrlSetting(Ref ref) {
-  final settings = ref.watch(appSettingsProvider);
-  return settings.watch(AppSettingsKeys.backendServerUrl).map((raw) {
-    if (raw == null || raw.isEmpty) return kDefaultBackendServerUrl;
-    return raw;
   });
 }
 

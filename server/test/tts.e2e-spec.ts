@@ -65,14 +65,60 @@ describe('TTS (e2e)', () => {
       return;
     }
 
+    // Try to import AWS-dependent service tokens for overriding
+    let DynamoDBService: unknown;
+    let SESEmailService: unknown;
+    let DynamoDBRateLimitService: unknown;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ DynamoDBService } = require('../src/dynamodb/dynamodb.service'));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ SESEmailService } = require('../src/email/ses-email.service'));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ DynamoDBRateLimitService } = require('../src/ratelimit/dynamodb-ratelimit.service'));
+    } catch {
+      // Services not yet implemented — gracefully degrade
+    }
+
     const KOKORO_PROXY = 'KOKORO_TTS_PROXY';
 
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    let builder = Test.createTestingModule({
       imports: [AppModule],
-    })
-      .overrideProvider(KOKORO_PROXY)
-      .useValue(mockKokoroProxy)
-      .compile();
+    }).overrideProvider(KOKORO_PROXY).useValue(mockKokoroProxy);
+
+    // Override AWS-dependent services with deterministic in-memory stubs
+    if (DynamoDBService) {
+      builder = builder.overrideProvider(DynamoDBService).useValue({
+        getUserById: jest.fn().mockResolvedValue(null),
+        getUserByEmail: jest.fn().mockResolvedValue(null),
+        createUser: jest.fn().mockResolvedValue(undefined),
+        createOtp: jest.fn().mockResolvedValue(undefined),
+        getActiveOtps: jest.fn().mockResolvedValue([]),
+        markOtpUsed: jest.fn().mockResolvedValue(undefined),
+        incrementOtpAttempts: jest.fn().mockResolvedValue(undefined),
+        invalidateOtpsForEmail: jest.fn().mockResolvedValue(undefined),
+        createRefreshToken: jest.fn().mockResolvedValue(undefined),
+        getRefreshToken: jest.fn().mockResolvedValue(null),
+        revokeRefreshToken: jest.fn().mockResolvedValue(undefined),
+        revokeAllRefreshTokens: jest.fn().mockResolvedValue(undefined),
+        getSyncMetadata: jest.fn().mockResolvedValue(null),
+        upsertSyncMetadata: jest.fn().mockResolvedValue(undefined),
+      });
+    }
+    if (SESEmailService) {
+      builder = builder
+        .overrideProvider(SESEmailService)
+        .useValue({ sendOtpEmail: jest.fn().mockResolvedValue(undefined) });
+    }
+    if (DynamoDBRateLimitService) {
+      builder = builder.overrideProvider(DynamoDBRateLimitService).useValue({
+        consume: jest.fn().mockResolvedValue({ allowed: true, current: 1, retryAfterSec: 0 }),
+        peek: jest.fn().mockResolvedValue({ allowed: true, current: 0, retryAfterSec: 0 }),
+        increment: jest.fn().mockResolvedValue(undefined),
+      });
+    }
+
+    const moduleFixture: TestingModule = await builder.compile();
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

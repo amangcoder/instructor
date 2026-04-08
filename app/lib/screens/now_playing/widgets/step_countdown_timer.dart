@@ -1,13 +1,13 @@
-import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
 /// A large circular countdown timer widget.
 ///
-/// Accepts the [timeRemaining] from the engine state stream (updated ~1 Hz)
-/// and smooths the display using a local 100 ms [Timer] that interpolates
-/// between received values. The circular arc depletes proportionally based
-/// on [totalDuration].
+/// Uses an [AnimationController] to drive a smooth 60 fps arc depletion from
+/// 1.0 → 0.0 over [totalDuration]. Engine snapshots ([timeRemaining]) arrive
+/// at ~1 Hz and are used for drift correction rather than hard resets, ensuring
+/// the arc never visually "jumps" between seconds.
 ///
 /// Displays the remaining time as MM:SS centred inside the arc.
 class StepCountdownTimer extends StatefulWidget {
@@ -15,16 +15,20 @@ class StepCountdownTimer extends StatefulWidget {
     super.key,
     required this.timeRemaining,
     required this.totalDuration,
+    this.isPaused = false,
     this.color,
     this.size = 220.0,
   });
 
   /// Time remaining as reported by the engine (updated approximately every
-  /// second). The widget interpolates locally between these snapshots.
+  /// second). Used for drift correction against the animation controller.
   final Duration timeRemaining;
 
   /// Total duration of the current step (used to compute arc fraction).
   final Duration totalDuration;
+
+  /// Whether the session is currently paused. Stops/starts the animation.
+  final bool isPaused;
 
   /// Colour of the arc indicator. Defaults to [ColorScheme.primary].
   final Color? color;
@@ -36,54 +40,121 @@ class StepCountdownTimer extends StatefulWidget {
   State<StepCountdownTimer> createState() => _StepCountdownTimerState();
 }
 
-class _StepCountdownTimerState extends State<StepCountdownTimer> {
-  static const _tickInterval = Duration(milliseconds: 100);
-
-  /// The displayed remaining duration — updated every tick.
-  late Duration _displayed;
-
-  /// The remaining duration at the moment of the last engine snapshot.
-  late Duration _snapshotRemaining;
-
-  /// Wall-clock time of the last snapshot reception.
-  late DateTime _snapshotTime;
-
-  Timer? _ticker;
+class _StepCountdownTimerState extends State<StepCountdownTimer>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
 
   @override
   void initState() {
     super.initState();
-    _displayed = widget.timeRemaining;
-    _snapshotRemaining = widget.timeRemaining;
-    _snapshotTime = DateTime.now();
-    _startTicker();
+    _controller = AnimationController(vsync: this);
+    _initializeAnimation();
   }
 
   @override
   void didUpdateWidget(StepCountdownTimer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.timeRemaining != widget.timeRemaining) {
-      // Fresh snapshot from the engine — re-anchor the interpolation.
-      _snapshotRemaining = widget.timeRemaining;
-      _snapshotTime = DateTime.now();
+
+    final stepChanged = widget.totalDuration != oldWidget.totalDuration;
+    final pauseChanged = widget.isPaused != oldWidget.isPaused;
+
+    // Detect a skip to a step with the same totalDuration: timeRemaining
+    // jumps UP significantly (more than 1 second).
+    final jumpedBackward =
+        widget.timeRemaining > oldWidget.timeRemaining + const Duration(seconds: 1);
+
+    if (stepChanged || jumpedBackward) {
+      _initializeAnimation();
+      return;
+    }
+
+    if (pauseChanged) {
+      if (widget.isPaused) {
+        _controller.stop();
+      } else {
+        _syncAndResume();
+      }
+      return;
+    }
+
+    // Engine snapshot (drift correction) — only when running.
+    if (widget.timeRemaining != oldWidget.timeRemaining && !widget.isPaused) {
+      _applyDriftCorrection();
     }
   }
 
-  void _startTicker() {
-    _ticker?.cancel();
-    _ticker = Timer.periodic(_tickInterval, (_) {
-      if (!mounted) return;
-      final elapsed = DateTime.now().difference(_snapshotTime);
-      final interpolated = _snapshotRemaining - elapsed;
-      setState(() {
-        _displayed = interpolated.isNegative ? Duration.zero : interpolated;
-      });
-    });
+  /// Configures the animation controller for the current step's remaining time.
+  void _initializeAnimation() {
+    final totalMs = widget.totalDuration.inMilliseconds;
+    if (totalMs <= 0) {
+      // Instant step: show full arc, no animation.
+      _controller
+        ..duration = const Duration(seconds: 1) // non-zero required
+        ..value = 1.0;
+      _controller.stop();
+      return;
+    }
+
+    final remainingMs = widget.timeRemaining.inMilliseconds.clamp(0, totalMs);
+    final fraction = remainingMs / totalMs;
+
+    _controller.duration = widget.totalDuration;
+    _controller.value = fraction;
+
+    if (!widget.isPaused && fraction > 0.0) {
+      // reverse() drives value from current → 0.0. Since duration is the full
+      // step duration, it takes (fraction * duration) ms = remainingMs.
+      _controller.reverse(from: fraction);
+    }
+  }
+
+  /// Corrects for drift between the animation and the engine's ground truth.
+  /// Only applies a correction when drift exceeds ~150 ms worth of arc fraction
+  /// to avoid perceptible jumps.
+  void _applyDriftCorrection() {
+    final totalMs = widget.totalDuration.inMilliseconds;
+    if (totalMs <= 0) return;
+
+    final engineFraction =
+        (widget.timeRemaining.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    final controllerFraction = _controller.value;
+    final drift = (engineFraction - controllerFraction).abs();
+
+    // 150 ms worth of fraction as threshold.
+    final threshold = 150 / totalMs;
+
+    if (drift > threshold) {
+      _controller.reverse(from: engineFraction);
+    }
+  }
+
+  /// Re-syncs the controller to the engine's timeRemaining and resumes.
+  void _syncAndResume() {
+    final totalMs = widget.totalDuration.inMilliseconds;
+    if (totalMs <= 0) return;
+
+    final fraction =
+        (widget.timeRemaining.inMilliseconds / totalMs).clamp(0.0, 1.0);
+
+    if (fraction <= 0.0) {
+      _controller.value = 0.0;
+      return;
+    }
+
+    _controller.reverse(from: fraction);
+  }
+
+  /// Derives the displayed remaining duration from the controller value.
+  Duration _displayedDuration() {
+    final totalMs = widget.totalDuration.inMilliseconds;
+    if (totalMs <= 0) return widget.timeRemaining;
+    final remainingMs = (_controller.value * totalMs).round();
+    return Duration(milliseconds: remainingMs.clamp(0, totalMs));
   }
 
   @override
   void dispose() {
-    _ticker?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -99,56 +170,59 @@ class _StepCountdownTimerState extends State<StepCountdownTimer> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final arcColor = widget.color ?? colorScheme.primary;
-
     final totalMs = widget.totalDuration.inMilliseconds;
-    final remainingMs = _displayed.inMilliseconds;
-    final fraction = totalMs > 0
-        ? (remainingMs / totalMs).clamp(0.0, 1.0)
-        : 0.0;
 
-    return Semantics(
-      label: 'Time remaining: ${_formatDuration(_displayed)}',
-      child: SizedBox(
-        width: widget.size,
-        height: widget.size,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Background track arc
-            SizedBox(
-              width: widget.size,
-              height: widget.size,
-              child: CircularProgressIndicator(
-                value: 1.0,
-                strokeWidth: 10,
-                color: arcColor.withValues(alpha: 0.15),
-              ),
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final fraction = totalMs > 0 ? _controller.value : 1.0;
+        final displayed = _displayedDuration();
+
+        return Semantics(
+          label: 'Time remaining: ${_formatDuration(displayed)}',
+          child: SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Background track arc
+                SizedBox(
+                  width: widget.size,
+                  height: widget.size,
+                  child: CircularProgressIndicator(
+                    value: 1.0,
+                    strokeWidth: 10,
+                    color: arcColor.withValues(alpha: 0.15),
+                  ),
+                ),
+                // Foreground progress arc
+                SizedBox(
+                  width: widget.size,
+                  height: widget.size,
+                  child: CircularProgressIndicator(
+                    value: fraction,
+                    strokeWidth: 10,
+                    color: arcColor,
+                    strokeCap: StrokeCap.round,
+                  ),
+                ),
+                // Time label
+                Text(
+                  _formatDuration(displayed),
+                  style: TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.w300,
+                    letterSpacing: -1,
+                    color: colorScheme.onSurface,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
             ),
-            // Foreground progress arc
-            SizedBox(
-              width: widget.size,
-              height: widget.size,
-              child: CircularProgressIndicator(
-                value: fraction,
-                strokeWidth: 10,
-                color: arcColor,
-                strokeCap: StrokeCap.round,
-              ),
-            ),
-            // Time label
-            Text(
-              _formatDuration(_displayed),
-              style: TextStyle(
-                fontSize: 48,
-                fontWeight: FontWeight.w300,
-                letterSpacing: -1,
-                color: colorScheme.onSurface,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

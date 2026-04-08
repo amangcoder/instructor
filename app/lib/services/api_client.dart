@@ -17,7 +17,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/auth_service.dart';
 
@@ -125,10 +124,7 @@ class ApiClient {
     return _parseJson(response);
   }
 
-  Future<String> get backendBaseUrl async {
-    final stored = await _settings.read(AppSettingsKeys.backendServerUrl);
-    return stored?.isNotEmpty == true ? stored! : kDefaultBackendServerUrl;
-  }
+  String get backendBaseUrl => kBackendUrl;
 
   // ── Private helpers ────────────────────────────────────────────────────
 

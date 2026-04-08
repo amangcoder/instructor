@@ -6,6 +6,16 @@ import 'package:instructor/database/app_database.dart';
 
 part 'app_settings.g.dart';
 
+/// Backend base URL, set at build time via `--dart-define=BACKEND_URL=<url>`.
+///
+/// Defaults to `http://localhost:3071` for local development.
+/// Override at build time:
+///   flutter run --dart-define=BACKEND_URL=https://api.example.com
+const String kBackendUrl = String.fromEnvironment(
+  'BACKEND_URL',
+  defaultValue: 'http://192.168.29.197:3071',
+);
+
 /// String keys for the [AppSettingsTable].
 abstract final class AppSettingsKeys {
   /// Set to `'true'` once the user completes the onboarding flow.
@@ -56,11 +66,6 @@ abstract final class AppSettingsKeys {
   ///
   /// Prevents the per-OEM instructions card from appearing again.
   static const String batteryPromptDismissed = 'battery_prompt_dismissed';
-
-  /// Backend server base URL for TTS synthesis requests.
-  ///
-  /// Defaults to `'http://localhost:3071'` when absent.
-  static const String backendServerUrl = 'backend_server_url';
 
   /// Backend x-api-key for authenticating TTS synthesis requests.
   ///

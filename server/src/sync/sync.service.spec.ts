@@ -1,71 +1,51 @@
+/**
+ * Unit tests for SyncService (migrated to DynamoDBService for metadata storage).
+ *
+ * DynamoDBService is mocked with per-method jest.fn() instances.
+ * AWS S3 SDK is mocked via jest.mock() — no real AWS calls in CI.
+ */
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { SyncService } from './sync.service';
-import { DatabaseService } from '../database/database.service';
+import { DynamoDBService } from '../dynamodb/dynamodb.service';
 
 // ---------------------------------------------------------------------------
 // Mock S3 client
 // ---------------------------------------------------------------------------
 
-/**
- * Mock S3 presign helper. The real implementation uses
- * @aws-sdk/s3-request-presigner's getSignedUrl. We mock it to return
- * predictable URLs without touching AWS.
- */
 const mockGetSignedUrl = jest.fn();
 
 jest.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: (...args: unknown[]) => mockGetSignedUrl(...args),
 }));
 
-const mockS3Client = {
-  send: jest.fn(),
-  config: { region: async () => 'ap-south-1' },
-};
-
 jest.mock('@aws-sdk/client-s3', () => ({
-  S3Client: jest.fn().mockImplementation(() => mockS3Client),
+  S3Client: jest.fn().mockImplementation(() => ({})),
   GetObjectCommand: jest.fn().mockImplementation((params) => ({ _type: 'GetObject', ...params })),
   PutObjectCommand: jest.fn().mockImplementation((params) => ({ _type: 'PutObject', ...params })),
 }));
 
 // ---------------------------------------------------------------------------
-// Drizzle ORM mock
+// Mock DynamoDBService factory
 // ---------------------------------------------------------------------------
 
-function createDrizzleMock() {
-  const selectGetMock = jest.fn().mockResolvedValue(null);
-  const selectAllMock = jest.fn().mockResolvedValue([]);
-
-  const selectChain = {
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    get: selectGetMock,
-  };
-
-  const updateChain = {
-    set: jest.fn().mockReturnThis(),
-    where: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const insertChain = {
-    values: jest.fn().mockReturnThis(),
-    onConflictDoNothing: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const drizzleDb = {
-    select: jest.fn().mockReturnValue(selectChain),
-    update: jest.fn().mockReturnValue(updateChain),
-    insert: jest.fn().mockReturnValue(insertChain),
-  };
-
+function createMockDynamoDBService() {
   return {
-    /** Provide as { db: drizzleMock.db } to DatabaseService mock. */
-    db: drizzleDb,
-    /** Configure the next .get() terminal value. */
-    _selectGet: selectGetMock,
-    /** Direct chain access for assertions. */
-    _chains: { select: selectChain, update: updateChain, insert: insertChain },
+    getUserById: jest.fn().mockResolvedValue(null),
+    getUserByEmail: jest.fn().mockResolvedValue(null),
+    createUser: jest.fn().mockResolvedValue(undefined),
+    createOtp: jest.fn().mockResolvedValue(undefined),
+    getActiveOtps: jest.fn().mockResolvedValue([]),
+    markOtpUsed: jest.fn().mockResolvedValue(undefined),
+    incrementOtpAttempts: jest.fn().mockResolvedValue(undefined),
+    invalidateOtpsForEmail: jest.fn().mockResolvedValue(undefined),
+    createRefreshToken: jest.fn().mockResolvedValue(undefined),
+    getRefreshToken: jest.fn().mockResolvedValue(null),
+    revokeRefreshToken: jest.fn().mockResolvedValue(undefined),
+    revokeAllRefreshTokens: jest.fn().mockResolvedValue(undefined),
+    getSyncMetadata: jest.fn().mockResolvedValue(null),
+    upsertSyncMetadata: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -75,17 +55,16 @@ function createDrizzleMock() {
 
 describe('SyncService', () => {
   let service: SyncService;
-  let drizzleMock: ReturnType<typeof createDrizzleMock>;
+  let mockDynamo: ReturnType<typeof createMockDynamoDBService>;
 
   const TEST_BUCKET = 'test-sync-bucket';
   const USER_ID = 'user-abc-123';
 
-  // A realistic presigned URL pattern
   const makePresignedUrl = (key: string, method: 'GET' | 'PUT') =>
-    `https://test-sync-bucket.s3.ap-south-1.amazonaws.com/${key}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123&method=${method}`;
+    `https://${TEST_BUCKET}.s3.ap-south-1.amazonaws.com/${key}?X-Amz-Signature=abc123&method=${method}`;
 
   beforeEach(async () => {
-    drizzleMock = createDrizzleMock();
+    mockDynamo = createMockDynamoDBService();
     process.env.AWS_S3_BUCKET = TEST_BUCKET;
     process.env.AWS_REGION = 'ap-south-1';
 
@@ -99,7 +78,7 @@ describe('SyncService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SyncService,
-        { provide: DatabaseService, useValue: { db: drizzleMock.db } },
+        { provide: DynamoDBService, useValue: mockDynamo },
       ],
     }).compile();
 
@@ -112,7 +91,7 @@ describe('SyncService', () => {
     delete process.env.AWS_REGION;
   });
 
-  // ── getUploadUrl ───────────────────────────────────────────────────────────
+  // ── getUploadUrl ────────────────────────────────────────────────────────────
 
   describe('getUploadUrl', () => {
     it('returns an uploadUrl and expiresIn', async () => {
@@ -156,18 +135,16 @@ describe('SyncService', () => {
         service.getUploadUrl('user-1'),
         service.getUploadUrl('user-2'),
       ]);
-      // Keys should differ
       expect(r1.uploadUrl).not.toBe(r2.uploadUrl);
     });
 
     it('throws ServiceUnavailableException when AWS_S3_BUCKET is not configured', async () => {
       delete process.env.AWS_S3_BUCKET;
 
-      // Rebuild service without bucket to exercise the null S3 path
       const module = await Test.createTestingModule({
         providers: [
           SyncService,
-          { provide: DatabaseService, useValue: { db: drizzleMock.db } },
+          { provide: DynamoDBService, useValue: mockDynamo },
         ],
       }).compile();
       const noBucketService = module.get<SyncService>(SyncService);
@@ -178,7 +155,7 @@ describe('SyncService', () => {
     });
   });
 
-  // ── getDownloadUrl ─────────────────────────────────────────────────────────
+  // ── getDownloadUrl ──────────────────────────────────────────────────────────
 
   describe('getDownloadUrl', () => {
     it('returns a downloadUrl and expiresIn', async () => {
@@ -228,7 +205,7 @@ describe('SyncService', () => {
       const module = await Test.createTestingModule({
         providers: [
           SyncService,
-          { provide: DatabaseService, useValue: { db: drizzleMock.db } },
+          { provide: DynamoDBService, useValue: mockDynamo },
         ],
       }).compile();
       const noBucketService = module.get<SyncService>(SyncService);
@@ -239,18 +216,18 @@ describe('SyncService', () => {
     });
   });
 
-  // ── getSyncStatus ──────────────────────────────────────────────────────────
+  // ── getSyncStatus ───────────────────────────────────────────────────────────
 
   describe('getSyncStatus', () => {
     it('returns null lastSyncAt and null sizeBytes when never synced', async () => {
-      drizzleMock._selectGet.mockResolvedValueOnce(null);
+      mockDynamo.getSyncMetadata.mockResolvedValueOnce(null);
       const result = await service.getSyncStatus(USER_ID);
       expect(result).toEqual({ lastSyncAt: null, sizeBytes: null });
     });
 
     it('returns lastSyncAt as ISO string and sizeBytes when a record exists', async () => {
       const lastSyncDate = new Date('2026-04-06T12:00:00Z');
-      drizzleMock._selectGet.mockResolvedValueOnce({
+      mockDynamo.getSyncMetadata.mockResolvedValueOnce({
         userId: USER_ID,
         lastSyncAt: lastSyncDate,
         sizeBytes: 5_242_880,
@@ -263,7 +240,7 @@ describe('SyncService', () => {
     });
 
     it('returns sizeBytes as null when size is not recorded', async () => {
-      drizzleMock._selectGet.mockResolvedValueOnce({
+      mockDynamo.getSyncMetadata.mockResolvedValueOnce({
         userId: USER_ID,
         lastSyncAt: new Date(),
         sizeBytes: null,
@@ -273,7 +250,7 @@ describe('SyncService', () => {
     });
 
     it('returns status independently per user', async () => {
-      drizzleMock._selectGet
+      mockDynamo.getSyncMetadata
         .mockResolvedValueOnce({ userId: USER_ID, lastSyncAt: new Date(), sizeBytes: 1024 })
         .mockResolvedValueOnce(null);
 
@@ -285,50 +262,51 @@ describe('SyncService', () => {
       expect(r1.lastSyncAt).not.toBeNull();
       expect(r2.lastSyncAt).toBeNull();
     });
+
+    it('calls DynamoDBService.getSyncMetadata with the userId', async () => {
+      mockDynamo.getSyncMetadata.mockResolvedValueOnce(null);
+      await service.getSyncStatus(USER_ID);
+      expect(mockDynamo.getSyncMetadata).toHaveBeenCalledWith(USER_ID);
+    });
   });
 
-  // ── confirmSync ────────────────────────────────────────────────────────────
+  // ── confirmSync ─────────────────────────────────────────────────────────────
 
   describe('confirmSync', () => {
     it('resolves without throwing on a successful confirm', async () => {
-      drizzleMock._selectGet.mockResolvedValueOnce({
-        userId: USER_ID,
-        lastSyncAt: null,
-        sizeBytes: null,
-      });
       await expect(service.confirmSync(USER_ID, 1024)).resolves.toBeUndefined();
     });
 
-    it('updates an existing record when one is found', async () => {
-      drizzleMock._selectGet.mockResolvedValueOnce({
-        userId: USER_ID,
-        lastSyncAt: new Date(),
-        sizeBytes: 512,
-      });
+    it('calls DynamoDBService.upsertSyncMetadata with userId and sizeBytes', async () => {
       await service.confirmSync(USER_ID, 2048);
-      expect(drizzleMock.db.update).toHaveBeenCalled();
-    });
-
-    it('inserts a new record when none exists', async () => {
-      drizzleMock._selectGet.mockResolvedValueOnce(null);
-      await service.confirmSync(USER_ID, 2048);
-      expect(drizzleMock.db.insert).toHaveBeenCalled();
-    });
-
-    it('stores the provided sizeBytes in the record', async () => {
-      drizzleMock._selectGet.mockResolvedValueOnce({
-        userId: USER_ID,
-        lastSyncAt: null,
-        sizeBytes: null,
-      });
-      await service.confirmSync(USER_ID, 9_999_999);
-      expect(drizzleMock._chains.update.set).toHaveBeenCalledWith(
-        expect.objectContaining({ sizeBytes: 9_999_999 }),
+      expect(mockDynamo.upsertSyncMetadata).toHaveBeenCalledWith(
+        USER_ID,
+        expect.any(Date),
+        2048,
       );
+    });
+
+    it('upserts even when sizeBytes is omitted', async () => {
+      await service.confirmSync(USER_ID);
+      expect(mockDynamo.upsertSyncMetadata).toHaveBeenCalledWith(
+        USER_ID,
+        expect.any(Date),
+        undefined,
+      );
+    });
+
+    it('calls upsertSyncMetadata with a recent lastSyncAt timestamp', async () => {
+      const before = new Date();
+      await service.confirmSync(USER_ID, 512);
+      const after = new Date();
+
+      const [, lastSyncAt] = mockDynamo.upsertSyncMetadata.mock.calls[0] as [string, Date, number];
+      expect(lastSyncAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(lastSyncAt.getTime()).toBeLessThanOrEqual(after.getTime());
     });
   });
 
-  // ── S3 key format ──────────────────────────────────────────────────────────
+  // ── S3 key format ────────────────────────────────────────────────────────────
 
   describe('S3 key format', () => {
     it('key format is "backups/{userId}/instructor.db"', async () => {

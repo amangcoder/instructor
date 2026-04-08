@@ -70,14 +70,14 @@ class _SessionGestureDetectorState extends State<SessionGestureDetector> {
   void _onTap() {
     widget.onTouchDetected();
     _tapCount++;
+    // Cancel any pending timer and restart it so the window always extends
+    // from the most-recent tap. Dispatch is deferred to the timer callback so
+    // that ALL taps within the 400 ms window are counted before any action is
+    // taken. This prevents a premature double-tap dispatch when the user's
+    // third tap arrives just after the previous timer would have fired.
+    // Note: the 400 ms window means three taps must all fall within 400 ms of
+    // the last tap to register as a triple-tap.
     _multiTapTimer?.cancel();
-
-    if (_tapCount >= 3) {
-      _tapCount = 0;
-      widget.onSkipBackward();
-      return;
-    }
-
     _multiTapTimer = Timer(_multiTapWindow, () {
       final count = _tapCount;
       _tapCount = 0;
@@ -85,26 +85,43 @@ class _SessionGestureDetectorState extends State<SessionGestureDetector> {
         widget.onTogglePause();
       } else if (count == 2) {
         widget.onSkipForward();
+      } else {
+        widget.onSkipBackward();
       }
-      // count >= 3 already handled above
     });
   }
 
-  void _onHorizontalDragEnd(DragEndDetails details) {
-    widget.onTouchDetected();
-    final vx = details.primaryVelocity ?? 0;
-    if (vx > _swipeVelocityThreshold) {
-      widget.onSkipForward();
-    } else if (vx < -_swipeVelocityThreshold) {
-      widget.onSkipBackward();
-    }
+  /// Called when the pan gesture is recognised by the arena — cancels the
+  /// long-press timer so a swipe does not accidentally trigger end-session.
+  void _onPanStart(DragStartDetails _) {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
   }
 
-  void _onVerticalDragEnd(DragEndDetails details) {
+  /// Unified pan-end handler that decomposes velocity into horizontal vs
+  /// vertical components and dispatches the appropriate callback based on
+  /// which axis dominates. Using a single [onPanEnd] instead of separate
+  /// [onHorizontalDragEnd] / [onVerticalDragEnd] avoids the Flutter gesture
+  /// arena conflict where both drag recognisers compete and one (usually
+  /// vertical) becomes unreliable.
+  void _onPanEnd(DragEndDetails details) {
     widget.onTouchDetected();
-    final vy = details.primaryVelocity ?? 0;
-    if (vy > _swipeVelocityThreshold) {
-      widget.onEnd();
+    final velocity = details.velocity.pixelsPerSecond;
+    final absDx = velocity.dx.abs();
+    final absDy = velocity.dy.abs();
+
+    if (absDx >= absDy) {
+      // Horizontal swipe dominates.
+      if (velocity.dx > _swipeVelocityThreshold) {
+        widget.onSkipForward();
+      } else if (velocity.dx < -_swipeVelocityThreshold) {
+        widget.onSkipBackward();
+      }
+    } else {
+      // Vertical swipe dominates.
+      if (velocity.dy > _swipeVelocityThreshold) {
+        widget.onEnd();
+      }
     }
   }
 
@@ -141,8 +158,8 @@ class _SessionGestureDetectorState extends State<SessionGestureDetector> {
       onTapDown: _onTapDown,
       onTapUp: _onTapUp,
       onTapCancel: _onTapCancel,
-      onHorizontalDragEnd: _onHorizontalDragEnd,
-      onVerticalDragEnd: _onVerticalDragEnd,
+      onPanStart: _onPanStart,
+      onPanEnd: _onPanEnd,
       child: widget.child,
     );
   }

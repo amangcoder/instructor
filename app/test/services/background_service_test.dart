@@ -291,14 +291,49 @@ void main() {
       expect(item!.title, 'Evening Meditation');
     });
 
-    test('mediaItem artist contains step number on state change', () async {
+    test(
+        'mediaItem artist falls back to "Step N" when no step text in state',
+        () async {
+      // _runningState does not set currentStepText, so the "Step N" fallback
+      // kicks in: currentStepIndex 2 → "Step 3".
       engine.stateController.add(_runningState(currentStepIndex: 2));
       await Future<void>.delayed(Duration.zero);
 
       final item = handler.mediaItem.value;
       expect(item, isNotNull);
-      // currentStepIndex 2 → "Step 3"
       expect(item!.artist, 'Step 3');
+    });
+
+    test('mediaItem artist shows actual step text when state carries it',
+        () async {
+      engine.stateController.add(ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 0,
+        timeRemaining: const Duration(seconds: 20),
+        status: ExecutionStatus.running,
+        currentStepText: 'Inhale for four counts',
+        currentStepType: StepType.say,
+      ));
+      await Future<void>.delayed(Duration.zero);
+
+      final item = handler.mediaItem.value;
+      expect(item, isNotNull);
+      expect(item!.artist, 'Inhale for four counts');
+    });
+
+    test('mediaItem artist shows Wait format for WaitStep state', () async {
+      engine.stateController.add(ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 1,
+        timeRemaining: const Duration(seconds: 15),
+        status: ExecutionStatus.running,
+        currentStepType: StepType.wait,
+      ));
+      await Future<void>.delayed(Duration.zero);
+
+      final item = handler.mediaItem.value;
+      expect(item, isNotNull);
+      expect(item!.artist, 'Wait: 15s remaining');
     });
 
     test('mediaItem id is stable across state updates with same plan', () async {
@@ -535,7 +570,9 @@ void main() {
       expect(item.title, 'Yoga Flow');
     });
 
-    test('artist shows "Step N" where N is currentStepIndex + 1', () {
+    // When currentStepText is null (no step text in state), fall back to
+    // "Step N" so the lock screen always shows something meaningful.
+    test('artist falls back to "Step N" when currentStepText is null', () {
       expect(
         executionStateToMediaItem(_runningState(currentStepIndex: 0)).artist,
         'Step 1',
@@ -548,6 +585,86 @@ void main() {
         executionStateToMediaItem(_runningState(currentStepIndex: 9)).artist,
         'Step 10',
       );
+    });
+
+    test('artist shows actual step text when currentStepText is provided', () {
+      final state = ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 2,
+        timeRemaining: const Duration(seconds: 10),
+        status: ExecutionStatus.running,
+        currentStepText: 'Breathe in deeply',
+        currentStepType: StepType.say,
+      );
+      expect(executionStateToMediaItem(state).artist, 'Breathe in deeply');
+    });
+
+    test('artist is truncated to 100 chars with ellipsis for long step text',
+        () {
+      // 101-character step text — must be truncated to exactly 100 chars.
+      final longText = 'A' * 101;
+      final state = ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 0,
+        timeRemaining: const Duration(seconds: 5),
+        status: ExecutionStatus.running,
+        currentStepText: longText,
+        currentStepType: StepType.say,
+      );
+      final artist = executionStateToMediaItem(state).artist;
+      expect(artist.length, 100);
+      expect(artist, endsWith('...'));
+    });
+
+    test('artist is NOT truncated when step text is exactly 100 chars', () {
+      final exactText = 'B' * 100;
+      final state = ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 0,
+        timeRemaining: const Duration(seconds: 5),
+        status: ExecutionStatus.running,
+        currentStepText: exactText,
+        currentStepType: StepType.say,
+      );
+      final artist = executionStateToMediaItem(state).artist;
+      expect(artist, exactText);
+    });
+
+    test('WaitStep shows "Wait: Ns remaining" using timeRemaining', () {
+      final state = ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 1,
+        timeRemaining: const Duration(seconds: 45),
+        status: ExecutionStatus.running,
+        currentStepType: StepType.wait,
+        currentStepDuration: const Duration(seconds: 60),
+      );
+      expect(executionStateToMediaItem(state).artist, 'Wait: 45s remaining');
+    });
+
+    test('WaitStep uses timeRemaining not currentStepDuration for Ns value',
+        () {
+      // timeRemaining=30s but total step duration is 120s — must show 30s.
+      final state = ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 0,
+        timeRemaining: const Duration(seconds: 30),
+        status: ExecutionStatus.running,
+        currentStepType: StepType.wait,
+        currentStepDuration: const Duration(seconds: 120),
+      );
+      expect(executionStateToMediaItem(state).artist, 'Wait: 30s remaining');
+    });
+
+    test('WaitStep with zero remaining shows "Wait: 0s remaining"', () {
+      final state = ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 0,
+        timeRemaining: Duration.zero,
+        status: ExecutionStatus.running,
+        currentStepType: StepType.wait,
+      );
+      expect(executionStateToMediaItem(state).artist, 'Wait: 0s remaining');
     });
 
     test('duration is plan totalDuration', () {

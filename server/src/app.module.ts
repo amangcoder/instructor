@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { DatabaseModule } from './database/database.module';
-import { RedisModule } from './redis/redis.module';
-import { RedisThrottlerStorage } from './redis/redis-throttler.storage';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { DynamoDBModule } from './dynamodb/dynamodb.module';
+import { SESEmailModule } from './email/ses-email.module';
+import { DynamoDBRateLimiterModule } from './ratelimit/dynamodb-ratelimit.module';
 import { AuthModule } from './auth/auth.module';
 import { TtsModule } from './tts/tts.module';
 import { PlansModule } from './plans/plans.module';
@@ -13,20 +12,12 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
 @Module({
   imports: [
-    // Global Redis connection (must be before ThrottlerModule).
-    RedisModule,
-
-    // Rate limit: 60 requests per minute per IP (Redis-backed).
-    ThrottlerModule.forRootAsync({
-      useFactory: (storage: RedisThrottlerStorage) => ({
-        throttlers: [{ ttl: 60_000, limit: 60 }],
-        storage,
-      }),
-      inject: [RedisThrottlerStorage],
-    }),
-
-    // Foundation: global database service.
-    DatabaseModule,
+    // Global AWS service modules (DynamoDB, SES, rate limiter).
+    // These are @Global() — all feature modules can inject their services
+    // without importing these modules individually.
+    DynamoDBModule,
+    SESEmailModule,
+    DynamoDBRateLimiterModule,
 
     // Feature modules.
     AuthModule,
@@ -36,7 +27,6 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
   ],
   controllers: [HealthController],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: ApiLoggerInterceptor },
   ],
 })

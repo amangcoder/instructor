@@ -2,14 +2,17 @@ import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { JsonLoggerService } from './common/json-logger.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const logger = new JsonLoggerService();
+
+  const app = await NestFactory.create(AppModule, { logger });
 
   // CORS: allow explicit origins (Flutter web dev + configured origins).
-  const allowedOrigins = (
-    process.env.CORS_ORIGINS ?? 'http://localhost:3072'
-  ).split(',').map((o) => o.trim());
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3072')
+    .split(',')
+    .map((o) => o.trim());
 
   app.enableCors({
     origin: allowedOrigins,
@@ -25,7 +28,14 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3071;
   await app.listen(port);
-  console.log(`Server running on port ${port}`);
-  console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
+
+  logger.log(
+    { msg: 'Server running', port, logLevel: process.env.LOG_LEVEL ?? 'debug' },
+    'Bootstrap',
+  );
+  logger.log(
+    { msg: 'CORS allowed origins', origins: allowedOrigins },
+    'Bootstrap',
+  );
 }
 bootstrap();

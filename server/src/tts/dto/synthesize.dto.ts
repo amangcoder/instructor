@@ -25,7 +25,7 @@ export class SynthesizeDto {
    */
   @IsOptional()
   @IsString()
-  @IsIn(['gemini', 'kokoro'], { message: 'provider must be "gemini" or "kokoro"' })
+  @IsIn(['gemini', 'kokoro', 'elevenlabs'], { message: 'provider must be "gemini", "kokoro", or "elevenlabs"' })
   provider?: string;
 
   /**

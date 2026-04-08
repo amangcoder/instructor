@@ -59,7 +59,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -67,6 +67,14 @@ class AppDatabase extends _$AppDatabase {
           await m.createAll();
         },
         onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 3) {
+            // v2 → v3: add ambientAssetKey column to execution_state for
+            // crash-recovery ambient track identity persistence.
+            await m.addColumn(
+              executionStateTable,
+              executionStateTable.ambientAssetKey,
+            );
+          }
           if (from < 2) {
             // v1 → v2: add provider and speechRate columns to tts_cache.
             await m.addColumn(ttsCacheTable, ttsCacheTable.provider);

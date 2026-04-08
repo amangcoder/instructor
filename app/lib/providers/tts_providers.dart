@@ -33,16 +33,10 @@ extension TtsProviderSettingsKeys on AppSettingsKeys {
 
 /// Fetches the list of TTS providers + their voices/locales from the backend.
 ///
-/// Re-fetches whenever the backend server URL changes.
 /// Returns an [AsyncValue<TtsProvidersResponse>] for error/loading handling.
 @riverpod
 Future<TtsProvidersResponse> ttsProviders(Ref ref) async {
-  final settings = ref.watch(appSettingsProvider);
-  final serverUrl =
-      await settings.read(AppSettingsKeys.backendServerUrl) ??
-          kDefaultBackendServerUrl;
-
-  final uri = Uri.parse('$serverUrl/api/tts/providers');
+  final uri = Uri.parse('$kBackendUrl/api/tts/providers');
   final response = await http.get(uri).timeout(const Duration(seconds: 15));
 
   if (response.statusCode != 200) {

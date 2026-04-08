@@ -27,8 +27,10 @@
 library audio_engine;
 
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -36,6 +38,25 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:instructor/data/audio_assets.dart';
 
 part 'audio_engine.g.dart';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Exceptions
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Thrown by [AudioEngine.playVoice] and [AudioEngine.playEffect] when
+/// [AudioEngine.stopAll] or [AudioEngine.dispose] interrupts in-progress
+/// audio playback before natural completion.
+///
+/// The [PlanExecutionEngine] catches this exception to distinguish a
+/// deliberate user-requested stop from an unexpected audio error, so that
+/// the execution engine can cleanly halt without logging a spurious error.
+class StoppedByUserException implements Exception {
+  const StoppedByUserException();
+
+  @override
+  String toString() =>
+      'StoppedByUserException: audio playback was stopped by the user';
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public interface
@@ -99,6 +120,14 @@ abstract class AudioEngine {
   /// [PlanExecutionEngine] to persist the position on every step transition
   /// for crash recovery.
   Duration? get currentAmbientPosition;
+
+  /// The asset key passed to the most recent [startAmbient] call, or `null`
+  /// if no ambient track is currently loaded (i.e. [stopAll] or
+  /// [stopAmbient] was called after the last [startAmbient]).
+  ///
+  /// Used by [PlanExecutionEngine] to re-load the correct ambient track when
+  /// resuming a paused session.
+  String? get currentAmbientAssetKey;
 
   /// Seeks the ambient player to [position].
   ///
@@ -182,6 +211,11 @@ class AudioEngineImpl implements AudioEngine {
   /// or [dispose] to unblock any in-progress [playVoice] call.
   Completer<void>? _voiceCompleter;
 
+  // ── Ambient track identity ────────────────────────────────────────────────
+
+  /// The asset key of the most recently loaded ambient track, or `null`.
+  String? _currentAmbientAssetKey;
+
   // ── Lifecycle guard ──────────────────────────────────────────────────────
 
   bool _disposed = false;
@@ -194,14 +228,32 @@ class AudioEngineImpl implements AudioEngine {
   Future<void> playVoice(String filePath, {double speed = 1.0}) async {
     _assertNotDisposed();
 
+    debugPrint('AudioEngine: playVoice called — file=$filePath, speed=$speed');
+
+    // Verify the file exists and has content before attempting playback.
+    final file = File(filePath);
+    if (!await file.exists()) {
+      throw StateError('AudioEngine: file does not exist: $filePath');
+    }
+    final fileSize = await file.length();
+    debugPrint('AudioEngine: file verified — $fileSize bytes');
+    // debugger(message: 'playVoice entry — file=$filePath, size=$fileSize bytes, speed=$speed');
+    if (fileSize == 0) {
+      throw StateError('AudioEngine: file is empty: $filePath');
+    }
+
     // Cancel any in-progress restore fade from a previous voice playback.
     _cancelFade();
     _voiceCompletionSubscription?.cancel();
     _voiceCompletionSubscription = null;
 
     // Unblock any previous pending playVoice call (rapid succession guard).
+    // Complete with StoppedByUserException so the previous caller (e.g.
+    // _executeSayStep) treats the interruption as a deliberate stop rather than
+    // a successful completion — preventing voicePlayedSuccessfully=true and the
+    // consequent ambient duck staying active after rapid step transitions.
     if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
-      _voiceCompleter!.complete();
+      _voiceCompleter!.completeError(const StoppedByUserException());
     }
     _voiceCompleter = Completer<void>();
 
@@ -213,29 +265,47 @@ class AudioEngineImpl implements AudioEngine {
     );
 
     // Load and play the voice file at the requested speed.
+    debugPrint('AudioEngine: loading file into player…');
     await _voicePlayer.setFilePath(filePath);
+    final duration = _voicePlayer.duration;
+    debugPrint('AudioEngine: file loaded — duration=$duration');
     await _voicePlayer.setSpeed(speed.clamp(0.5, 2.0));
     await _voicePlayer.seek(Duration.zero);
 
-    // Restore ambient volume when voice playback finishes, and resolve the
-    // completer so that callers awaiting playVoice() are unblocked.
+    // Listen for completion OR unexpected idle (error recovery).
     _voiceCompletionSubscription = _voicePlayer.processingStateStream
-        .where((state) => state == ProcessingState.completed)
-        .listen((_) {
-      _voiceCompletionSubscription?.cancel();
-      _voiceCompletionSubscription = null;
-      // Restore on the event loop so the completion callback isn't blocked.
-      unawaited(restoreAmbient());
-      if (!(_voiceCompleter?.isCompleted ?? true)) {
-        _voiceCompleter!.complete();
+        .listen((state) {
+      debugPrint('AudioEngine: processingState=$state');
+      if (state == ProcessingState.completed) {
+        _voiceCompletionSubscription?.cancel();
+        _voiceCompletionSubscription = null;
+        unawaited(restoreAmbient());
+        if (!(_voiceCompleter?.isCompleted ?? true)) {
+          _voiceCompleter!.complete();
+        }
+        _voiceCompleter = null;
+      } else if (state == ProcessingState.idle) {
+        // Player transitioned to idle without completing — likely a decoding
+        // or audio-focus error that didn't surface through play().
+        _voiceCompletionSubscription?.cancel();
+        _voiceCompletionSubscription = null;
+        unawaited(restoreAmbient());
+        if (!(_voiceCompleter?.isCompleted ?? true)) {
+          _voiceCompleter!.completeError(
+            StateError('AudioEngine: player went idle without completing '
+                '(possible decoding error for $filePath)'),
+          );
+        }
+        _voiceCompleter = null;
       }
-      _voiceCompleter = null;
     });
 
     // Guard against playback errors. just_audio surfaces errors through the
     // play() Future. Without catching them, a failed play() would leave
     // _voiceCompleter pending forever and hang the execution engine.
+    debugPrint('AudioEngine: calling play()…');
     _voicePlayer.play().catchError((Object e) {
+      debugPrint('AudioEngine: play() error — $e');
       _voiceCompletionSubscription?.cancel();
       _voiceCompletionSubscription = null;
       unawaited(restoreAmbient());
@@ -248,6 +318,7 @@ class AudioEngineImpl implements AudioEngine {
     // Await completion so that the caller (PlanExecutionEngine) can sequence
     // steps correctly — the next step only starts after voice is done.
     await _voiceCompleter!.future;
+    debugPrint('AudioEngine: playVoice completed');
   }
 
   @override
@@ -261,7 +332,7 @@ class AudioEngineImpl implements AudioEngine {
     _voiceCompletionSubscription = null;
 
     if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
-      _voiceCompleter!.complete();
+      _voiceCompleter!.completeError(const StoppedByUserException());
     }
     _voiceCompleter = Completer<void>();
 
@@ -275,16 +346,32 @@ class AudioEngineImpl implements AudioEngine {
     await _voicePlayer.setAsset(assetPath);
     await _voicePlayer.seek(Duration.zero);
 
+    // Listen for completion OR unexpected idle (error recovery) — same pattern
+    // as playVoice so that effects that fail to decode don't hang the engine.
     _voiceCompletionSubscription = _voicePlayer.processingStateStream
-        .where((state) => state == ProcessingState.completed)
-        .listen((_) {
-      _voiceCompletionSubscription?.cancel();
-      _voiceCompletionSubscription = null;
-      unawaited(restoreAmbient());
-      if (!(_voiceCompleter?.isCompleted ?? true)) {
-        _voiceCompleter!.complete();
+        .listen((state) {
+      if (state == ProcessingState.completed) {
+        _voiceCompletionSubscription?.cancel();
+        _voiceCompletionSubscription = null;
+        unawaited(restoreAmbient());
+        if (!(_voiceCompleter?.isCompleted ?? true)) {
+          _voiceCompleter!.complete();
+        }
+        _voiceCompleter = null;
+      } else if (state == ProcessingState.idle) {
+        // Player transitioned to idle without completing — likely a decoding
+        // or audio-focus error that didn't surface through play().
+        _voiceCompletionSubscription?.cancel();
+        _voiceCompletionSubscription = null;
+        unawaited(restoreAmbient());
+        if (!(_voiceCompleter?.isCompleted ?? true)) {
+          _voiceCompleter!.completeError(
+            StateError('AudioEngine: effect player went idle without completing '
+                '(possible decoding error for $assetKey)'),
+          );
+        }
+        _voiceCompleter = null;
       }
-      _voiceCompleter = null;
     });
 
     _voicePlayer.play().catchError((Object e) {
@@ -314,6 +401,7 @@ class AudioEngineImpl implements AudioEngine {
 
     _targetAmbientVolume = volume.clamp(0.0, 1.0);
     _currentAmbientVolume = _targetAmbientVolume;
+    _currentAmbientAssetKey = assetKey;
 
     final assetPath = resolveAudioAssetPath(assetKey);
 
@@ -327,6 +415,7 @@ class AudioEngineImpl implements AudioEngine {
   Future<void> stopAmbient({int fadeOutMs = kDefaultFadeOutMs}) async {
     _assertNotDisposed();
     _cancelFade();
+    _currentAmbientAssetKey = null;
 
     if (fadeOutMs > 0 && _ambientPlayer.playing) {
       await _animateAmbientVolume(
@@ -371,11 +460,13 @@ class AudioEngineImpl implements AudioEngine {
     _cancelFade();
     _voiceCompletionSubscription?.cancel();
     _voiceCompletionSubscription = null;
+    _currentAmbientAssetKey = null;
 
-    // Unblock any pending playVoice() awaiter so the execution engine
-    // is not left suspended when pause/stop is requested.
+    // Signal any pending playVoice()/playEffect() awaiter that the stop was
+    // deliberate (not an audio error) so the execution engine can cleanly
+    // halt rather than logging a spurious error.
     if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
-      _voiceCompleter!.complete();
+      _voiceCompleter!.completeError(const StoppedByUserException());
     }
     _voiceCompleter = null;
 
@@ -401,6 +492,9 @@ class AudioEngineImpl implements AudioEngine {
     }
     return _ambientPlayer.position;
   }
+
+  @override
+  String? get currentAmbientAssetKey => _currentAmbientAssetKey;
 
   @override
   Future<void> seekAmbient(Duration position) async {
@@ -446,8 +540,10 @@ class AudioEngineImpl implements AudioEngine {
     _voiceCompletionSubscription = null;
 
     // Unblock any pending playVoice() awaiter before tearing down players.
+    // Use StoppedByUserException so the caller can distinguish dispose from
+    // an audio error.
     if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
-      _voiceCompleter!.complete();
+      _voiceCompleter!.completeError(const StoppedByUserException());
     }
     _voiceCompleter = null;
 

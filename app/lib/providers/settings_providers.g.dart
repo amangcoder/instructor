@@ -159,29 +159,6 @@ final ttsLocaleSettingProvider = AutoDisposeStreamProvider<TtsLocale>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef TtsLocaleSettingRef = AutoDisposeStreamProviderRef<TtsLocale>;
-String _$backendServerUrlSettingHash() =>
-    r'c211d1068055a739b22dabf9d8c5ead580557ac4';
-
-/// Reactive stream of the backend server URL.
-///
-/// Emits [kDefaultBackendServerUrl] when the key is absent.
-///
-/// Copied from [backendServerUrlSetting].
-@ProviderFor(backendServerUrlSetting)
-final backendServerUrlSettingProvider =
-    AutoDisposeStreamProvider<String>.internal(
-  backendServerUrlSetting,
-  name: r'backendServerUrlSettingProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$backendServerUrlSettingHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-// ignore: unused_element
-typedef BackendServerUrlSettingRef = AutoDisposeStreamProviderRef<String>;
 String _$batteryPromptDismissedSettingHash() =>
     r'd8d7254e92c0e85098602e788c15894ded3b25a9';
 

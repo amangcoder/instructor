@@ -16,9 +16,16 @@ import {
 } from '@aws-sdk/client-s3';
 import { ProviderRegistryService } from './providers/provider-registry.service';
 import { KokoroProxyService } from './providers/kokoro-proxy.service';
+import { ElevenLabsProxyService } from './providers/elevenlabs-proxy.service';
 
-/** L1: local disk cache directory (fast, ephemeral across deploys). */
-const TTS_CACHE_DIR = join(process.cwd(), 'tts-cache');
+/**
+ * L1: local disk cache directory.
+ * On Lambda: /tmp/tts-cache (ephemeral per-container, survives warm invocations).
+ * Locally: <cwd>/tts-cache (persistent across restarts).
+ */
+const TTS_CACHE_DIR = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? '/tmp/tts-cache'
+  : join(process.cwd(), 'tts-cache');
 
 /** S3 key prefix for all TTS audio files. */
 const S3_PREFIX = 'tts';
@@ -85,6 +92,7 @@ export class TtsService {
   constructor(
     private readonly providerRegistry: ProviderRegistryService,
     private readonly kokoroProxy: KokoroProxyService,
+    private readonly elevenLabsProxy: ElevenLabsProxyService,
   ) {
     // L1: ensure local cache directory exists.
     if (!existsSync(TTS_CACHE_DIR)) {
@@ -314,6 +322,8 @@ export class TtsService {
     let audio: Buffer;
     if (provider === 'kokoro') {
       audio = await this.synthesizeKokoro(text, rawVoice, locale ?? 'en-us');
+    } else if (provider === 'elevenlabs') {
+      audio = await this.synthesizeElevenLabs(text, rawVoice);
     } else {
       audio = await this.synthesizeGemini(text, rawVoice, locale);
     }
@@ -456,6 +466,16 @@ export class TtsService {
     return this.kokoroProxy.synthesize({ text, voice, language: lang });
   }
 
+  // ── ElevenLabs TTS ─────────────────────────────────────────────────────────
+
+  private async synthesizeElevenLabs(
+    text: string,
+    voice: string,
+  ): Promise<Buffer> {
+    this.logger.log(`Routing to ElevenLabs — voice=${voice}`);
+    return this.elevenLabsProxy.synthesize({ text, voice });
+  }
+
   // ── Voice validation ──────────────────────────────────────────────────────
 
   /**
@@ -471,6 +491,16 @@ export class TtsService {
         throw new BadRequestException(
           `Unknown voice '${voice}' for provider 'kokoro'. Available: ${[...KOKORO_VOICES].join(', ')}`,
         );
+      }
+      return;
+    }
+
+    if (provider === 'elevenlabs') {
+      // ElevenLabs voice IDs are opaque strings (e.g. 'EXAVITQu4vr4xnSDxMaL').
+      // We don't maintain a static allowlist — the API itself validates them.
+      // Just ensure the ID is non-empty.
+      if (!voice) {
+        throw new BadRequestException('Voice ID is required for ElevenLabs');
       }
       return;
     }

@@ -2,19 +2,27 @@
   "name": "instructor-infra",
   "version": "0.1.0",
   "private": true,
-  "description": "AWS CDK infrastructure for the Instructor app (S3 bucket + IAM)",
+  "description": "AWS CDK infrastructure for the Instructor app (S3, IAM, DynamoDB, Lambda, API Gateway)",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
     "cdk": "cdk",
     "deploy": "cdk deploy --all",
+    "deploy:dev": "cdk deploy --all --context env=dev",
+    "deploy:prod": "cdk deploy --all --context env=prod",
     "destroy": "cdk destroy --all",
     "diff": "cdk diff",
-    "synth": "cdk synth"
+    "synth": "cdk synth",
+    "test": "jest",
+    "test:unit": "jest"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/node": "22.x",
     "aws-cdk": "2.x",
+    "esbuild": "^0.25.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "typescript": "~5.7.0"
   },
   "dependencies": {

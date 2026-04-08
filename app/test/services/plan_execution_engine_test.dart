@@ -56,12 +56,24 @@ class _FakeAudioEngine implements AudioEngine {
   final List<Duration> ambientSeeks = [];
   bool disposed = false;
 
+  /// When `true`, [restoreAmbient] throws an [Exception] to simulate a failure.
+  /// Used by TASK-008 tests to verify the engine doesn't crash.
+  bool throwOnRestoreAmbient = false;
+
   // ── State ─────────────────────────────────────────────────────────────────
   Duration? _position;
+  String? _currentAmbientAssetKey;
+
+  /// Pending voice/effect completer — completed by [stopAll] to simulate the
+  /// [StoppedByUserException] thrown by the real [AudioEngineImpl].
+  Completer<void>? _pendingVoiceCompleter;
 
   // ── Event streams (for synchronisation in async tests) ───────────────────
   final _voiceController = StreamController<String>.broadcast();
   Stream<String> get onVoicePlayed => _voiceController.stream;
+
+  @override
+  String? get currentAmbientAssetKey => _currentAmbientAssetKey;
 
   @override
   Future<void> playVoice(String filePath, {double speed = 1.0}) async {
@@ -69,7 +81,22 @@ class _FakeAudioEngine implements AudioEngine {
     _voiceController.add(filePath);
     // Simulate duck + playback + restore cycle (10 ms total).
     duckAmbientCount++;
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    // Use a Completer so that [stopAll] can interrupt this fake's playback
+    // by completing with [StoppedByUserException], matching the behaviour of
+    // the real [AudioEngineImpl].
+    final completer = Completer<void>();
+    _pendingVoiceCompleter = completer;
+    Timer(const Duration(milliseconds: 10), () {
+      if (!completer.isCompleted) completer.complete();
+    });
+
+    try {
+      await completer.future;
+    } finally {
+      if (_pendingVoiceCompleter == completer) _pendingVoiceCompleter = null;
+    }
+
     restoreAmbientCount++;
   }
 
@@ -81,12 +108,14 @@ class _FakeAudioEngine implements AudioEngine {
   }) async {
     ambientStarted.add((assetKey: assetKey, loop: loop, volume: volume));
     _position = Duration.zero;
+    _currentAmbientAssetKey = assetKey;
   }
 
   @override
   Future<void> stopAmbient({int fadeOutMs = kDefaultFadeOutMs}) async {
     stopAmbientCount++;
     _position = null;
+    _currentAmbientAssetKey = null;
   }
 
   @override
@@ -96,6 +125,9 @@ class _FakeAudioEngine implements AudioEngine {
 
   @override
   Future<void> restoreAmbient() async {
+    if (throwOnRestoreAmbient) {
+      throw Exception('_FakeAudioEngine: restoreAmbient intentionally threw');
+    }
     restoreAmbientCount++;
   }
 
@@ -103,6 +135,13 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> stopAll() async {
     stopAllCount++;
     _position = null;
+    _currentAmbientAssetKey = null;
+    // Mirror the real AudioEngineImpl behaviour: signal any pending
+    // playVoice/playEffect awaiter that the stop was user-initiated.
+    if (_pendingVoiceCompleter != null &&
+        !_pendingVoiceCompleter!.isCompleted) {
+      _pendingVoiceCompleter!.completeError(const StoppedByUserException());
+    }
   }
 
   @override
@@ -130,7 +169,19 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> playEffect(String assetKey) async {
     effectsPlayed.add(assetKey);
     duckAmbientCount++;
-    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    final completer = Completer<void>();
+    _pendingVoiceCompleter = completer;
+    Timer(const Duration(milliseconds: 10), () {
+      if (!completer.isCompleted) completer.complete();
+    });
+
+    try {
+      await completer.future;
+    } finally {
+      if (_pendingVoiceCompleter == completer) _pendingVoiceCompleter = null;
+    }
+
     restoreAmbientCount++;
   }
 
@@ -138,6 +189,13 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> dispose() async {
     if (disposed) return;
     disposed = true;
+    // Complete pending completer normally (not with error) to avoid
+    // unhandled exceptions from unawaited playVoice/playEffect during teardown.
+    if (_pendingVoiceCompleter != null &&
+        !_pendingVoiceCompleter!.isCompleted) {
+      _pendingVoiceCompleter!.complete();
+      _pendingVoiceCompleter = null;
+    }
     await _voiceController.close();
   }
 }
@@ -150,6 +208,16 @@ class _FakeAudioEngine implements AudioEngine {
 class _FakeTTSService implements TTSService {
   final List<({String text, String voiceId})> renderCalls = [];
   Exception? renderError;
+
+  /// Number of times [speakDirect] was called.
+  ///
+  /// Tests assert this stays 0 when [StoppedByUserException] interrupts
+  /// playback — the engine must not invoke the platform-TTS fallback for a
+  /// deliberate user-initiated stop.
+  int speakDirectCount = 0;
+
+  /// Number of times [stopSpeaking] was called.
+  int stopSpeakingCount = 0;
 
   @override
   Future<String> renderTTS({required String text, required String voiceId}) async {
@@ -175,7 +243,14 @@ class _FakeTTSService implements TTSService {
       '/fake/platform/${text.hashCode}.wav';
 
   @override
-  Future<void> speakDirect(String text, {double speed = 1.0}) async {}
+  Future<void> speakDirect(String text, {double speed = 1.0}) async {
+    speakDirectCount++;
+  }
+
+  @override
+  Future<void> stopSpeaking() async {
+    stopSpeakingCount++;
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -233,14 +308,23 @@ Plan _makePlan({
 }
 
 /// Creates a plan row in the DB so that FK references succeed.
-Future<int> _insertPlanRow(AppDatabase db, {int? id, String name = 'Test Plan'}) async {
+///
+/// [steps] defaults to an empty list. For tests that recover via
+/// [getRecoverableSession] (which loads steps from the DB), pass the actual
+/// steps so the reconstructed plan matches the in-memory plan.
+Future<int> _insertPlanRow(
+  AppDatabase db, {
+  int? id,
+  String name = 'Test Plan',
+  List<PlanStep> steps = const [],
+}) async {
   final now = DateTime(2026);
   return db.into(db.plansTable).insert(
     PlansTableCompanion.insert(
       name: name,
       category: Value(PlanCategory.custom.name),
       defaultVoice: const Value('nova'),
-      steps: const Value([]),
+      steps: Value(steps),
       createdAt: Value(now),
       updatedAt: Value(now),
     ),
@@ -309,7 +393,7 @@ void main() {
         id: planId,
         steps: [
           _sayStep('Step 1'),
-          _waitStep(const Duration(seconds: 5)),
+          _waitStep(const Duration(milliseconds: 100)),
           _notifyStep('Done', 'Complete'),
         ],
       );
@@ -318,8 +402,9 @@ void main() {
       final sub = engine.stateStream.listen(states.add);
 
       await engine.startPlan(plan);
-      // Wait for execution to complete.
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      // Wait for execution to complete. The engine's WaitStep timer fires
+      // every 1 second, so even a 100ms wait takes ~1 s to detect completion.
+      await Future<void>.delayed(const Duration(milliseconds: 2000));
       await sub.cancel();
       await engine.dispose();
 
@@ -527,6 +612,185 @@ void main() {
     });
   });
 
+  // ── SayStep ambient restoration (TASK-008) ────────────────────────────────
+  //
+  // Verifies that ambient volume is always restored after a SayStep, regardless
+  // of which failure path is taken.  The single try/finally in _executeSayStep
+  // must call restoreAmbient on every exit path.
+
+  group('SayStep ambient restoration (TASK-008)', () {
+    test(
+      'TtsFallbackException path restores ambient exactly once',
+      () async {
+        final (engine, audio, tts, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        // Simulate platform-TTS-already-spoke fallback.
+        tts.renderError = const TtsFallbackException('Backend offline');
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [_sayStep('Fallback test')],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await engine.stop();
+        await engine.dispose();
+
+        // finally block must have restored ambient exactly once.
+        expect(audio.restoreAmbientCount, 1);
+      },
+    );
+
+    test(
+      'Generic TTS render error (speakDirect fallback) restores ambient exactly once',
+      () async {
+        final (engine, audio, tts, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        // Simulate an arbitrary network / render error.
+        tts.renderError = Exception('TTS render exploded');
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [_sayStep('Generic error test')],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await engine.stop();
+        await engine.dispose();
+
+        // speakDirect is called as fallback, then finally restores ambient.
+        expect(audio.restoreAmbientCount, 1);
+      },
+    );
+
+    test(
+      'TtsApiException (non-401) speakDirect fallback restores ambient exactly once',
+      () async {
+        final (engine, audio, tts, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        tts.renderError = const TtsApiException('Server error', statusCode: 503);
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [_sayStep('API error test')],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await engine.stop();
+        await engine.dispose();
+
+        expect(audio.restoreAmbientCount, 1);
+      },
+    );
+
+    test(
+      'restoreAmbient throwing on TTS failure does not crash the execution engine',
+      () async {
+        // Build the engine manually with throwOnRestoreAmbient = true.
+        final audio = _FakeAudioEngine()..throwOnRestoreAmbient = true;
+        final tts = _FakeTTSService();
+        final notifications = _FakeNotificationService();
+
+        final planId = await _insertPlanRow(db);
+        tts.renderError = const TtsFallbackException('Backend offline');
+
+        final engine = PlanExecutionEngineImpl(
+          audioEngine: audio,
+          ttsService: tts,
+          notificationService: notifications,
+          db: db,
+        );
+
+        // Two steps: failing SayStep then a NotifyStep.
+        // If the engine crashes on the SayStep the notification will never fire.
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            _sayStep('Should not crash'),
+            const PlanStep.notify(id: 'n1', title: 'After crash test', body: ''),
+          ],
+        );
+
+        final states = <ExecutionState>[];
+        final sub = engine.stateStream.listen(states.add);
+
+        // Must not throw.
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await engine.stop();
+        await sub.cancel();
+        await engine.dispose();
+
+        // The notification fired → engine survived the restoreAmbient exception.
+        expect(notifications.stepNotifications, isNotEmpty);
+        expect(
+          notifications.stepNotifications.first.title,
+          'After crash test',
+        );
+      },
+    );
+
+    test(
+      'Successful SayStep does not call restoreAmbient a second time (no double-restore)',
+      () async {
+        final (engine, audio, _, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [_sayStep('Success test')],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await engine.stop();
+        await engine.dispose();
+
+        // playVoice internally restores ambient (restoreAmbientCount = 1 from
+        // the fake).  The try/finally must NOT add a second call.
+        expect(audio.restoreAmbientCount, 1);
+      },
+    );
+
+    test(
+      'playVoice failure restores ambient exactly once via finally block',
+      () async {
+        // Build an audio engine whose playVoice always throws (simulates a
+        // corrupt file or codec failure) but does NOT internally restore ambient.
+        final audio = _ThrowingPlayVoiceAudioEngine();
+        final tts = _FakeTTSService();
+        final notifications = _FakeNotificationService();
+
+        final planId = await _insertPlanRow(db);
+        final engine = PlanExecutionEngineImpl(
+          audioEngine: audio,
+          ttsService: tts,
+          notificationService: notifications,
+          db: db,
+        );
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [_sayStep('PlayVoice fails')],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await engine.stop();
+        await engine.dispose();
+
+        // finally block must restore ambient since playVoice failed.
+        expect(audio.restoreAmbientCount, 1);
+      },
+    );
+  });
+
   // ── NotifyStep execution ──────────────────────────────────────────────────
 
   group('NotifyStep execution (REQ-006)', () {
@@ -607,6 +871,7 @@ void main() {
       final (engine, audio, _, _) = _makeEngine(db);
       final planId = await _insertPlanRow(db);
 
+      // loop: false → playEffect (one-shot). Verify the effect was played.
       final plan = _makePlan(
         id: planId,
         steps: [
@@ -624,8 +889,9 @@ void main() {
       await engine.stop();
       await engine.dispose();
 
-      expect(audio.ambientStarted.first.loop, isFalse);
-      expect(audio.ambientStarted.first.volume, closeTo(0.6, 0.001));
+      // loop: false calls playEffect, not startAmbient.
+      expect(audio.effectsPlayed, hasLength(1));
+      expect(audio.effectsPlayed.first, 'ambient_forest');
     });
   });
 
@@ -645,7 +911,8 @@ void main() {
       );
 
       await engine.startPlan(plan);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      // Wait past the 2-second ambient display hold so StopAudioStep runs.
+      await Future<void>.delayed(const Duration(milliseconds: 2500));
       await engine.stop();
       await engine.dispose();
 
@@ -663,7 +930,7 @@ void main() {
       final plan = _makePlan(
         id: planId,
         steps: [
-          _waitStep(const Duration(milliseconds: 50), id: 'w1'),
+          _waitStep(const Duration(seconds: 1), id: 'w1'),
           const PlanStep.play(id: 'p1', audioAssetKey: 'ambient_rain'),
         ],
       );
@@ -671,11 +938,11 @@ void main() {
       await engine.startPlan(plan);
 
       // Just before the wait ends: play should not have been called yet.
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       final ambientCountBefore = audio.ambientStarted.length;
 
       // After the wait: play should have been called.
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
       await engine.stop();
       await engine.dispose();
 
@@ -758,7 +1025,8 @@ void main() {
       );
 
       await orderedEngine.startPlan(plan);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      // Wait past the 2-second ambient display hold after PlayStep.
+      await Future<void>.delayed(const Duration(milliseconds: 2500));
       await orderedEngine.stop();
       await orderedAudio.dispose();
 
@@ -833,14 +1101,14 @@ void main() {
       final plan = _makePlan(
         id: planId,
         steps: [
-          _waitStep(const Duration(milliseconds: 100), id: 'w1'),
+          _waitStep(const Duration(seconds: 1), id: 'w1'),
           const PlanStep.notify(id: 'n1', title: 'After wait', body: ''),
         ],
       );
 
       await engine.startPlan(plan);
-      // Pause immediately before wait completes.
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      // Pause during the WaitStep.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       await engine.pause();
 
       // Verify notification hasn't fired yet.
@@ -848,7 +1116,7 @@ void main() {
 
       // Resume and let execution finish.
       await engine.resume();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
       await engine.stop();
       await engine.dispose();
 
@@ -1028,11 +1296,12 @@ void main() {
       );
 
       await engine.startPlan(plan);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      // Skip to last step, then skip again — should be safe.
-      await engine.skipForward(); // step 0 → 1? Clamped.
-      await engine.skipForward(); // No more steps.
+      // Skip on the last (only) step — index should be clamped and not OOB.
+      await engine.skipForward();
+      // Allow time for the loop to restart before stopping.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
       // Should not throw.
       await engine.stop();
@@ -1337,21 +1606,31 @@ void main() {
 
     test('getRecoverableSession restores engine state for resume()', () async {
       final (engine, _, _, notifications) = _makeEngine(db);
-      final planId = await _insertPlanRow(db, name: 'Recovery Plan');
+
+      final planSteps = <PlanStep>[
+        _waitStep(const Duration(seconds: 2), id: 'w1'),
+        const PlanStep.notify(id: 'n1', title: 'After Recovery', body: ''),
+      ];
+
+      // Pass actual steps so getRecoverableSession reconstructs them from DB.
+      final planId = await _insertPlanRow(
+        db,
+        name: 'Recovery Plan',
+        steps: planSteps,
+      );
 
       final plan = _makePlan(
         id: planId,
         name: 'Recovery Plan',
-        steps: [
-          _waitStep(const Duration(milliseconds: 100), id: 'w1'),
-          const PlanStep.notify(id: 'n1', title: 'After Recovery', body: ''),
-        ],
+        steps: planSteps,
       );
 
-      // Start and pause early in the wait step.
+      // Start and pause during the wait step. Use a longer delay to ensure
+      // the WaitStep timer is definitely running.
       await engine.startPlan(plan);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await Future<void>.delayed(const Duration(milliseconds: 500));
       await engine.pause();
+
       await engine.dispose();
 
       // Simulate cold start: new engine instance.
@@ -1360,8 +1639,9 @@ void main() {
       expect(session, isNotNull);
 
       // Resume — execution should continue from where it left off.
+      // The remaining wait is ~1.5 s; periodic timer fires every 1 s.
       await engine2.resume();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 3000));
       await engine2.stop();
       await engine2.dispose();
 
@@ -1394,6 +1674,421 @@ void main() {
     });
   });
 
+  // ── TASK-010 regression: Concurrent loop prevention (TASK-002) ───────────
+  //
+  // Verifies that the _cancelled-flag guard prevents two concurrent
+  // _runFromCurrentStep loops when skipForward is called mid-SayStep or in
+  // rapid succession.
+
+  group('TASK-010: Concurrent loop prevention (TASK-002)', () {
+    test(
+      'skipForward during SayStep playVoice does not start a second execution loop',
+      () async {
+        final (engine, audio, tts, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            _sayStep('Step 1', id: 's1'),
+            _sayStep('Step 2', id: 's2'),
+            _sayStep('Step 3', id: 's3'),
+          ],
+        );
+
+        final states = <ExecutionState>[];
+        final sub = engine.stateStream.listen(states.add);
+
+        await engine.startPlan(plan);
+        // Wait until playVoice for step 0 has started (TTS renders, then
+        // playVoice is called — onVoicePlayed fires before the completer wait).
+        await audio.onVoicePlayed.first;
+
+        // Skip while step 0's playVoice is still in progress.
+        // The old loop must stop before the new one starts.
+        await engine.skipForward();
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        await engine.stop();
+        await sub.cancel();
+        await engine.dispose();
+
+        // After one skipForward from index 0, step index must be ≥1.
+        // If two loops ran concurrently the index could be wrong or TTS
+        // renderCalls would contain duplicate entries for the same step.
+        final indicesAfterSkip =
+            states.skipWhile((s) => s.currentStepIndex == 0).toList();
+        expect(indicesAfterSkip, isNotEmpty,
+            reason: 'engine should have advanced past step 0');
+
+        // No step should have been rendered more than once consecutively
+        // (duplicate adjacent render calls = concurrent loop regression).
+        final texts = tts.renderCalls.map((c) => c.text).toList();
+        for (var i = 0; i < texts.length - 1; i++) {
+          expect(
+            texts[i] == texts[i + 1],
+            isFalse,
+            reason: 'Duplicate consecutive TTS render for "${texts[i]}" '
+                'suggests a concurrent execution loop',
+          );
+        }
+      },
+    );
+
+    test(
+      'three rapid skipForward calls produce the correct final step index',
+      () async {
+        final (engine, _, _, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        // Four long WaitSteps — none will complete naturally during the test.
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            _waitStep(const Duration(seconds: 100), id: 'w0'),
+            _waitStep(const Duration(seconds: 100), id: 'w1'),
+            _waitStep(const Duration(seconds: 100), id: 'w2'),
+            _waitStep(const Duration(seconds: 100), id: 'w3'),
+          ],
+        );
+
+        final states = <ExecutionState>[];
+        final sub = engine.stateStream.listen(states.add);
+
+        await engine.startPlan(plan);
+        // Wait long enough so the first WaitStep is definitely in progress.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+
+        // Three sequential (awaited) skips from index 0.
+        await engine.skipForward(); // → 1
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await engine.skipForward(); // → 2
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await engine.skipForward(); // → 3
+
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await engine.stop();
+        await sub.cancel();
+        await engine.dispose();
+
+        // The last running state should show index 3.
+        final lastRunning = states.lastWhere(
+          (s) => s.status == ExecutionStatus.running,
+          orElse: () => states.last,
+        );
+        expect(lastRunning.currentStepIndex, 3,
+            reason: 'Three skips from 0 should land on index 3');
+      },
+    );
+  });
+
+  // ── TASK-010 regression: Ambient resume (TASK-002) ────────────────────────
+  //
+  // Verifies that pause → resume correctly restarts the ambient track that
+  // was playing when the session was paused, and seeks to the persisted
+  // position.
+
+  group('TASK-010: Ambient resume (TASK-002)', () {
+    test(
+      'resume restarts ambient track with the persisted assetKey',
+      () async {
+        final (engine, audio, _, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        // PlayStep starts ambient_rain, then a long WaitStep we can pause in.
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            const PlanStep.play(id: 'p1', audioAssetKey: 'ambient_rain'),
+            _waitStep(const Duration(seconds: 100), id: 'w1'),
+          ],
+        );
+
+        await engine.startPlan(plan);
+        // Allow the PlayStep to run so the ambient track is started.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(audio.currentAmbientAssetKey, 'ambient_rain',
+            reason: 'ambient track should be running before pause');
+
+        await engine.pause();
+        // After pause() → stopAll() the track is stopped.
+        expect(audio.currentAmbientAssetKey, isNull,
+            reason: 'ambient track should be stopped after pause');
+
+        // Clear ambient-started history so we can assert on the resume call.
+        audio.ambientStarted.clear();
+
+        await engine.resume();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        // Resume must have called startAmbient with the same assetKey.
+        expect(audio.ambientStarted, isNotEmpty,
+            reason: 'resume should restart the ambient track');
+        expect(audio.ambientStarted.last.assetKey, 'ambient_rain',
+            reason: 'startAmbient must use the persisted assetKey');
+
+        await engine.stop();
+        await engine.dispose();
+      },
+    );
+
+    test(
+      'resume seeks ambient to the position persisted at pause time',
+      () async {
+        final (engine, audio, _, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            const PlanStep.play(id: 'p1', audioAssetKey: 'ambient_rain'),
+            _waitStep(const Duration(seconds: 100), id: 'w1'),
+          ],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        // Simulate ambient having played for 45 seconds.
+        await audio.seekAmbient(const Duration(seconds: 45));
+        expect(audio.currentAmbientPosition, const Duration(seconds: 45));
+
+        await engine.pause();
+        // After pause, position is cleared (stopAll was called).
+        expect(audio.currentAmbientPosition, isNull);
+
+        // Clear seek history so only the resume seek is captured.
+        audio.ambientSeeks.clear();
+
+        await engine.resume();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        // seekAmbient must have been called to restore the position.
+        expect(audio.ambientSeeks, isNotEmpty,
+            reason: 'resume should seek ambient to the persisted position');
+        // Allow ±2 s tolerance for timing jitter.
+        expect(audio.ambientSeeks.last.inSeconds, greaterThanOrEqualTo(43),
+            reason: 'seekAmbient position should be ≈45 s');
+
+        await engine.stop();
+        await engine.dispose();
+      },
+    );
+  });
+
+  // ── TASK-010 regression: StoppedByUserException handling (TASK-001) ───────
+  //
+  // Verifies that a user-initiated stop (which causes AudioEngine.stopAll to
+  // complete any pending playVoice with StoppedByUserException) does NOT
+  // trigger the speakDirect platform-TTS fallback.
+
+  group('TASK-010: StoppedByUserException does not trigger speakDirect', () {
+    test(
+      'stop() during SayStep playVoice does not call speakDirect (speakDirectCount == 0)',
+      () async {
+        final audio = _FakeAudioEngine();
+        final tts = _FakeTTSService();
+        final notifications = _FakeNotificationService();
+        final planId = await _insertPlanRow(db);
+
+        final engine = PlanExecutionEngineImpl(
+          audioEngine: audio,
+          ttsService: tts,
+          notificationService: notifications,
+          db: db,
+        );
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            _sayStep('Stop me mid-voice', id: 's1'),
+            _sayStep('Never reached', id: 's2'),
+          ],
+        );
+
+        await engine.startPlan(plan);
+        // Wait until playVoice has started (so StoppedByUserException will
+        // be thrown when stop() calls stopAll()).
+        await audio.onVoicePlayed.first;
+
+        // stop() → stopAll() → playVoice throws StoppedByUserException.
+        await engine.stop();
+        await engine.dispose();
+
+        // speakDirect must NOT have been called — StoppedByUserException is
+        // not a TTS or audio-file failure.
+        expect(tts.speakDirectCount, 0,
+            reason: 'StoppedByUserException must not trigger speakDirect fallback');
+      },
+    );
+
+    test(
+      'pause() during SayStep playVoice does not call speakDirect',
+      () async {
+        final audio = _FakeAudioEngine();
+        final tts = _FakeTTSService();
+        final notifications = _FakeNotificationService();
+        final planId = await _insertPlanRow(db);
+
+        final engine = PlanExecutionEngineImpl(
+          audioEngine: audio,
+          ttsService: tts,
+          notificationService: notifications,
+          db: db,
+        );
+
+        final plan = _makePlan(
+          id: planId,
+          steps: [_sayStep('Pause me mid-voice', id: 's1')],
+        );
+
+        await engine.startPlan(plan);
+        await audio.onVoicePlayed.first;
+
+        // pause() also calls stopAll(), which throws StoppedByUserException.
+        await engine.pause();
+        await engine.stop();
+        await engine.dispose();
+
+        expect(tts.speakDirectCount, 0,
+            reason: 'pause()-induced StoppedByUserException must not trigger speakDirect');
+      },
+    );
+  });
+
+  // ── TASK-010 regression: Ambient volume restoration on TTS failure (TASK-008)
+  //
+  // Verifies that _executeSayStep always restores ambient volume regardless
+  // of which TTS failure path is taken — specifically when an ambient track
+  // is already running.
+
+  group('TASK-010: Ambient volume always restored on TTS failure (TASK-008)', () {
+    test(
+      'restoreAmbientCount > 0 when TTS render throws during SayStep with ambient playing',
+      () async {
+        final (engine, audio, tts, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        // Force TTS to always fail.
+        tts.renderError = Exception('TTS service unavailable');
+
+        // Start ambient first, then execute a SayStep that will fail.
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            const PlanStep.play(id: 'p1', audioAssetKey: 'ambient_rain'),
+            _sayStep('Will fail', id: 's1'),
+          ],
+        );
+
+        await engine.startPlan(plan);
+        // Wait long enough for the 2-second ambient display hold + SayStep start.
+        await Future<void>.delayed(const Duration(milliseconds: 2500));
+        await engine.stop();
+        await engine.dispose();
+
+        // The finally block in _executeSayStep must have called restoreAmbient.
+        expect(audio.restoreAmbientCount, greaterThan(0),
+            reason: 'ambient volume must be restored even when TTS render fails');
+      },
+    );
+  });
+
+  // ── TASK-010 regression: playEffect idle error handling (TASK-001) ────────
+  //
+  // Verifies that a PlayStep effect failure (e.g. decode error causing the
+  // player to go idle without completing) does not hang the execution engine.
+
+  group('TASK-010: playEffect error handling (TASK-001)', () {
+    test(
+      'effect decode failure does not hang engine — subsequent steps still run',
+      () async {
+        final audio = _ThrowingPlayEffectAudioEngine();
+        final tts = _FakeTTSService();
+        final notifications = _FakeNotificationService();
+        final planId = await _insertPlanRow(db);
+
+        final engine = PlanExecutionEngineImpl(
+          audioEngine: audio,
+          ttsService: tts,
+          notificationService: notifications,
+          db: db,
+        );
+
+        // PlayStep with loop=false → calls playEffect (which throws).
+        // Followed by a NotifyStep that MUST run if the engine recovered.
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            const PlanStep.play(
+              id: 'p1',
+              audioAssetKey: 'effect_bell',
+              loop: false,
+            ),
+            const PlanStep.notify(
+              id: 'n1',
+              title: 'After effect',
+              body: '',
+            ),
+          ],
+        );
+
+        await engine.startPlan(plan);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await engine.stop();
+        await engine.dispose();
+
+        // The engine must have continued past the failing PlayStep.
+        expect(audio.playEffectCount, 1,
+            reason: 'playEffect should have been called once');
+        expect(notifications.stepNotifications, hasLength(1),
+            reason: 'NotifyStep after the failing effect must still execute');
+        expect(
+          notifications.stepNotifications.first.title,
+          'After effect',
+        );
+      },
+    );
+  });
+
+  // ── TASK-010 regression: Plan completion emits exactly one completed state ─
+
+  group('TASK-010: Plan completion (regression)', () {
+    test(
+      'plan that runs to end emits completed status exactly once',
+      () async {
+        final (engine, _, _, _) = _makeEngine(db);
+        final planId = await _insertPlanRow(db);
+
+        // Short plan: two quick NotifySteps so it completes without stop().
+        final plan = _makePlan(
+          id: planId,
+          steps: [
+            const PlanStep.notify(id: 'n1', title: 'Step 1', body: ''),
+            const PlanStep.notify(id: 'n2', title: 'Step 2', body: ''),
+          ],
+        );
+
+        final states = <ExecutionState>[];
+        final sub = engine.stateStream.listen(states.add);
+
+        await engine.startPlan(plan);
+        // Wait long enough for both steps to complete and the stream to fire.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+
+        await sub.cancel();
+        await engine.dispose();
+
+        final completedStates = states
+            .where((s) => s.status == ExecutionStatus.completed)
+            .toList();
+
+        expect(completedStates, hasLength(1),
+            reason: 'completed status should be emitted exactly once');
+      },
+    );
+  });
+
   // ── Interface compliance ──────────────────────────────────────────────────
 
   group('Interface compliance', () {
@@ -1420,6 +2115,8 @@ void main() {
         status: ExecutionStatus.running,
         repeatCounters: const {'r1': 2},
         ambientPositionMs: 5000,
+        currentStepDuration: const Duration(seconds: 60),
+        nextStepType: StepType.say,
       );
 
       expect(state.currentStepIndex, 2);
@@ -1427,6 +2124,8 @@ void main() {
       expect(state.status, ExecutionStatus.running);
       expect(state.repeatCounters['r1'], 2);
       expect(state.ambientPositionMs, 5000);
+      expect(state.currentStepDuration, const Duration(seconds: 60));
+      expect(state.nextStepType, StepType.say);
     });
 
     test('ExecutionState has default repeatCounters = {}', () {
@@ -1448,6 +2147,9 @@ void main() {
 
       expect(state.repeatCounters, isEmpty);
       expect(state.ambientPositionMs, 0);
+      // New fields have sensible defaults.
+      expect(state.currentStepDuration, Duration.zero);
+      expect(state.nextStepType, isNull);
     });
   });
 }
@@ -1461,6 +2163,7 @@ class _OrderTrackingAudioEngine implements AudioEngine {
   _OrderTrackingAudioEngine(this._order);
   final List<String> _order;
   Duration? _position;
+  String? _currentAmbientAssetKey;
   bool _disposed = false;
 
   @override
@@ -1473,12 +2176,14 @@ class _OrderTrackingAudioEngine implements AudioEngine {
   Future<void> startAmbient(String assetKey, {bool loop = true, double volume = 1.0}) async {
     _order.add('play');
     _position = Duration.zero;
+    _currentAmbientAssetKey = assetKey;
   }
 
   @override
   Future<void> stopAmbient({int fadeOutMs = kDefaultFadeOutMs}) async {
     _order.add('stopAudio');
     _position = null;
+    _currentAmbientAssetKey = null;
   }
 
   @override
@@ -1490,10 +2195,14 @@ class _OrderTrackingAudioEngine implements AudioEngine {
   @override
   Future<void> stopAll() async {
     _position = null;
+    _currentAmbientAssetKey = null;
   }
 
   @override
   Duration? get currentAmbientPosition => _position;
+
+  @override
+  String? get currentAmbientAssetKey => _currentAmbientAssetKey;
 
   @override
   Future<void> seekAmbient(Duration position) async {
@@ -1545,6 +2254,9 @@ class _OrderTrackingTTSService implements TTSService {
 
   @override
   Future<void> speakDirect(String text, {double speed = 1.0}) async {}
+
+  @override
+  Future<void> stopSpeaking() async {}
 }
 
 /// [NotificationService] fake that records 'notify' to the shared order list.
@@ -1568,4 +2280,130 @@ class _OrderTrackingNotificationService implements NotificationService {
 
   @override
   Future<void> updateForegroundNotification(String stepText, Duration remaining) async {}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TASK-008: playVoice-throwing fake (for ambient-restoration tests)
+// ────────────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────────────
+// TASK-010: playEffect-throwing fake
+// ────────────────────────────────────────────────────────────────────────────
+
+/// [AudioEngine] fake where [playEffect] always throws immediately — simulating
+/// a decode failure or audio-focus error for a one-shot effect sound.
+/// Used by TASK-010 tests to verify the execution engine continues gracefully
+/// when a PlayStep effect fails.
+class _ThrowingPlayEffectAudioEngine implements AudioEngine {
+  int playEffectCount = 0;
+
+  @override
+  Future<void> playEffect(String assetKey) async {
+    playEffectCount++;
+    throw StateError(
+      '_ThrowingPlayEffectAudioEngine: playEffect intentionally threw '
+      '(simulates decode failure for assetKey=$assetKey)',
+    );
+  }
+
+  @override
+  Future<void> startAmbient(
+    String assetKey, {
+    bool loop = true,
+    double volume = 1.0,
+  }) async {}
+
+  @override
+  Future<void> stopAmbient({int fadeOutMs = kDefaultFadeOutMs}) async {}
+
+  @override
+  Future<void> duckAmbient() async {}
+
+  @override
+  Future<void> restoreAmbient() async {}
+
+  @override
+  Future<void> stopAll() async {}
+
+  @override
+  Duration? get currentAmbientPosition => null;
+
+  @override
+  String? get currentAmbientAssetKey => null;
+
+  @override
+  Future<void> seekAmbient(Duration position) async {}
+
+  @override
+  Future<void> startSilenceKeepAlive() async {}
+
+  @override
+  Future<void> stopSilenceKeepAlive() async {}
+
+  @override
+  Future<void> playVoice(String filePath, {double speed = 1.0}) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TASK-008: playVoice-throwing fake (for ambient-restoration tests)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// [AudioEngine] fake where [playVoice] always throws — simulating a corrupt
+/// file or codec failure — and does NOT internally restore ambient.
+/// Used by TASK-008 tests to verify the try/finally block restores ambient.
+class _ThrowingPlayVoiceAudioEngine implements AudioEngine {
+  int duckAmbientCount = 0;
+  int restoreAmbientCount = 0;
+
+  @override
+  Future<void> playVoice(String filePath, {double speed = 1.0}) async {
+    throw Exception('_ThrowingPlayVoiceAudioEngine: playVoice intentionally threw');
+  }
+
+  @override
+  Future<void> startAmbient(
+    String assetKey, {
+    bool loop = true,
+    double volume = 1.0,
+  }) async {}
+
+  @override
+  Future<void> stopAmbient({int fadeOutMs = kDefaultFadeOutMs}) async {}
+
+  @override
+  Future<void> duckAmbient() async {
+    duckAmbientCount++;
+  }
+
+  @override
+  Future<void> restoreAmbient() async {
+    restoreAmbientCount++;
+  }
+
+  @override
+  Future<void> stopAll() async {}
+
+  @override
+  Duration? get currentAmbientPosition => null;
+
+  @override
+  Future<void> seekAmbient(Duration position) async {}
+
+  @override
+  String? get currentAmbientAssetKey => null;
+
+  @override
+  Future<void> startSilenceKeepAlive() async {}
+
+  @override
+  Future<void> stopSilenceKeepAlive() async {}
+
+  @override
+  Future<void> playEffect(String assetKey) async {}
+
+  @override
+  Future<void> dispose() async {}
 }

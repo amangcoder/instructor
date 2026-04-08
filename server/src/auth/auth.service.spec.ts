@@ -1,95 +1,66 @@
+/**
+ * Unit tests for AuthService (migrated to DynamoDB + SES + DynamoDBRateLimiter).
+ *
+ * All external service calls are intercepted via mocked service classes.
+ * No real DynamoDB, SES, or network calls are made in CI.
+ *
+ * Mock strategy:
+ *   - DynamoDBService   → jest.fn() for each typed entity method
+ *   - SESEmailService   → jest.fn() for sendOtpEmail
+ *   - DynamoDBRateLimitService → jest.fn() for consume/peek/increment
+ *   - JwtService        → deterministic sign/verify based on Buffer.from(JSON)
+ *
+ * To test verifyOtp with a valid OTP:
+ *   1. Call requestOtp, capturing the OTP via the SES mock
+ *   2. Capture the hashed code via the DynamoDB createOtp mock
+ *   3. Return the captured hash from getActiveOtps
+ *   4. Call verifyOtp with the captured plaintext code
+ */
+
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  UnauthorizedException,
-  TooManyRequestsException,
-} from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
-import { DatabaseService } from '../database/database.service';
+import { DynamoDBService } from '../dynamodb/dynamodb.service';
+import { SESEmailService } from '../email/ses-email.service';
+import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
 
 // ---------------------------------------------------------------------------
-// Mock nodemailer — prevents network calls in AuthService.onModuleInit()
+// Mock factories
 // ---------------------------------------------------------------------------
 
-const mockSendMail = jest.fn().mockResolvedValue({ messageId: 'test-message-id' });
-const mockCreateTransport = jest.fn().mockReturnValue({ sendMail: mockSendMail });
-
-jest.mock('nodemailer', () => ({
-  createTransport: (...args: unknown[]) => mockCreateTransport(...args),
-  createTestAccount: jest.fn().mockResolvedValue({
-    user: 'ethereal@test.com',
-    pass: 'ethereal-pass',
-  }),
-  getTestMessageUrl: jest.fn().mockReturnValue(null),
-}));
-
-// ---------------------------------------------------------------------------
-// Drizzle ORM mock
-// ---------------------------------------------------------------------------
-
-/**
- * Creates a mock DatabaseService where db.db supports Drizzle's fluent
- * query builder chains:
- *   select().from(t).where(c).orderBy(col).all()
- *   select().from(t).where(c).get()
- *   update(t).set(vals).where(c)
- *   insert(t).values(vals)
- *   delete(t).where(c)
- *
- * Configure terminal responses with:
- *   drizzleMock._selectGet.mockResolvedValueOnce(value)
- *   drizzleMock._selectAll.mockResolvedValueOnce(array)
- */
-function createDrizzleMock() {
-  const selectGetMock = jest.fn().mockResolvedValue(null);
-  const selectAllMock = jest.fn().mockResolvedValue([]);
-
-  const selectChain = {
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    get: selectGetMock,
-    all: selectAllMock,
-  };
-
-  const updateChain = {
-    set: jest.fn().mockReturnThis(),
-    where: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const insertChain = {
-    values: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const deleteChain = {
-    where: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const drizzleDb = {
-    select: jest.fn().mockReturnValue(selectChain),
-    update: jest.fn().mockReturnValue(updateChain),
-    insert: jest.fn().mockReturnValue(insertChain),
-    delete: jest.fn().mockReturnValue(deleteChain),
-  };
-
+function createMockDynamoDBService() {
   return {
-    /** The DatabaseService mock provided to NestJS. */
-    db: drizzleDb,
-
-    /** Configure the next .get() return value. */
-    _selectGet: selectGetMock,
-
-    /** Configure the next .all() return value. */
-    _selectAll: selectAllMock,
-
-    /** Direct access to the chain mocks for assertion. */
-    _chains: { select: selectChain, update: updateChain, insert: insertChain, delete: deleteChain },
+    getUserById: jest.fn().mockResolvedValue(null),
+    getUserByEmail: jest.fn().mockResolvedValue(null),
+    createUser: jest.fn().mockResolvedValue(undefined),
+    createOtp: jest.fn().mockResolvedValue(undefined),
+    getActiveOtps: jest.fn().mockResolvedValue([]),
+    markOtpUsed: jest.fn().mockResolvedValue(undefined),
+    incrementOtpAttempts: jest.fn().mockResolvedValue(undefined),
+    invalidateOtpsForEmail: jest.fn().mockResolvedValue(undefined),
+    createRefreshToken: jest.fn().mockResolvedValue(undefined),
+    getRefreshToken: jest.fn().mockResolvedValue(null),
+    revokeRefreshToken: jest.fn().mockResolvedValue(undefined),
+    revokeAllRefreshTokens: jest.fn().mockResolvedValue(undefined),
+    getSyncMetadata: jest.fn().mockResolvedValue(null),
+    upsertSyncMetadata: jest.fn().mockResolvedValue(undefined),
   };
 }
 
-// ---------------------------------------------------------------------------
-// JWT service mock
-// ---------------------------------------------------------------------------
+function createMockSESEmailService() {
+  return {
+    sendOtpEmail: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+function createMockRateLimiter() {
+  return {
+    consume: jest.fn().mockResolvedValue({ allowed: true, current: 1, retryAfterSec: 0 }),
+    peek: jest.fn().mockResolvedValue({ allowed: true, current: 0, retryAfterSec: 0 }),
+    increment: jest.fn().mockResolvedValue(undefined),
+  };
+}
 
 function createMockJwtService() {
   return {
@@ -112,23 +83,34 @@ function createMockJwtService() {
 
 const USER = { id: 'user-abc-123', email: 'user@example.com', createdAt: new Date() };
 
-const VALID_OTP_RECORD = {
-  id: 1,
-  email: 'user@example.com',
-  code: '123456',
-  expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-  attempts: 0,
-  used: false,
-  createdAt: new Date(),
+const VALID_REFRESH_TOKEN_RECORD = {
+  userId: USER.id,
+  tokenHash: 'sha256ofvalidrefreshtoken',
+  revoked: false,
+  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+  sk: 'TOKEN',
 };
 
-const VALID_REFRESH_TOKEN_RECORD = {
-  id: 'rt-1',
-  userId: USER.id,
-  token: 'valid-refresh-token-abc',
-  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-  revoked: false,
-};
+/**
+ * Build a minimal OTP record for getActiveOtps mock.
+ * code must be the HMAC-SHA256 hash that the service would store.
+ */
+function makeOtpRecord(overrides: {
+  code: string;
+  email?: string;
+  attempts?: number;
+  used?: boolean;
+  expiresAt?: Date;
+}) {
+  return {
+    email: overrides.email ?? USER.email,
+    code: overrides.code,
+    attempts: overrides.attempts ?? 0,
+    used: overrides.used ?? false,
+    expiresAt: overrides.expiresAt ?? new Date(Date.now() + 5 * 60 * 1000),
+    sk: `2026-04-09T00:00:00.000Z#otp-test-id`,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -136,23 +118,29 @@ const VALID_REFRESH_TOKEN_RECORD = {
 
 describe('AuthService', () => {
   let service: AuthService;
-  let mockDb: ReturnType<typeof createDrizzleMock>;
+  let mockDynamo: ReturnType<typeof createMockDynamoDBService>;
+  let mockSes: ReturnType<typeof createMockSESEmailService>;
+  let mockRateLimiter: ReturnType<typeof createMockRateLimiter>;
   let mockJwt: ReturnType<typeof createMockJwtService>;
 
   beforeEach(async () => {
-    mockDb = createDrizzleMock();
+    process.env.OTP_SALT = 'test-otp-salt-32-chars-placeholder';
+
+    mockDynamo = createMockDynamoDBService();
+    mockSes = createMockSESEmailService();
+    mockRateLimiter = createMockRateLimiter();
     mockJwt = createMockJwtService();
-    mockSendMail.mockClear();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: DatabaseService, useValue: { db: mockDb.db } },
+        { provide: DynamoDBService, useValue: mockDynamo },
+        { provide: SESEmailService, useValue: mockSes },
+        { provide: DynamoDBRateLimitService, useValue: mockRateLimiter },
         { provide: JwtService, useValue: mockJwt },
       ],
     }).compile();
 
-    // init() triggers onModuleInit lifecycle hook (initialises nodemailer transporter).
     await module.init();
     service = module.get<AuthService>(AuthService);
   });
@@ -160,6 +148,7 @@ describe('AuthService', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     jest.useRealTimers();
+    delete process.env.OTP_SALT;
   });
 
   // ── requestOtp ─────────────────────────────────────────────────────────────
@@ -175,114 +164,144 @@ describe('AuthService', () => {
       expect(result).toEqual({ message: 'OTP sent' });
     });
 
-    it('inserts a new OTP record into the database', async () => {
+    it('stores an OTP record via DynamoDBService.createOtp', async () => {
       await service.requestOtp('user@example.com');
-      expect(mockDb.db.insert).toHaveBeenCalled();
+      expect(mockDynamo.createOtp).toHaveBeenCalled();
     });
 
-    it('invalidates previous unused OTPs before inserting the new one', async () => {
+    it('invalidates previous unused OTPs before creating the new one', async () => {
       await service.requestOtp('user@example.com');
-      // First DB write: update existing OTPs to used=true
-      expect(mockDb.db.update).toHaveBeenCalled();
+      expect(mockDynamo.invalidateOtpsForEmail).toHaveBeenCalledWith('user@example.com');
     });
 
-    it('fires the OTP email asynchronously (does not throw on slow mail)', async () => {
-      // sendMail is fire-and-forget; even if it hangs, requestOtp should resolve
-      mockSendMail.mockImplementationOnce(
-        () => new Promise((resolve) => setTimeout(() => resolve({ messageId: 'slow' }), 10_000)),
+    it('sends OTP email via SESEmailService.sendOtpEmail', async () => {
+      await service.requestOtp('user@example.com');
+      await new Promise((r) => setImmediate(r));
+      expect(mockSes.sendOtpEmail).toHaveBeenCalledWith(
+        'user@example.com',
+        expect.stringMatching(/^\d{6}$/),
       );
-      await expect(service.requestOtp('user@example.com')).resolves.toEqual({
-        message: 'OTP sent',
-      });
     });
 
-    // ── Rate limiting (in-memory: 3 per 5 minutes per email) ─────────────────
+    it('passes a 6-digit OTP code to sendOtpEmail', async () => {
+      await service.requestOtp('user@example.com');
+      await new Promise((r) => setImmediate(r));
+      const [, code] = mockSes.sendOtpEmail.mock.calls[0] as [string, string];
+      expect(code).toMatch(/^\d{6}$/);
+    });
+
+    it('checks rate limit before processing (calls consume)', async () => {
+      await service.requestOtp('user@example.com');
+      expect(mockRateLimiter.consume).toHaveBeenCalledWith(
+        'otp',
+        'user@example.com',
+        expect.any(Number),
+        expect.any(Number),
+      );
+    });
+
+    it('invalidateOtpsForEmail is called with the normalised (lowercase) email', async () => {
+      await service.requestOtp('USER@EXAMPLE.COM');
+      expect(mockDynamo.invalidateOtpsForEmail).toHaveBeenCalledWith('user@example.com');
+    });
+
+    // ── Rate limiting ─────────────────────────────────────────────────────
 
     describe('rate limiting', () => {
-      it('allows the first 3 requests without throwing', async () => {
-        await service.requestOtp('rate@example.com');
-        await service.requestOtp('rate@example.com');
-        await service.requestOtp('rate@example.com');
-        // All three should resolve
+      it('allows the request when rate limiter returns { allowed: true }', async () => {
+        mockRateLimiter.consume.mockResolvedValue({ allowed: true, current: 1, retryAfterSec: 0 });
+        await expect(service.requestOtp('user@example.com')).resolves.toEqual({ message: 'OTP sent' });
       });
 
-      it('throws TooManyRequestsException on the 4th request within the window', async () => {
-        await service.requestOtp('limited@example.com');
-        await service.requestOtp('limited@example.com');
-        await service.requestOtp('limited@example.com');
+      it('throws HTTP 429 when rate limiter returns { allowed: false }', async () => {
+        mockRateLimiter.consume.mockResolvedValue({ allowed: false, current: 4, retryAfterSec: 240 });
 
-        await expect(service.requestOtp('limited@example.com')).rejects.toThrow(
-          TooManyRequestsException,
-        );
+        const thrownError: any = await service.requestOtp('limited@example.com').catch((e) => e);
+        expect(thrownError).toBeTruthy();
+        const statusCode = thrownError.getStatus?.() ?? thrownError.status ?? thrownError.statusCode;
+        expect(statusCode).toBe(429);
       });
 
-      it('blocks the rate-limited email but allows a different email', async () => {
-        // Exhaust limit for email-a
-        await service.requestOtp('email-a@example.com');
-        await service.requestOtp('email-a@example.com');
-        await service.requestOtp('email-a@example.com');
-
-        // email-a is now blocked
-        await expect(service.requestOtp('email-a@example.com')).rejects.toThrow(
-          TooManyRequestsException,
-        );
-
-        // email-b is still allowed
-        await expect(service.requestOtp('email-b@example.com')).resolves.toEqual({
-          message: 'OTP sent',
-        });
+      it('does NOT call sendOtpEmail when rate-limited', async () => {
+        mockRateLimiter.consume.mockResolvedValue({ allowed: false, current: 4, retryAfterSec: 240 });
+        await service.requestOtp('limited@example.com').catch(() => null);
+        await new Promise((r) => setImmediate(r));
+        expect(mockSes.sendOtpEmail).not.toHaveBeenCalled();
       });
 
-      it('resets the rate limit after the time window elapses', async () => {
-        jest.useFakeTimers();
-
-        // Exhaust the window
-        await service.requestOtp('reset@example.com');
-        await service.requestOtp('reset@example.com');
-        await service.requestOtp('reset@example.com');
-        await expect(service.requestOtp('reset@example.com')).rejects.toThrow(
-          TooManyRequestsException,
-        );
-
-        // Advance past the 5-minute window
-        jest.advanceTimersByTime(5 * 60 * 1001);
-
-        await expect(service.requestOtp('reset@example.com')).resolves.toEqual({
-          message: 'OTP sent',
-        });
+      it('does NOT call createOtp when rate-limited', async () => {
+        mockRateLimiter.consume.mockResolvedValue({ allowed: false, current: 4, retryAfterSec: 240 });
+        await service.requestOtp('limited@example.com').catch(() => null);
+        expect(mockDynamo.createOtp).not.toHaveBeenCalled();
       });
 
-      it('does NOT send email when rate-limited (saves SMTP quota)', async () => {
+      it('allows a different email when one email is rate-limited', async () => {
+        // limited@example.com is blocked
+        mockRateLimiter.consume
+          .mockResolvedValueOnce({ allowed: false, current: 4, retryAfterSec: 240 })
+          // email-b@example.com is still allowed
+          .mockResolvedValueOnce({ allowed: true, current: 1, retryAfterSec: 0 });
+
+        await service.requestOtp('limited@example.com').catch(() => null);
+        await expect(service.requestOtp('email-b@example.com')).resolves.toEqual({ message: 'OTP sent' });
+      });
+
+      it('does NOT send email when rate-limited (conserves SES quota)', async () => {
+        // First 3 allowed, 4th blocked
+        mockRateLimiter.consume
+          .mockResolvedValueOnce({ allowed: true, current: 1, retryAfterSec: 0 })
+          .mockResolvedValueOnce({ allowed: true, current: 2, retryAfterSec: 0 })
+          .mockResolvedValueOnce({ allowed: true, current: 3, retryAfterSec: 0 })
+          .mockResolvedValueOnce({ allowed: false, current: 3, retryAfterSec: 300 });
+
         await service.requestOtp('quota@example.com');
         await service.requestOtp('quota@example.com');
         await service.requestOtp('quota@example.com');
         await service.requestOtp('quota@example.com').catch(() => null);
 
-        // sendMail was only called 3 times (not 4)
-        // Note: sendMail is fire-and-forget so we wait a tick
         await new Promise((r) => setImmediate(r));
-        expect(mockSendMail).toHaveBeenCalledTimes(3);
+        expect(mockSes.sendOtpEmail).toHaveBeenCalledTimes(3);
       });
     });
   });
 
-  // ── verifyOtp ──────────────────────────────────────────────────────────────
+  // ── verifyOtp ───────────────────────────────────────────────────────────────
 
   describe('verifyOtp', () => {
-    const email = 'user@example.com';
-    const correctOtp = '123456';
+    const email = USER.email;
 
-    function setupVerify(
-      otpRecords: unknown[] = [VALID_OTP_RECORD],
-      user: unknown = USER,
-    ) {
-      mockDb._selectAll.mockResolvedValueOnce(otpRecords);
-      mockDb._selectGet.mockResolvedValueOnce(user);
+    /**
+     * Helper: call requestOtp, capture the OTP code and its hash,
+     * then set up getActiveOtps to return a record with that hash.
+     */
+    async function setupVerification(overrideEmail = email) {
+      let capturedOtp = '';
+      let capturedHash = '';
+
+      mockSes.sendOtpEmail.mockImplementationOnce(async (_: string, code: string) => {
+        capturedOtp = code;
+      });
+      mockDynamo.createOtp.mockImplementationOnce(
+        async (_email: string, codeHash: string, _expiresAt: Date) => {
+          capturedHash = codeHash;
+        },
+      );
+
+      await service.requestOtp(overrideEmail);
+      await new Promise((r) => setImmediate(r));
+
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([
+        makeOtpRecord({ email: overrideEmail, code: capturedHash }),
+      ]);
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(USER);
+
+      return { capturedOtp, capturedHash };
     }
 
     it('returns accessToken, refreshToken, and user on correct OTP', async () => {
-      setupVerify();
-      const result = await service.verifyOtp(email, correctOtp);
+      const { capturedOtp } = await setupVerification();
+
+      const result = await service.verifyOtp(email, capturedOtp);
       expect(result).toMatchObject({
         accessToken: expect.any(String),
         refreshToken: expect.any(String),
@@ -291,113 +310,170 @@ describe('AuthService', () => {
     });
 
     it('marks the OTP as used after successful verification', async () => {
-      setupVerify();
-      await service.verifyOtp(email, correctOtp);
-      expect(mockDb._chains.update.set).toHaveBeenCalledWith(
-        expect.objectContaining({ used: true }),
-      );
+      const { capturedOtp } = await setupVerification();
+      await service.verifyOtp(email, capturedOtp);
+      expect(mockDynamo.markOtpUsed).toHaveBeenCalled();
     });
 
-    it('stores a refresh token in the database', async () => {
-      setupVerify();
-      await service.verifyOtp(email, correctOtp);
-      // insert is called for: (possibly user,) refresh token
-      expect(mockDb.db.insert).toHaveBeenCalled();
-    });
-
-    it('throws UnauthorizedException when no active OTP is found', async () => {
-      mockDb._selectAll.mockResolvedValueOnce([]);
-      await expect(service.verifyOtp(email, correctOtp)).rejects.toThrow(UnauthorizedException);
-    });
-
-    it('throws UnauthorizedException for incorrect OTP code', async () => {
-      setupVerify([VALID_OTP_RECORD], USER);
-      await expect(service.verifyOtp(email, 'wrong-otp')).rejects.toThrow(UnauthorizedException);
-    });
-
-    it('increments attempt count on incorrect OTP', async () => {
-      mockDb._selectAll.mockResolvedValueOnce([VALID_OTP_RECORD]);
-      await service.verifyOtp(email, '000000').catch(() => null);
-      expect(mockDb._chains.update.set).toHaveBeenCalledWith(
-        expect.objectContaining({ attempts: 1 }),
-      );
-    });
-
-    it('throws UnauthorizedException when attempt count is at max (5)', async () => {
-      const lockedRecord = { ...VALID_OTP_RECORD, attempts: 5 };
-      mockDb._selectAll.mockResolvedValueOnce([lockedRecord]);
-      await expect(service.verifyOtp(email, '000000')).rejects.toThrow(UnauthorizedException);
+    it('stores a refresh token in DynamoDB after successful verification', async () => {
+      const { capturedOtp } = await setupVerification();
+      await service.verifyOtp(email, capturedOtp);
+      expect(mockDynamo.createRefreshToken).toHaveBeenCalled();
     });
 
     it('creates a new user if one does not exist yet', async () => {
-      mockDb._selectAll.mockResolvedValueOnce([VALID_OTP_RECORD]);
-      mockDb._selectGet.mockResolvedValueOnce(null); // user not found
-      await service.verifyOtp(email, correctOtp);
-      expect(mockDb.db.insert).toHaveBeenCalled();
+      let capturedOtp = '';
+      let capturedHash = '';
+
+      mockSes.sendOtpEmail.mockImplementationOnce(async (_: string, code: string) => {
+        capturedOtp = code;
+      });
+      mockDynamo.createOtp.mockImplementationOnce(
+        async (_email: string, codeHash: string) => {
+          capturedHash = codeHash;
+        },
+      );
+
+      await service.requestOtp(email);
+      await new Promise((r) => setImmediate(r));
+
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([
+        makeOtpRecord({ email, code: capturedHash }),
+      ]);
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(null); // user not found
+
+      await service.verifyOtp(email, capturedOtp);
+      expect(mockDynamo.createUser).toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when no active OTP is found', async () => {
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([]);
+      await expect(service.verifyOtp(email, '123456')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws UnauthorizedException for an incorrect OTP code', async () => {
+      // Set up a record whose hash does NOT match '000000'
+      const { capturedHash } = await setupVerification();
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([
+        makeOtpRecord({ email, code: capturedHash }),
+      ]);
+
+      await expect(service.verifyOtp(email, '000000')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('increments attempt count on an incorrect OTP', async () => {
+      const { capturedHash } = await setupVerification();
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([
+        makeOtpRecord({ email, code: capturedHash }),
+      ]);
+
+      await service.verifyOtp(email, '000000').catch(() => null);
+      expect(mockDynamo.incrementOtpAttempts).toHaveBeenCalled();
+    });
+
+    it('throws UnauthorizedException when attempt count is at max (5)', async () => {
+      const lockedRecord = makeOtpRecord({ email, code: 'any-hash', attempts: 5 });
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([lockedRecord]);
+      await expect(service.verifyOtp(email, '000000')).rejects.toThrow(UnauthorizedException);
     });
 
     it('returns a non-empty user id in the response', async () => {
-      setupVerify();
-      const result = await service.verifyOtp(email, correctOtp);
+      const { capturedOtp } = await setupVerification();
+      const result = await service.verifyOtp(email, capturedOtp);
       expect(result.user.id).toBeTruthy();
+    });
+
+    it('OTP is single-use — verifying twice returns error on second attempt', async () => {
+      const { capturedOtp, capturedHash } = await setupVerification();
+
+      // First use: success
+      await service.verifyOtp(email, capturedOtp);
+
+      // Second use: getActiveOtps returns empty (OTP now marked used)
+      mockDynamo.getActiveOtps.mockResolvedValueOnce([]);
+      await expect(service.verifyOtp(email, capturedOtp)).rejects.toThrow(UnauthorizedException);
     });
   });
 
-  // ── refreshAccessToken ─────────────────────────────────────────────────────
+  // ── refreshAccessToken ──────────────────────────────────────────────────────
 
   describe('refreshAccessToken', () => {
     it('returns a new accessToken for a valid refresh token', async () => {
-      mockDb._selectGet.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
-      mockDb._selectGet.mockResolvedValueOnce(USER);
-      const result = await service.refreshAccessToken(VALID_REFRESH_TOKEN_RECORD.token);
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
+      mockDynamo.getUserById.mockResolvedValueOnce(USER);
+
+      const result = await service.refreshAccessToken('valid-refresh-token-abc');
       expect(result).toMatchObject({ accessToken: expect.any(String) });
     });
 
     it('accessToken is a non-empty string', async () => {
-      mockDb._selectGet.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
-      mockDb._selectGet.mockResolvedValueOnce(USER);
-      const { accessToken } = await service.refreshAccessToken(VALID_REFRESH_TOKEN_RECORD.token);
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
+      mockDynamo.getUserById.mockResolvedValueOnce(USER);
+
+      const { accessToken } = await service.refreshAccessToken('valid-refresh-token-abc');
       expect(accessToken.length).toBeGreaterThan(0);
     });
 
     it('throws UnauthorizedException when refresh token is not found', async () => {
-      mockDb._selectGet.mockResolvedValueOnce(null);
-      await expect(service.refreshAccessToken('unknown-token')).rejects.toThrow(
-        UnauthorizedException,
-      );
-    });
-
-    it('throws UnauthorizedException when token is revoked', async () => {
-      // The service queries with revoked=false in WHERE clause; if revoked it won't be returned
-      mockDb._selectGet.mockResolvedValueOnce(null); // not found (filtered by revoked=false)
-      await expect(
-        service.refreshAccessToken(VALID_REFRESH_TOKEN_RECORD.token),
-      ).rejects.toThrow(UnauthorizedException);
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(null);
+      await expect(service.refreshAccessToken('unknown-token')).rejects.toThrow(UnauthorizedException);
     });
 
     it('throws UnauthorizedException when user is not found', async () => {
-      mockDb._selectGet.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
-      mockDb._selectGet.mockResolvedValueOnce(null); // user not found
-      await expect(
-        service.refreshAccessToken(VALID_REFRESH_TOKEN_RECORD.token),
-      ).rejects.toThrow(UnauthorizedException);
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
+      mockDynamo.getUserById.mockResolvedValueOnce(null);
+      await expect(service.refreshAccessToken('valid-token')).rejects.toThrow(UnauthorizedException);
     });
 
-    it('signs new access token with 15-minute expiry', async () => {
-      mockDb._selectGet.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
-      mockDb._selectGet.mockResolvedValueOnce(USER);
-      await service.refreshAccessToken(VALID_REFRESH_TOKEN_RECORD.token);
+    it('revokes the old refresh token (token rotation security)', async () => {
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
+      mockDynamo.getUserById.mockResolvedValueOnce(USER);
+
+      await service.refreshAccessToken('valid-refresh-token-abc');
+      expect(mockDynamo.revokeRefreshToken).toHaveBeenCalled();
+    });
+
+    it('issues a brand-new refresh token after rotation', async () => {
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
+      mockDynamo.getUserById.mockResolvedValueOnce(USER);
+
+      await service.refreshAccessToken('valid-refresh-token-abc');
+      expect(mockDynamo.createRefreshToken).toHaveBeenCalled();
+    });
+
+    it('signs the new access token with 15-minute expiry', async () => {
+      mockDynamo.getRefreshToken.mockResolvedValueOnce(VALID_REFRESH_TOKEN_RECORD);
+      mockDynamo.getUserById.mockResolvedValueOnce(USER);
+
+      await service.refreshAccessToken('valid-refresh-token-abc');
       const signCall = mockJwt.sign.mock.calls[0];
       expect(signCall[1]).toEqual(expect.objectContaining({ expiresIn: '15m' }));
     });
   });
 
-  // ── pruneExpiredOtps ───────────────────────────────────────────────────────
+  // ── revokeRefreshToken ──────────────────────────────────────────────────────
 
-  describe('pruneExpiredOtps', () => {
-    it('deletes expired OTP records from the database', async () => {
-      await service.pruneExpiredOtps();
-      expect(mockDb.db.delete).toHaveBeenCalled();
+  describe('revokeRefreshToken', () => {
+    it('calls DynamoDBService.revokeRefreshToken', async () => {
+      await service.revokeRefreshToken('some-refresh-token');
+      expect(mockDynamo.revokeRefreshToken).toHaveBeenCalled();
+    });
+
+    it('resolves without throwing (idempotent — handles already-revoked tokens)', async () => {
+      await expect(service.revokeRefreshToken('any-token')).resolves.toBeUndefined();
+    });
+  });
+
+  // ── revokeAllRefreshTokens ──────────────────────────────────────────────────
+
+  describe('revokeAllRefreshTokens', () => {
+    it('calls DynamoDBService.revokeAllRefreshTokens with the userId', async () => {
+      await service.revokeAllRefreshTokens(USER.id);
+      expect(mockDynamo.revokeAllRefreshTokens).toHaveBeenCalledWith(USER.id);
+    });
+
+    it('resolves without throwing', async () => {
+      await expect(service.revokeAllRefreshTokens(USER.id)).resolves.toBeUndefined();
     });
   });
 });

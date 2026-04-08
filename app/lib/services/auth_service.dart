@@ -24,7 +24,6 @@ import 'package:http/http.dart' as http;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/models/auth_models.dart';
-import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 
 part 'auth_service.g.dart';
@@ -389,12 +388,7 @@ class AuthServiceImpl implements AuthService {
 
   // ── Private helpers ────────────────────────────────────────────────────
 
-  Future<Uri> _buildUrl(String path) async {
-    final serverUrl =
-        await _settings.read(AppSettingsKeys.backendServerUrl) ??
-            kDefaultBackendServerUrl;
-    return Uri.parse('$serverUrl$path');
-  }
+  Uri _buildUrl(String path) => Uri.parse('$kBackendUrl$path');
 
   /// POST to [url] with [body] and return the decoded JSON map.
   ///

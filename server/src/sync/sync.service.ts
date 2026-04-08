@@ -1,3 +1,13 @@
+/**
+ * SyncService — S3 pre-signed URL generation for database backup sync.
+ *
+ * Migrated from DatabaseService (SQLite/Drizzle) → DynamoDBService
+ * for sync metadata storage (lastSyncAt, sizeBytes per user).
+ *
+ * All sync metadata uses DynamoDB key pattern:
+ *   pk = USER#<userId>  sk = SYNC
+ */
+
 import {
   Injectable,
   Logger,
@@ -9,9 +19,7 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { eq } from 'drizzle-orm';
-import { DatabaseService } from '../database/database.service';
-import { syncMetadata } from '../database/schema';
+import { DynamoDBService } from '../dynamodb/dynamodb.service';
 import { SyncStatusDto } from './dto/sync-status.dto';
 
 const URL_EXPIRY_SECONDS = 300; // 5 minutes
@@ -23,7 +31,7 @@ export class SyncService {
   private readonly s3: S3Client | null;
   private readonly bucket: string | null;
 
-  constructor(private readonly db: DatabaseService) {
+  constructor(private readonly db: DynamoDBService) {
     this.bucket = process.env.AWS_S3_BUCKET ?? null;
     if (this.bucket) {
       this.s3 = new S3Client({
@@ -66,10 +74,6 @@ export class SyncService {
       `Pre-signed PUT URL generated for userId=${userId}, key=${key}`,
     );
 
-    // Note: sync_metadata is NOT written here — it is written only in confirmSync()
-    // after the client confirms the upload succeeded. This keeps the data model
-    // consistent: a sync_metadata row exists if and only if a sync was confirmed.
-
     return { uploadUrl, expiresIn: URL_EXPIRY_SECONDS };
   }
 
@@ -101,11 +105,7 @@ export class SyncService {
    * Returns the last sync metadata for the user.
    */
   async getSyncStatus(userId: string): Promise<SyncStatusDto> {
-    const record = await this.db.db
-      .select()
-      .from(syncMetadata)
-      .where(eq(syncMetadata.userId, userId))
-      .get();
+    const record = await this.db.getSyncMetadata(userId);
 
     if (!record) {
       return { lastSyncAt: null, sizeBytes: null };
@@ -123,32 +123,10 @@ export class SyncService {
    */
   async confirmSync(userId: string, sizeBytes?: number): Promise<void> {
     const now = new Date();
-    const existing = await this.db.db
-      .select()
-      .from(syncMetadata)
-      .where(eq(syncMetadata.userId, userId))
-      .get();
-
-    if (existing) {
-      await this.db.db
-        .update(syncMetadata)
-        .set({
-          lastSyncAt: now,
-          sizeBytes: sizeBytes ?? existing.sizeBytes,
-        })
-        .where(eq(syncMetadata.userId, userId));
-    } else {
-      await this.db.db.insert(syncMetadata).values({
-        userId,
-        lastSyncAt: now,
-        sizeBytes: sizeBytes ?? null,
-      });
-    }
+    await this.db.upsertSyncMetadata(userId, now, sizeBytes);
 
     this.logger.log(
       `Sync confirmed for userId=${userId}, sizeBytes=${sizeBytes ?? 'unknown'}, at=${now.toISOString()}`,
     );
   }
-
 }
-

@@ -143,7 +143,10 @@ class InstructorAudioHandler extends BaseAudioHandler {
           ? AudioProcessingState.completed
           : AudioProcessingState.ready,
       playing: isPlaying,
-      updatePosition: Duration.zero,
+      // Use the ambient position so iOS/Android lock screen progress bars
+      // reflect actual playback position instead of always showing 0:00.
+      updatePosition: Duration(milliseconds: state.ambientPositionMs),
+      bufferedPosition: state.plan.totalDuration,
       speed: 1.0,
     ));
   }
@@ -250,22 +253,45 @@ Future<InstructorAudioHandler> initializeBackgroundService({
 /// Converts an [ExecutionState] into a [MediaItem] for the lock screen.
 ///
 /// - [MediaItem.title]  = plan name (shown as the track title).
-/// - [MediaItem.artist] = "Step N" indicator (shown as the subtitle).
+/// - [MediaItem.artist] = step display text (truncated to 100 chars):
+///   - For [StepType.wait]: `"Wait: Ns remaining"` derived from
+///     [ExecutionState.timeRemaining], so the user can see how long to wait
+///     without unlocking their device.
+///   - For all other step types: [ExecutionState.currentStepText] (e.g.
+///     `"Breathe in deeply"`), truncated to 100 chars with an ellipsis.
+///   - Fallback when [ExecutionState.currentStepText] is null: `"Step N"`.
 /// - [MediaItem.duration] = total plan duration (shown in the progress bar).
 ///
 /// The [id] is stable for the duration of a single plan execution and changes
 /// when a new plan starts, which prompts iOS / Android to refresh the artwork.
 MediaItem executionStateToMediaItem(ExecutionState state) {
-  // [currentStepIndex] is an index into the engine's internal *flattened*
-  // step list, which is not exposed by [ExecutionState]. We display
-  // "Step N" as a human-readable indicator; a future enhancement could
-  // carry the step display text directly in [ExecutionState].
-  final stepLabel = 'Step ${state.currentStepIndex + 1}';
+  String artistText;
+
+  if (state.currentStepType == StepType.wait) {
+    // For WaitStep, show the actual remaining seconds so the user knows
+    // how long they need to wait without unlocking their device.
+    final secs = state.timeRemaining.inSeconds;
+    artistText = 'Wait: ${secs}s remaining';
+  } else if (state.currentStepText case final text?) {
+    // Use the actual step display text for all other step types.
+    artistText = text;
+  } else {
+    // Fallback for states where step text has not yet been populated
+    // (e.g. the very first emission before the engine sets currentStepText).
+    artistText = 'Step ${state.currentStepIndex + 1}';
+  }
+
+  // Lock screen subtitle fields have a practical limit — truncate long step
+  // texts so Android / iOS do not clip them mid-word.
+  const _kMaxArtistLength = 100;
+  if (artistText.length > _kMaxArtistLength) {
+    artistText = '${artistText.substring(0, _kMaxArtistLength - 3)}...';
+  }
 
   return MediaItem(
     id: 'instructor:${state.plan.id}',
     title: state.plan.name,
-    artist: stepLabel,
+    artist: artistText,
     duration: state.plan.totalDuration,
   );
 }

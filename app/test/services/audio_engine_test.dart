@@ -19,6 +19,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:instructor/data/audio_assets.dart';
 import 'package:instructor/services/audio_engine.dart';
 
+// ignore_for_file: unawaited_futures
+
 // ────────────────────────────────────────────────────────────────────────────
 // Fake implementation for unit testing
 // ────────────────────────────────────────────────────────────────────────────
@@ -40,6 +42,11 @@ class _FakeAudioEngine implements AudioEngine {
   // Controllable state
   Duration? _position;
   Duration? positionAfterSeek;
+  String? _currentAmbientAssetKey;
+
+  /// Pending voice/effect completer — completed by [stopAll] to simulate
+  /// the [StoppedByUserException] that the real [AudioEngineImpl] throws.
+  Completer<void>? _pendingVoiceCompleter;
 
   /// Completes when [playVoice] is called. Tests can await this to know the
   /// exact moment a voice call arrives.
@@ -64,6 +71,9 @@ class _FakeAudioEngine implements AudioEngine {
   double get targetVolume => _targetVolume;
 
   @override
+  String? get currentAmbientAssetKey => _currentAmbientAssetKey;
+
+  @override
   Future<void> playVoice(String filePath, {double speed = 1.0}) async {
     voiceFilesPlayed.add(filePath);
     _voiceController.add(filePath);
@@ -72,8 +82,28 @@ class _FakeAudioEngine implements AudioEngine {
     _currentVolume = kDuckVolume;
     duckAmbientCount++;
     _duckController.add(null);
-    // Simulate voice playback completing after a short delay → restore.
-    await Future.delayed(const Duration(milliseconds: 10));
+
+    // Use a Completer so that [stopAll] can interrupt this fake's
+    // playback by completing with [StoppedByUserException], matching the
+    // behaviour of the real [AudioEngineImpl].
+    final completer = Completer<void>();
+    _pendingVoiceCompleter = completer;
+    Timer(const Duration(milliseconds: 10), () {
+      if (!completer.isCompleted) completer.complete();
+    });
+
+    try {
+      // Awaiting here: resolves normally after 10 ms, or throws
+      // StoppedByUserException if stopAll() completes us with error.
+      await completer.future;
+    } finally {
+      if (_pendingVoiceCompleter == completer) _pendingVoiceCompleter = null;
+    }
+
+    // Guard: stream controllers may already be closed if dispose() ran.
+    if (disposed) return;
+
+    // Simulate restore after normal completion.
     _currentVolume = _targetVolume;
     restoreAmbientCount++;
     _restoreController.add(null);
@@ -89,6 +119,7 @@ class _FakeAudioEngine implements AudioEngine {
     _targetVolume = volume;
     _currentVolume = volume;
     _position = Duration.zero;
+    _currentAmbientAssetKey = assetKey;
     ambientCalls.add(_AmbientCall(assetKey: assetKey, loop: loop, volume: volume));
   }
 
@@ -96,6 +127,7 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> stopAmbient({int fadeOutMs = kDefaultFadeOutMs}) async {
     stopAmbientFadeOuts.add(fadeOutMs);
     _position = null;
+    _currentAmbientAssetKey = null;
   }
 
   @override
@@ -116,6 +148,13 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> stopAll() async {
     stopAllCount++;
     _position = null;
+    _currentAmbientAssetKey = null;
+    // Mirror the real AudioEngineImpl behaviour: signal any pending
+    // playVoice/playEffect awaiter that the stop was user-initiated.
+    if (_pendingVoiceCompleter != null &&
+        !_pendingVoiceCompleter!.isCompleted) {
+      _pendingVoiceCompleter!.completeError(const StoppedByUserException());
+    }
   }
 
   @override
@@ -143,7 +182,19 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> playEffect(String assetKey) async {
     effectsPlayed.add(assetKey);
     duckAmbientCount++;
-    await Future.delayed(const Duration(milliseconds: 10));
+
+    final completer = Completer<void>();
+    _pendingVoiceCompleter = completer;
+    Timer(const Duration(milliseconds: 10), () {
+      if (!completer.isCompleted) completer.complete();
+    });
+
+    try {
+      await completer.future;
+    } finally {
+      if (_pendingVoiceCompleter == completer) _pendingVoiceCompleter = null;
+    }
+
     restoreAmbientCount++;
   }
 
@@ -151,6 +202,15 @@ class _FakeAudioEngine implements AudioEngine {
   Future<void> dispose() async {
     if (disposed) return; // Guard against double-dispose from tearDown.
     disposed = true;
+    // Complete pending voice completer normally (not with error) to avoid
+    // unhandled exceptions from unawaited playVoice/playEffect calls during
+    // test teardown.  The `disposed` check inside playVoice/playEffect guards
+    // against touching stream controllers after they are closed.
+    if (_pendingVoiceCompleter != null &&
+        !_pendingVoiceCompleter!.isCompleted) {
+      _pendingVoiceCompleter!.complete();
+      _pendingVoiceCompleter = null;
+    }
     await _voiceController.close();
     await _duckController.close();
     await _restoreController.close();
@@ -402,6 +462,37 @@ void main() {
       expect(engine.restoreAmbientCount, 2);
     });
 
+    // ── currentAmbientAssetKey ────────────────────────────────────────────
+
+    test('currentAmbientAssetKey is null before startAmbient', () {
+      expect(engine.currentAmbientAssetKey, isNull);
+    });
+
+    test('currentAmbientAssetKey returns the key passed to startAmbient', () async {
+      await engine.startAmbient(kAmbientRain);
+      expect(engine.currentAmbientAssetKey, kAmbientRain);
+    });
+
+    test('currentAmbientAssetKey updates when startAmbient is called again', () async {
+      await engine.startAmbient(kAmbientRain);
+      await engine.startAmbient(kAmbientOcean);
+      expect(engine.currentAmbientAssetKey, kAmbientOcean);
+    });
+
+    test('currentAmbientAssetKey is null after stopAmbient', () async {
+      await engine.startAmbient(kAmbientForest);
+      expect(engine.currentAmbientAssetKey, kAmbientForest);
+      await engine.stopAmbient();
+      expect(engine.currentAmbientAssetKey, isNull);
+    });
+
+    test('currentAmbientAssetKey is null after stopAll', () async {
+      await engine.startAmbient(kAmbientWhiteNoise);
+      expect(engine.currentAmbientAssetKey, kAmbientWhiteNoise);
+      await engine.stopAll();
+      expect(engine.currentAmbientAssetKey, isNull);
+    });
+
     // ── stopAll ───────────────────────────────────────────────────────────
 
     test('stopAll increments stopAllCount', () async {
@@ -416,6 +507,25 @@ void main() {
       await engine.stopAll();
 
       expect(engine.currentAmbientPosition, isNull);
+    });
+
+    test('stopAll while playVoice is in progress throws StoppedByUserException', () async {
+      await engine.startAmbient(kAmbientRain);
+
+      // Start playVoice but don't await — it will be in progress.
+      final voiceFuture = engine.playVoice('/tmp/hello.mp3');
+
+      // Wait until the duck event fires (voice is now mid-playback).
+      await engine.onDuck.first;
+
+      // stopAll should complete the voice completer with StoppedByUserException.
+      await engine.stopAll();
+
+      // Awaiting the voice future should now throw StoppedByUserException.
+      await expectLater(
+        voiceFuture,
+        throwsA(isA<StoppedByUserException>()),
+      );
     });
 
     // ── seekAmbient / currentAmbientPosition ──────────────────────────────
@@ -461,6 +571,54 @@ void main() {
       expect(engine.currentVolume, 0.75);
     });
 
+    // ── playEffect ────────────────────────────────────────────────────────
+
+    test('playEffect records the asset key', () async {
+      await engine.startAmbient(kAmbientRain);
+      await engine.playEffect(kEffectBell);
+
+      expect(engine.effectsPlayed, [kEffectBell]);
+    });
+
+    test('playEffect ducks ambient and restores it after completion', () async {
+      await engine.startAmbient(kAmbientRain, volume: 1.0);
+
+      await engine.playEffect(kEffectChime);
+
+      // After effect completes, restoreAmbientCount should be 1 (duck+restore).
+      expect(engine.restoreAmbientCount, 1);
+    });
+
+    test('playing two effects in sequence records both', () async {
+      await engine.startAmbient(kAmbientOcean);
+
+      await engine.playEffect(kEffectBell);
+      await engine.playEffect(kEffectGong);
+
+      expect(engine.effectsPlayed, [kEffectBell, kEffectGong]);
+      expect(engine.duckAmbientCount, 2);
+      expect(engine.restoreAmbientCount, 2);
+    });
+
+    test('stopAll while playEffect is in progress throws StoppedByUserException',
+        () async {
+      await engine.startAmbient(kAmbientRain);
+
+      // Start playEffect without awaiting — it waits for the completer.
+      final effectFuture = engine.playEffect(kEffectBell);
+
+      // Wait for the duck event so the effect is definitely in progress.
+      await engine.onDuck.first;
+
+      // stopAll should complete the effect completer with StoppedByUserException.
+      await engine.stopAll();
+
+      await expectLater(
+        effectFuture,
+        throwsA(isA<StoppedByUserException>()),
+      );
+    });
+
     // ── dispose ───────────────────────────────────────────────────────────
 
     test('dispose marks engine as disposed', () async {
@@ -468,6 +626,59 @@ void main() {
       await engine.dispose();
       expect(engine.disposed, isTrue);
     });
+  });
+
+  // ── playEffect idle / error simulation (TASK-010) ────────────────────────
+
+  group('AudioEngine playEffect idle error handling (TASK-010)', () {
+    // These tests use the _FakeAudioEngine to simulate the scenario where a
+    // stopAll() call arrives while playEffect is awaiting completion, mirroring
+    // the ProcessingState.idle error path in the real AudioEngineImpl.
+
+    test(
+      'playEffect completes with StoppedByUserException when stopAll() is called mid-effect',
+      () async {
+        final engine = _FakeAudioEngine();
+
+        await engine.startAmbient(kAmbientRain);
+        final effectFuture = engine.playEffect(kEffectBell);
+
+        // Confirm the effect started (duck event fires synchronously in the fake).
+        await engine.onDuck.first;
+
+        // stopAll() simulates an external interrupt (idle state from real engine).
+        await engine.stopAll();
+
+        // The effect future must complete with the sentinel exception.
+        await expectLater(
+          effectFuture,
+          throwsA(isA<StoppedByUserException>()),
+        );
+
+        await engine.dispose();
+      },
+    );
+
+    test(
+      'playEffect does not restore ambient after StoppedByUserException',
+      () async {
+        final engine = _FakeAudioEngine();
+
+        await engine.startAmbient(kAmbientForest);
+        final effectFuture = engine.playEffect(kEffectChime);
+        await engine.onDuck.first;
+        await engine.stopAll();
+
+        // Swallow the expected exception.
+        await effectFuture.catchError((_) {});
+
+        // restoreAmbientCount should be 0 — stopAll handled cleanup,
+        // not the effect's normal completion path.
+        expect(engine.restoreAmbientCount, 0);
+
+        await engine.dispose();
+      },
+    );
   });
 
   // ── kDuckVolume constant ──────────────────────────────────────────────────
