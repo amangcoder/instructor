@@ -35,7 +35,7 @@ describe('SESEmailService', () => {
 
   beforeEach(async () => {
     process.env.AWS_REGION = 'us-east-1';
-    process.env.SES_FROM_EMAIL = 'noreply@instructor.app';
+    process.env.SES_FROM_EMAIL = 'instructor.app@layersiq.com';
 
     mockSesSend.mockResolvedValue({ MessageId: 'test-message-id-abc' });
 
@@ -80,7 +80,7 @@ describe('SESEmailService', () => {
     it('uses SES_FROM_EMAIL as the sender address', async () => {
       await service.sendOtpEmail(recipientEmail, otpCode);
       const callArg = mockSesSend.mock.calls[0][0];
-      expect(JSON.stringify(callArg)).toContain('noreply@instructor.app');
+      expect(JSON.stringify(callArg)).toContain('instructor.app@layersiq.com');
     });
 
     it('falls back to a default sender when SES_FROM_EMAIL is not set', async () => {

@@ -196,8 +196,8 @@ describe('InstructorStack', () => {
   // ── Secrets Manager (existing resource) ───────────────────────────────────
 
   describe('Secrets Manager', () => {
-    it('creates a Secrets Manager secret for server credentials', () => {
-      template.resourceCountIs('AWS::SecretsManager::Secret', 1);
+    it('creates two Secrets Manager secrets (credentials + app secrets)', () => {
+      template.resourceCountIs('AWS::SecretsManager::Secret', 2);
     });
 
     it('secret name follows instructor/<env>/server-aws-credentials pattern', () => {
@@ -259,25 +259,33 @@ describe('InstructorStack', () => {
 
     it('Lambda runtime is nodejs (Node.js 20+)', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
-        Runtime: Match.stringLikeRegexp(/nodejs/),
+        Runtime: Match.stringLikeRegexp('nodejs'),
       });
     });
 
-    it('Lambda has DYNAMODB_TABLE environment variable', () => {
+    it('Lambda does NOT have DYNAMODB_TABLE_NAME environment variable', () => {
+      const resources = template.toJSON().Resources;
+      const lambdaFunctions = Object.values(resources).filter(
+        (r: any) => r.Type === 'AWS::Lambda::Function' && r.Properties?.Environment?.Variables?.DYNAMODB_TABLE_NAME,
+      );
+      expect(lambdaFunctions.length).toBe(0);
+    });
+
+    it('Lambda has SES_FROM_EMAIL set to instructor.app@layersiq.com', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         Environment: {
           Variables: Match.objectLike({
-            DYNAMODB_TABLE: Match.anyValue(),
+            SES_FROM_EMAIL: 'instructor.app@layersiq.com',
           }),
         },
       });
     });
 
-    it('Lambda has AWS_REGION environment variable', () => {
+    it('Lambda has AWS_S3_BUCKET environment variable', () => {
       template.hasResourceProperties('AWS::Lambda::Function', {
         Environment: {
           Variables: Match.objectLike({
-            AWS_REGION: Match.anyValue(),
+            AWS_S3_BUCKET: Match.anyValue(),
           }),
         },
       });
@@ -307,7 +315,7 @@ describe('InstructorStack', () => {
 
     it('has an /api/{proxy+} integration route', () => {
       template.hasResourceProperties('AWS::ApiGatewayV2::Route', {
-        RouteKey: Match.stringLikeRegexp(/api/),
+        RouteKey: Match.stringLikeRegexp('api'),
       });
     });
 
@@ -326,82 +334,32 @@ describe('InstructorStack', () => {
     });
   });
 
-  // ── DynamoDB table (TASK-010) ─────────────────────────────────────────────
+  // ── No DynamoDB table (TASK-010 update) ──────────────────────────────────
+  // DynamoDB has been replaced by Neon PostgreSQL + Upstash Redis.
+  // Verify the table is NOT present in the synthesized template.
 
-  describe('DynamoDB table (TASK-010)', () => {
-    it('creates exactly one DynamoDB table', () => {
-      template.resourceCountIs('AWS::DynamoDB::Table', 1);
-    });
-
-    it('uses on-demand (PAY_PER_REQUEST) billing mode', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        BillingMode: 'PAY_PER_REQUEST',
-      });
-    });
-
-    it('has pk (HASH) and sk (RANGE) attributes', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        AttributeDefinitions: Match.arrayWith([
-          { AttributeName: 'pk', AttributeType: 'S' },
-          { AttributeName: 'sk', AttributeType: 'S' },
-        ]),
-        KeySchema: Match.arrayWith([
-          { AttributeName: 'pk', KeyType: 'HASH' },
-          { AttributeName: 'sk', KeyType: 'RANGE' },
-        ]),
-      });
-    });
-
-    it('has a GSI with gsi1pk and gsi1sk (for email lookups)', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        GlobalSecondaryIndexes: Match.arrayWith([
-          Match.objectLike({
-            KeySchema: Match.arrayWith([
-              { AttributeName: 'gsi1pk', KeyType: 'HASH' },
-              { AttributeName: 'gsi1sk', KeyType: 'RANGE' },
-            ]),
-          }),
-        ]),
-      });
-    });
-
-    it('has TTL enabled on the ttl attribute', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        TimeToLiveSpecification: {
-          AttributeName: 'ttl',
-          Enabled: true,
-        },
-      });
-    });
-
-    it('point-in-time recovery is enabled', () => {
-      template.hasResourceProperties('AWS::DynamoDB::Table', {
-        PointInTimeRecoverySpecification: {
-          PointInTimeRecoveryEnabled: true,
-        },
-      });
+  describe('No DynamoDB table (post-migration)', () => {
+    it('creates zero DynamoDB tables', () => {
+      template.resourceCountIs('AWS::DynamoDB::Table', 0);
     });
   });
 
   // ── Lambda IAM execution role (TASK-010) ──────────────────────────────────
 
   describe('Lambda IAM execution role (TASK-010)', () => {
-    it('Lambda execution role has DynamoDB permissions on the table', () => {
-      template.hasResourceProperties('AWS::IAM::Policy', {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith([
-                'dynamodb:GetItem',
-                'dynamodb:PutItem',
-                'dynamodb:UpdateItem',
-                'dynamodb:DeleteItem',
-                'dynamodb:Query',
-              ]),
-            }),
-          ]),
-        },
-      });
+    it('Lambda execution role has NO dynamodb:* permissions', () => {
+      const resources = template.toJSON().Resources;
+      const policies = Object.values(resources).filter(
+        (r: any) => r.Type === 'AWS::IAM::Policy',
+      );
+      for (const policy of policies as any[]) {
+        const statements: any[] = policy.Properties?.PolicyDocument?.Statement ?? [];
+        for (const stmt of statements) {
+          const actions: string[] = Array.isArray(stmt.Action) ? stmt.Action : [stmt.Action];
+          const hasDynamo = actions.some((a: string) => a.startsWith('dynamodb:'));
+          expect(hasDynamo).toBe(false);
+        }
+      }
     });
 
     it('Lambda execution role has SES SendEmail permission', () => {
@@ -422,7 +380,6 @@ describe('InstructorStack', () => {
           Statement: Match.arrayWith([
             Match.objectLike({
               Action: Match.arrayWith([
-                'logs:CreateLogGroup',
                 'logs:CreateLogStream',
                 'logs:PutLogEvents',
               ]),
@@ -430,6 +387,49 @@ describe('InstructorStack', () => {
           ]),
         },
       });
+    });
+  });
+
+  // ── SES domain identity (TASK-010 update) ─────────────────────────────────
+
+  describe('SES domain identity', () => {
+    it('creates an SES email identity for layersiq.com domain', () => {
+      template.hasResourceProperties('AWS::SES::EmailIdentity', {
+        EmailIdentity: 'layersiq.com',
+      });
+    });
+
+    it('SES identity is NOT set to an individual email address', () => {
+      const resources = template.toJSON().Resources;
+      const sesIdentities = Object.values(resources).filter(
+        (r: any) => r.Type === 'AWS::SES::EmailIdentity',
+      );
+      expect(sesIdentities.length).toBeGreaterThan(0);
+      for (const identity of sesIdentities as any[]) {
+        const emailIdentity: string = identity.Properties?.EmailIdentity ?? '';
+        // Must be a domain (no @), not an individual email address.
+        expect(emailIdentity).not.toContain('@');
+        expect(emailIdentity).toBe('layersiq.com');
+      }
+    });
+  });
+
+  // ── App Secrets keys (TASK-010 update) ────────────────────────────────────
+
+  describe('App Secrets (Secrets Manager)', () => {
+    it('app-secrets secret includes DATABASE_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN', () => {
+      const resources = template.toJSON().Resources;
+      const secrets = Object.values(resources).filter(
+        (r: any) =>
+          r.Type === 'AWS::SecretsManager::Secret' &&
+          r.Properties?.Name?.includes('app-secrets'),
+      );
+      expect(secrets.length).toBeGreaterThan(0);
+      const secretValue = (secrets[0] as any).Properties.SecretString;
+      const parsed = JSON.parse(secretValue);
+      expect(parsed).toHaveProperty('DATABASE_URL');
+      expect(parsed).toHaveProperty('UPSTASH_REDIS_REST_URL');
+      expect(parsed).toHaveProperty('UPSTASH_REDIS_REST_TOKEN');
     });
   });
 

@@ -1,18 +1,18 @@
 /**
- * Unit tests for AuthService (migrated to DynamoDB + SES + DynamoDBRateLimiter).
+ * Unit tests for AuthService (using DatabaseService + SES + UpstashRateLimiter).
  *
  * All external service calls are intercepted via mocked service classes.
- * No real DynamoDB, SES, or network calls are made in CI.
+ * No real database, SES, or network calls are made in CI.
  *
  * Mock strategy:
- *   - DynamoDBService   → jest.fn() for each typed entity method
- *   - SESEmailService   → jest.fn() for sendOtpEmail
- *   - DynamoDBRateLimitService → jest.fn() for consume/peek/increment
- *   - JwtService        → deterministic sign/verify based on Buffer.from(JSON)
+ *   - DatabaseService          → jest.fn() for each typed entity method
+ *   - SESEmailService          → jest.fn() for sendOtpEmail
+ *   - UpstashRateLimitService  → jest.fn() for consume/peek/increment
+ *   - JwtService               → deterministic sign/verify based on Buffer.from(JSON)
  *
  * To test verifyOtp with a valid OTP:
  *   1. Call requestOtp, capturing the OTP via the SES mock
- *   2. Capture the hashed code via the DynamoDB createOtp mock
+ *   2. Capture the hashed code via the DatabaseService createOtp mock
  *   3. Return the captured hash from getActiveOtps
  *   4. Call verifyOtp with the captured plaintext code
  */
@@ -21,15 +21,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
-import { DynamoDBService } from '../dynamodb/dynamodb.service';
+import { DatabaseService } from '../database/database.service';
 import { SESEmailService } from '../email/ses-email.service';
-import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
+import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 
 // ---------------------------------------------------------------------------
 // Mock factories
 // ---------------------------------------------------------------------------
 
-function createMockDynamoDBService() {
+function createMockDatabaseService() {
   return {
     getUserById: jest.fn().mockResolvedValue(null),
     getUserByEmail: jest.fn().mockResolvedValue(null),
@@ -118,15 +118,18 @@ function makeOtpRecord(overrides: {
 
 describe('AuthService', () => {
   let service: AuthService;
-  let mockDynamo: ReturnType<typeof createMockDynamoDBService>;
+  let mockDynamo: ReturnType<typeof createMockDatabaseService>;
   let mockSes: ReturnType<typeof createMockSESEmailService>;
   let mockRateLimiter: ReturnType<typeof createMockRateLimiter>;
   let mockJwt: ReturnType<typeof createMockJwtService>;
 
   beforeEach(async () => {
     process.env.OTP_SALT = 'test-otp-salt-32-chars-placeholder';
+    // Set DATABASE_URL so AuthService.localBypass = false and the full OTP
+    // flow (rate-limit → DB → SES) is exercised via the mock providers.
+    process.env.DATABASE_URL = 'postgresql://test:test@test/test';
 
-    mockDynamo = createMockDynamoDBService();
+    mockDynamo = createMockDatabaseService();
     mockSes = createMockSESEmailService();
     mockRateLimiter = createMockRateLimiter();
     mockJwt = createMockJwtService();
@@ -134,9 +137,9 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: DynamoDBService, useValue: mockDynamo },
+        { provide: DatabaseService, useValue: mockDynamo },
         { provide: SESEmailService, useValue: mockSes },
-        { provide: DynamoDBRateLimitService, useValue: mockRateLimiter },
+        { provide: UpstashRateLimitService, useValue: mockRateLimiter },
         { provide: JwtService, useValue: mockJwt },
       ],
     }).compile();
@@ -149,6 +152,7 @@ describe('AuthService', () => {
     jest.restoreAllMocks();
     jest.useRealTimers();
     delete process.env.OTP_SALT;
+    delete process.env.DATABASE_URL;
   });
 
   // ── requestOtp ─────────────────────────────────────────────────────────────
@@ -164,7 +168,7 @@ describe('AuthService', () => {
       expect(result).toEqual({ message: 'OTP sent' });
     });
 
-    it('stores an OTP record via DynamoDBService.createOtp', async () => {
+    it('stores an OTP record via DatabaseService.createOtp', async () => {
       await service.requestOtp('user@example.com');
       expect(mockDynamo.createOtp).toHaveBeenCalled();
     });
@@ -315,7 +319,7 @@ describe('AuthService', () => {
       expect(mockDynamo.markOtpUsed).toHaveBeenCalled();
     });
 
-    it('stores a refresh token in DynamoDB after successful verification', async () => {
+    it('stores a refresh token in the database after successful verification', async () => {
       const { capturedOtp } = await setupVerification();
       await service.verifyOtp(email, capturedOtp);
       expect(mockDynamo.createRefreshToken).toHaveBeenCalled();
@@ -454,7 +458,7 @@ describe('AuthService', () => {
   // ── revokeRefreshToken ──────────────────────────────────────────────────────
 
   describe('revokeRefreshToken', () => {
-    it('calls DynamoDBService.revokeRefreshToken', async () => {
+    it('calls DatabaseService.revokeRefreshToken', async () => {
       await service.revokeRefreshToken('some-refresh-token');
       expect(mockDynamo.revokeRefreshToken).toHaveBeenCalled();
     });
@@ -467,7 +471,7 @@ describe('AuthService', () => {
   // ── revokeAllRefreshTokens ──────────────────────────────────────────────────
 
   describe('revokeAllRefreshTokens', () => {
-    it('calls DynamoDBService.revokeAllRefreshTokens with the userId', async () => {
+    it('calls DatabaseService.revokeAllRefreshTokens with the userId', async () => {
       await service.revokeAllRefreshTokens(USER.id);
       expect(mockDynamo.revokeAllRefreshTokens).toHaveBeenCalledWith(USER.id);
     });

@@ -71,6 +71,9 @@ describe('TtsController', () => {
 
     const mockTtsService: Partial<jest.Mocked<TtsService>> = {
       synthesize: jest.fn(),
+      // checkCacheOnly is called when auth fails — return null (cache miss) so
+      // the controller sends a 401 response rather than serving cached audio.
+      checkCacheOnly: jest.fn().mockResolvedValue(null),
     };
 
     const mockProviderRegistry: Partial<ProviderRegistryService> = {
@@ -247,55 +250,57 @@ describe('TtsController', () => {
   // -------------------------------------------------------------------------
 
   describe('API key and JWT authentication (AC-007)', () => {
-    it('throws UnauthorizedException when API_KEY is set and x-api-key header is wrong', async () => {
+    it('returns 401 response when API_KEY is set and x-api-key header is wrong', async () => {
+      // Auth fails → controller falls through to checkCacheOnly → cache miss → 401 response.
       process.env.API_KEY = 'secret-key';
 
       const dto: SynthesizeDto = { text: 'Hello' };
       const res = makeMockRes();
 
-      await expect(
-        controller.synthesize(
-          dto,
-          'wrong-key',    // x-api-key: wrong
-          undefined,      // Authorization: absent
-          res as unknown as import('express').Response,
-        ),
-      ).rejects.toThrow(UnauthorizedException);
+      await controller.synthesize(
+        dto,
+        'wrong-key',    // x-api-key: wrong
+        undefined,      // Authorization: absent
+        res as unknown as import('express').Response,
+      );
 
+      expect(res.status).toHaveBeenCalledWith(401);
       expect(ttsService.synthesize).not.toHaveBeenCalled();
     });
 
-    it('throws UnauthorizedException when API_KEY is set but no credentials provided', async () => {
+    it('returns 401 response when API_KEY is set but no credentials provided', async () => {
       process.env.API_KEY = 'secret-key';
 
       const dto: SynthesizeDto = { text: 'Hello' };
       const res = makeMockRes();
 
-      await expect(
-        controller.synthesize(
-          dto,
-          undefined,  // x-api-key: absent
-          undefined,  // Authorization: absent
-          res as unknown as import('express').Response,
-        ),
-      ).rejects.toThrow(UnauthorizedException);
+      await controller.synthesize(
+        dto,
+        undefined,  // x-api-key: absent
+        undefined,  // Authorization: absent
+        res as unknown as import('express').Response,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(401);
     });
 
-    it('throws UnauthorizedException when no credentials are provided (fail-open fixed)', async () => {
-      // TASK-003: fail-open vulnerability — must reject when no credentials
+    it('returns 401 when no credentials are provided (fail-open fixed)', async () => {
+      // TASK-003: fail-open vulnerability — must reject when no credentials.
+      // Auth fails → checkCacheOnly returns null (cache miss) → 401 response.
       delete process.env.API_KEY;
 
       const dto: SynthesizeDto = { text: 'Hello' };
       const res = makeMockRes();
 
-      await expect(
-        controller.synthesize(
-          dto,
-          undefined,  // x-api-key: absent
-          undefined,  // Authorization: absent
-          res as unknown as import('express').Response,
-        ),
-      ).rejects.toThrow(UnauthorizedException);
+      await controller.synthesize(
+        dto,
+        undefined,  // x-api-key: absent
+        undefined,  // Authorization: absent
+        res as unknown as import('express').Response,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(ttsService.synthesize).not.toHaveBeenCalled();
     });
 
     it('allows request when valid JWT Bearer token is present', async () => {

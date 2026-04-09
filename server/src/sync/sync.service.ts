@@ -1,11 +1,8 @@
 /**
  * SyncService — S3 pre-signed URL generation for database backup sync.
  *
- * Migrated from DatabaseService (SQLite/Drizzle) → DynamoDBService
- * for sync metadata storage (lastSyncAt, sizeBytes per user).
- *
- * All sync metadata uses DynamoDB key pattern:
- *   pk = USER#<userId>  sk = SYNC
+ * Uses DatabaseService (Neon PostgreSQL/Drizzle) for sync metadata storage
+ * (lastSyncAt, sizeBytes per user).
  */
 
 import {
@@ -19,7 +16,7 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { DynamoDBService } from '../dynamodb/dynamodb.service';
+import { DatabaseService } from '../database/database.service';
 import { SyncStatusDto } from './dto/sync-status.dto';
 
 const URL_EXPIRY_SECONDS = 300; // 5 minutes
@@ -31,7 +28,7 @@ export class SyncService {
   private readonly s3: S3Client | null;
   private readonly bucket: string | null;
 
-  constructor(private readonly db: DynamoDBService) {
+  constructor(private readonly db: DatabaseService) {
     this.bucket = process.env.AWS_S3_BUCKET ?? null;
     if (this.bucket) {
       this.s3 = new S3Client({

@@ -1,14 +1,14 @@
 /**
- * Unit tests for SyncService (migrated to DynamoDBService for metadata storage).
+ * Unit tests for SyncService (using DatabaseService for metadata storage).
  *
- * DynamoDBService is mocked with per-method jest.fn() instances.
+ * DatabaseService is mocked with per-method jest.fn() instances.
  * AWS S3 SDK is mocked via jest.mock() — no real AWS calls in CI.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { SyncService } from './sync.service';
-import { DynamoDBService } from '../dynamodb/dynamodb.service';
+import { DatabaseService } from '../database/database.service';
 
 // ---------------------------------------------------------------------------
 // Mock S3 client
@@ -27,10 +27,10 @@ jest.mock('@aws-sdk/client-s3', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock DynamoDBService factory
+// Mock DatabaseService factory
 // ---------------------------------------------------------------------------
 
-function createMockDynamoDBService() {
+function createMockDatabaseService() {
   return {
     getUserById: jest.fn().mockResolvedValue(null),
     getUserByEmail: jest.fn().mockResolvedValue(null),
@@ -55,7 +55,7 @@ function createMockDynamoDBService() {
 
 describe('SyncService', () => {
   let service: SyncService;
-  let mockDynamo: ReturnType<typeof createMockDynamoDBService>;
+  let mockDynamo: ReturnType<typeof createMockDatabaseService>;
 
   const TEST_BUCKET = 'test-sync-bucket';
   const USER_ID = 'user-abc-123';
@@ -64,7 +64,7 @@ describe('SyncService', () => {
     `https://${TEST_BUCKET}.s3.ap-south-1.amazonaws.com/${key}?X-Amz-Signature=abc123&method=${method}`;
 
   beforeEach(async () => {
-    mockDynamo = createMockDynamoDBService();
+    mockDynamo = createMockDatabaseService();
     process.env.AWS_S3_BUCKET = TEST_BUCKET;
     process.env.AWS_REGION = 'ap-south-1';
 
@@ -78,7 +78,7 @@ describe('SyncService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SyncService,
-        { provide: DynamoDBService, useValue: mockDynamo },
+        { provide: DatabaseService, useValue: mockDynamo },
       ],
     }).compile();
 
@@ -144,7 +144,7 @@ describe('SyncService', () => {
       const module = await Test.createTestingModule({
         providers: [
           SyncService,
-          { provide: DynamoDBService, useValue: mockDynamo },
+          { provide: DatabaseService, useValue: mockDynamo },
         ],
       }).compile();
       const noBucketService = module.get<SyncService>(SyncService);
@@ -205,7 +205,7 @@ describe('SyncService', () => {
       const module = await Test.createTestingModule({
         providers: [
           SyncService,
-          { provide: DynamoDBService, useValue: mockDynamo },
+          { provide: DatabaseService, useValue: mockDynamo },
         ],
       }).compile();
       const noBucketService = module.get<SyncService>(SyncService);
@@ -263,7 +263,7 @@ describe('SyncService', () => {
       expect(r2.lastSyncAt).toBeNull();
     });
 
-    it('calls DynamoDBService.getSyncMetadata with the userId', async () => {
+    it('calls DatabaseService.getSyncMetadata with the userId', async () => {
       mockDynamo.getSyncMetadata.mockResolvedValueOnce(null);
       await service.getSyncStatus(USER_ID);
       expect(mockDynamo.getSyncMetadata).toHaveBeenCalledWith(USER_ID);
@@ -277,7 +277,7 @@ describe('SyncService', () => {
       await expect(service.confirmSync(USER_ID, 1024)).resolves.toBeUndefined();
     });
 
-    it('calls DynamoDBService.upsertSyncMetadata with userId and sizeBytes', async () => {
+    it('calls DatabaseService.upsertSyncMetadata with userId and sizeBytes', async () => {
       await service.confirmSync(USER_ID, 2048);
       expect(mockDynamo.upsertSyncMetadata).toHaveBeenCalledWith(
         USER_ID,

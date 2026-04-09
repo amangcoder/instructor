@@ -8,7 +8,7 @@ import {
   BadGatewayException,
 } from '@nestjs/common';
 import { validatePlan } from './validators/plan.validator';
-import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
+import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ Keep plans practical, well-structured, and achievable.`;
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
 
-  constructor(private readonly rateLimit: DynamoDBRateLimitService) {}
+  constructor(private readonly rateLimit: UpstashRateLimitService) {}
 
   async generatePlan(
     prompt: string,

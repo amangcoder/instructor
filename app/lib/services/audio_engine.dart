@@ -187,8 +187,15 @@ class AudioEngineImpl implements AudioEngine {
   final AudioPlayer _ambientPlayer;
   final AudioPlayer _voicePlayer;
 
-  /// Internal player for iOS AVAudioSession keep-alive during wait steps.
+  /// Internal player for OS keep-alive during wait steps.
   final AudioPlayer _silencePlayer;
+
+  /// True while the silence keep-alive cycle is active.
+  bool _silenceKeepAliveActive = false;
+
+  /// Subscription to [_silencePlayer.processingStateStream] for detecting
+  /// when a silence chunk finishes so we can restart with the next chunk.
+  StreamSubscription<ProcessingState>? _silenceCompletionSub;
 
   // ── Volume state ─────────────────────────────────────────────────────────
 
@@ -458,6 +465,9 @@ class AudioEngineImpl implements AudioEngine {
   Future<void> stopAll() async {
     if (_disposed) return;
     _cancelFade();
+    _silenceKeepAliveActive = false;
+    _silenceCompletionSub?.cancel();
+    _silenceCompletionSub = null;
     _voiceCompletionSubscription?.cancel();
     _voiceCompletionSubscription = null;
     _currentAmbientAssetKey = null;
@@ -509,21 +519,43 @@ class AudioEngineImpl implements AudioEngine {
   @override
   Future<void> startSilenceKeepAlive() async {
     if (_disposed) return;
-    // Both iOS and Android need a silent audio loop during wait steps to
-    // prevent the OS from suspending the Dart isolate. On iOS this keeps
-    // AVAudioSession active; on Android it keeps the foreground service's
-    // audio focus alive and prevents process suspension.
-    final silencePath = resolveAudioAssetPath(kSilenceTrack);
-    await _silencePlayer.setLoopMode(LoopMode.one);
-    await _silencePlayer.setVolume(0.0);
-    await _silencePlayer.setAsset(silencePath);
-    unawaited(_silencePlayer.play());
+    _silenceKeepAliveActive = true;
+    await _playSilenceChunk();
   }
 
   @override
   Future<void> stopSilenceKeepAlive() async {
+    _silenceKeepAliveActive = false;
+    _silenceCompletionSub?.cancel();
+    _silenceCompletionSub = null;
     if (_disposed) return;
     await _silencePlayer.stop();
+  }
+
+  /// Plays a single 60-second silence chunk and listens for completion to
+  /// restart the next chunk. This creates natural play-complete-restart
+  /// cycles that iOS and Android treat as legitimate audio activity, unlike
+  /// an infinite loop of a tiny silence file which the OS can detect and
+  /// kill after 10-15 minutes.
+  Future<void> _playSilenceChunk() async {
+    if (_disposed || !_silenceKeepAliveActive) return;
+
+    _silenceCompletionSub?.cancel();
+    final silencePath = resolveAudioAssetPath(kSilenceTrack);
+    await _silencePlayer.setLoopMode(LoopMode.off);
+    await _silencePlayer.setVolume(0.0);
+    await _silencePlayer.setAsset(silencePath);
+
+    _silenceCompletionSub = _silencePlayer.processingStateStream.listen(
+      (state) {
+        if (state == ProcessingState.completed && _silenceKeepAliveActive) {
+          debugPrint('AudioEngine: silence chunk completed — restarting');
+          unawaited(_playSilenceChunk());
+        }
+      },
+    );
+
+    unawaited(_silencePlayer.play());
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -536,6 +568,9 @@ class AudioEngineImpl implements AudioEngine {
     _disposed = true;
 
     _cancelFade();
+    _silenceKeepAliveActive = false;
+    _silenceCompletionSub?.cancel();
+    _silenceCompletionSub = null;
     _voiceCompletionSubscription?.cancel();
     _voiceCompletionSubscription = null;
 

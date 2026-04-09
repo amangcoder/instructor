@@ -5,7 +5,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { PlansService } from './plans.service';
-import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
+import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,7 +90,7 @@ function makeGeminiInvalidPlanResponse(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Mock DynamoDBRateLimitService factory
+// Mock UpstashRateLimitService factory
 // ---------------------------------------------------------------------------
 
 function createMockRateLimiter() {
@@ -171,7 +171,7 @@ describe('PlansService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PlansService,
-        { provide: DynamoDBRateLimitService, useValue: mockRateLimiter },
+        { provide: UpstashRateLimitService, useValue: mockRateLimiter },
       ],
     }).compile();
 
@@ -403,7 +403,7 @@ describe('PlansService', () => {
     });
   });
 
-  // ── Rate limiting via DynamoDBRateLimitService (10 per hour per user) ────────
+  // ── Rate limiting via UpstashRateLimitService (10 per hour per user) ────────
 
   describe('rate limiting', () => {
     beforeEach(() => {

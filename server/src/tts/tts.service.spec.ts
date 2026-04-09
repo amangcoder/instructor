@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadGatewayException, BadRequestException } from '@nestjs/common';
 import { TtsService } from './tts.service';
 import { KokoroProxyService } from './providers/kokoro-proxy.service';
+import { ElevenLabsProxyService } from './providers/elevenlabs-proxy.service';
 import { ProviderRegistryService } from './providers/provider-registry.service';
 
 // Suppress fs operations during tests (TtsService creates the cache dir on init).
@@ -72,6 +73,13 @@ function createMockKokoroProxy() {
   };
 }
 
+/** Mock ElevenLabsProxyService — required by TtsService constructor (TASK-011). */
+function createMockElevenLabsProxy() {
+  return {
+    synthesize: jest.fn(),
+  };
+}
+
 /** Mock ProviderRegistryService — required by TtsService constructor. */
 function createMockProviderRegistry() {
   return {
@@ -108,16 +116,19 @@ function makeKokoroWav(): Buffer {
 describe('TtsService', () => {
   let service: TtsService;
   let mockKokoroProxy: ReturnType<typeof createMockKokoroProxy>;
+  let mockElevenLabsProxy: ReturnType<typeof createMockElevenLabsProxy>;
   let mockProviderRegistry: ReturnType<typeof createMockProviderRegistry>;
 
   beforeEach(async () => {
     mockKokoroProxy = createMockKokoroProxy();
+    mockElevenLabsProxy = createMockElevenLabsProxy();
     mockProviderRegistry = createMockProviderRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TtsService,
         { provide: KokoroProxyService, useValue: mockKokoroProxy },
+        { provide: ElevenLabsProxyService, useValue: mockElevenLabsProxy },
         { provide: ProviderRegistryService, useValue: mockProviderRegistry },
       ],
     }).compile();

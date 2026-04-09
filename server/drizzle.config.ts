@@ -1,12 +1,26 @@
-/**
- * Drizzle ORM has been removed from this project as part of the AWS Lambda migration.
- * The SQLite database layer has been replaced by Amazon DynamoDB (single-table design).
- *
- * This file is kept as a placeholder to document the migration.
- * It is excluded from TypeScript compilation via tsconfig.build.json.
- *
- * @see server/src/dynamodb/dynamodb.service.ts — new DynamoDB data access layer
- * @see server/src/dynamodb/entities.ts        — DynamoDB entity type definitions
- */
+import { defineConfig } from 'drizzle-kit';
 
-export default {};
+/**
+ * Drizzle Kit configuration for Neon PostgreSQL.
+ *
+ * Used by `drizzle-kit generate` to produce migration SQL files and by
+ * `drizzle-kit migrate` to apply them against the Neon database.
+ *
+ * Database connection is read from DATABASE_URL — set it in .env for local
+ * development or export it before running drizzle-kit commands:
+ *
+ *   DATABASE_URL="postgres://..." npx drizzle-kit generate
+ *   DATABASE_URL="postgres://..." npx drizzle-kit migrate
+ *
+ * In Lambda, DATABASE_URL is injected by the AWS Parameters and Secrets
+ * Lambda Extension from Secrets Manager — migrations are run locally before
+ * each deployment, not at runtime.
+ */
+export default defineConfig({
+  dialect: 'postgresql',
+  schema: './src/database/schema.ts',
+  out: './drizzle',
+  dbCredentials: {
+    url: process.env.DATABASE_URL!,
+  },
+});

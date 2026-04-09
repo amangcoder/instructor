@@ -52,9 +52,12 @@ const String kEffectGong = 'gong';
 // Silence key (internal — used by AudioEngine for iOS keep-alive)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// 1-second silent audio loop for iOS AVAudioSession keep-alive during wait
-/// steps. Not intended to be used directly in Plan steps.
-const String kSilenceTrack = 'silence';
+/// 60-second silent audio file for OS keep-alive during wait steps.
+///
+/// Played in discrete chunks (not infinite loop) so that iOS / Android see
+/// natural play-complete-restart cycles instead of a suspicious infinite loop.
+/// Not intended to be used directly in Plan steps.
+const String kSilenceTrack = 'silence_60s';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Asset path map
@@ -77,8 +80,8 @@ const Map<String, String> kAudioAssetPaths = {
   kEffectChime: 'assets/audio/effects/chime.mp3',
   kEffectGong: 'assets/audio/effects/gong.mp3',
 
-  // Silence (iOS keep-alive)
-  kSilenceTrack: 'assets/audio/silence/silence.mp3',
+  // Silence (OS keep-alive — 60-second chunks)
+  kSilenceTrack: 'assets/audio/silence/silence_60s.mp3',
 };
 
 /// Returns `true` if [key] is a known ambient track key.

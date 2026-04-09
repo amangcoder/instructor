@@ -4,11 +4,10 @@ import {
   aws_s3 as s3,
   aws_iam as iam,
   aws_secretsmanager as secretsmanager,
-  aws_dynamodb as dynamodb,
   aws_lambda as lambda,
   aws_lambda_nodejs as nodejs,
   aws_logs as logs,
-  aws_apigatewayv2 as apigwv2,
+  aws_apigateway as apigw,
   aws_ses as ses,
   aws_wafv2 as wafv2,
   aws_cloudwatch as cloudwatch,
@@ -26,9 +25,9 @@ export interface InstructorStackProps extends cdk.StackProps {
   /** 'dev' | 'staging' | 'prod' — controls removal policy and lifecycle rules */
   readonly envName: string;
   /**
-   * Verified SES sender email address (e.g. "noreply@instructor.app").
-   * Falls back to CDK context key 'sesFromEmail', then 'noreply@instructor.app'.
-   * For production: must be a domain/email verified in AWS SES before first deploy.
+   * SES sender email address (e.g. "instructor.app@layersiq.com").
+   * Falls back to CDK context key 'sesFromEmail', then 'instructor.app@layersiq.com'.
+   * For production: layersiq.com domain must be verified in AWS SES before first deploy.
    */
   readonly sesFromEmail?: string;
 }
@@ -40,22 +39,21 @@ export interface InstructorStackProps extends cdk.StackProps {
 //   2. IAM user           — NestJS server S3 credentials for Docker/local (EXISTING)
 //   3. IAM policies       — Least-privilege S3 access for IAM user (EXISTING)
 //   4. Secrets Manager    — IAM user credentials (EXISTING)
-//   5. DynamoDB table     — Single-table design; pk/sk + GSI (gsi1pk/gsi1sk); TTL on 'ttl'
-//   6. App secrets        — JWT, API keys, Gemini key in Secrets Manager
-//   7. CloudWatch log grp — Explicit log group with retention policy
-//   8. Lambda exec role   — Least-privilege IAM role for Lambda function
-//   9. Extension layer    — AWS Parameters & Secrets Lambda Extension (Secrets Manager cache)
-//  10. Lambda function    — NodejsFunction with esbuild; 1024 MB / 120 s; no VPC
-//  11. HTTP API v2        — API Gateway HTTP API; ANY /api/{proxy+} → Lambda
-//  12. SES identity       — Verified sender email identity for OTP emails
-//  13. WAF log group      — CloudWatch log group for WAF request logs (name: aws-waf-logs-*)
-//  14. WAF WebACL         — REGIONAL WebACL; rate-based rule 100 req/5-min per source IP
-//  15. WAF logging config — Connects WebACL to the WAF log group
-//  16. WAF association    — Attaches WebACL to API Gateway HTTP API $default stage
+//   5. App secrets        — JWT, API keys, Gemini key, DB/Redis URLs in Secrets Manager
+//   6. CloudWatch log grp — Explicit log group with retention policy
+//   7. Lambda exec role   — Least-privilege IAM role for Lambda function
+//   8. Extension layer    — AWS Parameters & Secrets Lambda Extension (Secrets Manager cache)
+//   9. Lambda function    — NodejsFunction with esbuild; 1024 MB / 120 s; no VPC
+//  10. HTTP API v2        — API Gateway HTTP API; ANY /api/{proxy+} -> Lambda
+//  11. SES identity       — layersiq.com domain identity (DKIM + TXT verification records)
+//  12. WAF log group      — CloudWatch log group for WAF request logs (name: aws-waf-logs-*)
+//  13. WAF WebACL         — REGIONAL WebACL; rate-based rule 100 req/5-min per source IP
+//  14. WAF logging config — Connects WebACL to the WAF log group
+//  15. WAF association    — Attaches WebACL to API Gateway HTTP API $default stage
 //
 // Key design decisions:
 //   • Lambda is NOT placed in a VPC — eliminates NAT Gateway cost and ENI cold-start penalty.
-//   • On-demand DynamoDB billing — no capacity planning for startup workloads (~1,000 DAU).
+//   • Neon PostgreSQL (free tier) and Upstash Redis (free tier) replace DynamoDB — no per-request data charges at launch scale (~1,000 DAU).
 //   • HTTP API v2 (not REST API) — 70% cheaper, lower latency, sufficient feature set.
 //   • Parameters & Secrets Lambda Extension — secrets cached in-process; zero latency on warm calls.
 //   • IAM role (not IAM user) for Lambda — execution role grants temporary credentials automatically.
@@ -68,15 +66,12 @@ export class InstructorStack extends cdk.Stack {
   // ── Existing resources ─────────────────────────────────────────────────────
 
   /** The single bucket shared by TTS cache and user backups. */
-  public readonly bucket: s3.Bucket;
+  public readonly bucket: s3.IBucket;
 
   /** IAM user whose credentials the NestJS server uses (Docker / local dev). */
   public readonly serverUser: iam.User;
 
   // ── New Lambda resources ───────────────────────────────────────────────────
-
-  /** DynamoDB single-table for all entities. */
-  public readonly table: dynamodb.Table;
 
   /** Lambda function running the NestJS application. */
   public readonly lambdaFn: lambda.Function;
@@ -93,56 +88,62 @@ export class InstructorStack extends cdk.Stack {
     const sesFromEmail =
       props.sesFromEmail ??
       (this.node.tryGetContext('sesFromEmail') as string | undefined) ??
-      'noreply@instructor.app';
+      'instructor.app@layersiq.com';
 
     // ── 1. S3 Bucket ──────────────────────────────────────────────────────────
 
     const bucketName = isProd ? 'instructor-cache' : `instructor-cache-${envName}`;
 
-    this.bucket = new s3.Bucket(this, 'InstructorBucket', {
-      bucketName,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      enforceSSL: true,
-      versioned: true,
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-      autoDeleteObjects: !isProd,
+    if (isProd) {
+      // In prod, the bucket already exists (created before the stack was managed by CDK).
+      // Import it by name so CDK can reference its ARN without trying to create it.
+      this.bucket = s3.Bucket.fromBucketName(this, 'InstructorBucket', bucketName);
+    } else {
+      this.bucket = new s3.Bucket(this, 'InstructorBucket', {
+        bucketName,
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        encryption: s3.BucketEncryption.S3_MANAGED,
+        enforceSSL: true,
+        versioned: true,
+        removalPolicy: RemovalPolicy.DESTROY,
+        autoDeleteObjects: true,
 
-      lifecycleRules: [
-        {
-          id: 'tts-cache-expiry',
-          prefix: 'tts/',
-          enabled: true,
-          expiration: Duration.days(isProd ? 90 : 30),
-          noncurrentVersionExpiration: Duration.days(1),
-          abortIncompleteMultipartUploadAfter: Duration.days(1),
-        },
-        {
-          id: 'backups-version-retention',
-          prefix: 'backups/',
-          enabled: true,
-          noncurrentVersionExpiration: Duration.days(30),
-          noncurrentVersionsToRetain: 5,
-        },
-      ],
+        lifecycleRules: [
+          {
+            id: 'tts-cache-expiry',
+            prefix: 'tts/',
+            enabled: true,
+            expiration: Duration.days(30),
+            noncurrentVersionExpiration: Duration.days(1),
+            abortIncompleteMultipartUploadAfter: Duration.days(1),
+          },
+          {
+            id: 'backups-version-retention',
+            prefix: 'backups/',
+            enabled: true,
+            noncurrentVersionExpiration: Duration.days(30),
+            noncurrentVersionsToRetain: 5,
+          },
+        ],
 
-      cors: [
-        {
-          id: 'flutter-presigned-uploads',
-          allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
-          allowedOrigins: ['*'],
-          allowedHeaders: [
-            'Content-Type',
-            'Content-Disposition',
-            'Content-Length',
-            'x-amz-*',
-            'Authorization',
-          ],
-          maxAge: 3000,
-          exposedHeaders: ['ETag'],
-        },
-      ],
-    });
+        cors: [
+          {
+            id: 'flutter-presigned-uploads',
+            allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET, s3.HttpMethods.HEAD],
+            allowedOrigins: ['*'],
+            allowedHeaders: [
+              'Content-Type',
+              'Content-Disposition',
+              'Content-Length',
+              'x-amz-*',
+              'Authorization',
+            ],
+            maxAge: 3000,
+            exposedHeaders: ['ETag'],
+          },
+        ],
+      });
+    }
 
     // ── 2. IAM User (NestJS backend — Docker / local dev) ─────────────────────
     // NOTE: Lambda uses its execution role (not this IAM user).
@@ -187,35 +188,49 @@ export class InstructorStack extends cdk.Stack {
     this.serverUser.attachInlinePolicy(ttsPolicy);
     this.serverUser.attachInlinePolicy(syncPolicy);
 
-    // ── 4. IAM User Access Key → Secrets Manager ──────────────────────────────
+    // ── 4. IAM User Access Key -> Secrets Manager ──────────────────────────────
 
-    const accessKey = new iam.CfnAccessKey(this, 'ServerAccessKey', {
-      userName: this.serverUser.userName,
-    });
+    const secretName = `instructor/${envName}/server-aws-credentials`;
+    let credentialsSecret: secretsmanager.ISecret;
+    let accessKey: iam.CfnAccessKey | null = null;
 
-    const credentialsSecret = new secretsmanager.Secret(this, 'ServerCredentialsSecret', {
-      secretName: `instructor/${envName}/server-aws-credentials`,
-      description: 'AWS access key for the Instructor NestJS server (S3 TTS cache + sync)',
-      secretStringValue: cdk.SecretValue.unsafePlainText(
-        JSON.stringify({
-          AWS_ACCESS_KEY_ID: accessKey.ref,
-          AWS_SECRET_ACCESS_KEY: accessKey.attrSecretAccessKey,
-        }),
-      ),
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
+    if (isProd) {
+      // In prod, import the existing secret to avoid recreating it
+      credentialsSecret = secretsmanager.Secret.fromSecretNameV2(
+        this,
+        'ServerCredentialsSecret',
+        secretName
+      );
+    } else {
+      // In non-prod, create a new secret with fresh access key
+      accessKey = new iam.CfnAccessKey(this, 'ServerAccessKey', {
+        userName: this.serverUser.userName,
+      });
+
+      credentialsSecret = new secretsmanager.Secret(this, 'ServerCredentialsSecret', {
+        secretName,
+        description: 'AWS access key for the Instructor NestJS server (S3 TTS cache + sync)',
+        secretStringValue: cdk.SecretValue.unsafePlainText(
+          JSON.stringify({
+            AWS_ACCESS_KEY_ID: accessKey.ref,
+            AWS_SECRET_ACCESS_KEY: accessKey.attrSecretAccessKey,
+          }),
+        ),
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+    }
 
     // ── 5. CloudFormation Outputs — existing resources ────────────────────────
 
     new CfnOutput(this, 'BucketName', {
       value: this.bucket.bucketName,
-      description: 'S3 bucket name → AWS_S3_BUCKET env var',
+      description: 'S3 bucket name -> AWS_S3_BUCKET env var',
       exportName: `InstructorBucketName-${envName}`,
     });
 
     new CfnOutput(this, 'BucketRegion', {
       value: this.region,
-      description: 'AWS region → AWS_REGION env var',
+      description: 'AWS region -> AWS_REGION env var',
       exportName: `InstructorBucketRegion-${envName}`,
     });
 
@@ -230,55 +245,18 @@ export class InstructorStack extends cdk.Stack {
       exportName: `InstructorCredentialsSecretArn-${envName}`,
     });
 
-    new CfnOutput(this, 'AccessKeyId', {
-      value: accessKey.ref,
-      description: 'AWS_ACCESS_KEY_ID for the NestJS server (also in Secrets Manager)',
-    });
+    if (accessKey) {
+      new CfnOutput(this, 'AccessKeyId', {
+        value: accessKey.ref,
+        description: 'AWS_ACCESS_KEY_ID for the NestJS server (also in Secrets Manager)',
+      });
+    }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // NEW RESOURCES — Lambda, API Gateway, DynamoDB, SES
+    // NEW RESOURCES — Lambda, API Gateway, SES
     // ══════════════════════════════════════════════════════════════════════════
 
-    // ── 6. DynamoDB Table (single-table design) ───────────────────────────────
-    //
-    // Key schema:
-    //   pk        (S) — partition key  (e.g. "USER#<id>", "OTP#<email>")
-    //   sk        (S) — sort key       (e.g. "PROFILE", "<timestamp>#<id>")
-    //   gsi1pk    (S) — GSI partition  (e.g. "<email>", "USER#<userId>")
-    //   gsi1sk    (S) — GSI sort       (e.g. "USER", "TOKEN")
-    //   ttl       (N) — TTL epoch (Unix seconds) — auto-expired by DynamoDB
-    //
-    // Entity key patterns (from architecture.json):
-    //   Users:         pk=USER#<id>              sk=PROFILE        gsi1pk=<email>      gsi1sk=USER
-    //   OTPs:          pk=OTP#<email>            sk=<ts>#<id>      ttl=<expiresAt>
-    //   RefreshTokens: pk=TOKEN#<hash>           sk=TOKEN          gsi1pk=USER#<uid>   gsi1sk=TOKEN  ttl=<expiresAt>
-    //   SyncMetadata:  pk=USER#<userId>          sk=SYNC
-    //   RateLimits:    pk=RATELIMIT#<ns>#<key>   sk=COUNTER        ttl=<windowEnd>
-
-    this.table = new dynamodb.Table(this, 'InstructorTable', {
-      tableName: `instructor-${envName}`,
-      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      // TTL attribute — DynamoDB auto-deletes items whose ttl (epoch seconds) has passed.
-      // Best-effort: deletion may lag up to 48 hours; app must still filter on expiresAt.
-      timeToLiveAttribute: 'ttl',
-      // Point-in-time recovery for production (enables 35-day restore window).
-      pointInTimeRecovery: isProd,
-      // AWS-managed CMK encryption at rest (no extra KMS cost vs. default keys).
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
-
-    // GSI for email-based lookups (users) and per-user token enumeration (logout all).
-    this.table.addGlobalSecondaryIndex({
-      indexName: 'gsi1',
-      partitionKey: { name: 'gsi1pk', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'gsi1sk', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-
-    // ── 7. App Secrets (JWT, API keys, Gemini key) ────────────────────────────
+    // ── 5. App Secrets (JWT, API keys, Gemini key, DB/Redis URLs) ────────────
     // These are consumed by the Lambda function via the Parameters & Secrets
     // Lambda Extension (localhost:2773).  Populate all REPLACE_ME values before
     // running `cdk deploy` for the first time:
@@ -286,35 +264,50 @@ export class InstructorStack extends cdk.Stack {
     //     --secret-id instructor/<env>/app-secrets \
     //     --secret-string '{"JWT_SECRET":"...","JWT_REFRESH_SECRET":"...","API_KEY":"...","OTP_SALT":"...","GEMINI_API_KEY":"..."}'
 
-    const appSecrets = new secretsmanager.Secret(this, 'AppSecrets', {
-      secretName: `instructor/${envName}/app-secrets`,
-      description: [
-        'Application secrets for Instructor Lambda.',
-        'Keys: JWT_SECRET, JWT_REFRESH_SECRET, API_KEY, OTP_SALT, GEMINI_API_KEY, KOKORO_SERVER_URL.',
-        'MUST be populated before first deploy — replace all REPLACE_ME values.',
-      ].join(' '),
-      secretStringValue: cdk.SecretValue.unsafePlainText(
-        JSON.stringify({
-          JWT_SECRET: 'REPLACE_ME',           // openssl rand -hex 32
-          JWT_REFRESH_SECRET: 'REPLACE_ME',   // openssl rand -hex 32
-          API_KEY: 'REPLACE_ME',              // openssl rand -hex 32
-          OTP_SALT: 'REPLACE_ME',             // openssl rand -hex 32
-          GEMINI_API_KEY: 'REPLACE_ME',       // https://aistudio.google.com/app/apikey
-          KOKORO_SERVER_URL: '',              // Optional: URL of standalone Kokoro server
-        }),
-      ),
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
+    const appSecretsName = `instructor/${envName}/app-secrets`;
+    let appSecrets: secretsmanager.ISecret;
+
+    if (isProd) {
+      // Secret already exists (created before stack was managed by CDK).
+      appSecrets = secretsmanager.Secret.fromSecretNameV2(this, 'AppSecrets', appSecretsName);
+    } else {
+      appSecrets = new secretsmanager.Secret(this, 'AppSecrets', {
+        secretName: appSecretsName,
+        description: [
+          'Application secrets for Instructor Lambda.',
+          'Keys: JWT_SECRET, JWT_REFRESH_SECRET, API_KEY, OTP_SALT, GEMINI_API_KEY, KOKORO_SERVER_URL,',
+          'DATABASE_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN.',
+          'MUST be populated before first deploy - replace all REPLACE_ME values.',
+        ].join(' '),
+        secretStringValue: cdk.SecretValue.unsafePlainText(
+          JSON.stringify({
+            JWT_SECRET: 'REPLACE_ME',              // openssl rand -hex 32
+            JWT_REFRESH_SECRET: 'REPLACE_ME',      // openssl rand -hex 32
+            API_KEY: 'REPLACE_ME',                 // openssl rand -hex 32
+            OTP_SALT: 'REPLACE_ME',                // openssl rand -hex 32
+            GEMINI_API_KEY: 'REPLACE_ME',          // https://aistudio.google.com/app/apikey
+            KOKORO_SERVER_URL: '',                 // Optional: URL of standalone Kokoro server
+            DATABASE_URL: 'REPLACE_ME',            // Neon pooler connection string
+            UPSTASH_REDIS_REST_URL: 'REPLACE_ME',  // Upstash Redis REST URL
+            UPSTASH_REDIS_REST_TOKEN: 'REPLACE_ME',// Upstash Redis REST token
+          }),
+        ),
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+    }
 
     // ── 8. CloudWatch Log Group ───────────────────────────────────────────────
-    // Explicitly created (rather than auto-created by Lambda) to control retention
-    // and ensure it is destroyed with the stack in non-prod environments.
+    // Import existing log group if prod, otherwise create a new one for non-prod
+    // (non-prod logs are cleaned up on stack destroy)
 
-    const logGroup = new logs.LogGroup(this, 'LambdaLogGroup', {
-      logGroupName: `/aws/lambda/instructor-${envName}`,
-      retention: isProd ? logs.RetentionDays.THREE_MONTHS : logs.RetentionDays.ONE_WEEK,
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
+    const logGroupName = `/aws/lambda/instructor-${envName}`;
+    const logGroup = isProd
+      ? logs.LogGroup.fromLogGroupName(this, 'LambdaLogGroup', logGroupName)
+      : new logs.LogGroup(this, 'LambdaLogGroup', {
+          logGroupName,
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: RemovalPolicy.DESTROY,
+        });
 
     // ── 9. Lambda IAM Execution Role ─────────────────────────────────────────
     // Principle of least privilege — each sid is scoped to the exact resources
@@ -323,7 +316,7 @@ export class InstructorStack extends cdk.Stack {
     const lambdaRole = new iam.Role(this, 'LambdaExecutionRole', {
       roleName: `instructor-lambda-${envName}`,
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      description: 'Execution role for Instructor Lambda — DynamoDB, S3, SES, Secrets Manager, CloudWatch',
+      description: 'Execution role for Instructor Lambda - S3, SES, Secrets Manager, CloudWatch',
     });
 
     // 9a. CloudWatch Logs — write to the explicit log group only.
@@ -337,27 +330,7 @@ export class InstructorStack extends cdk.Stack {
       }),
     );
 
-    // 9b. DynamoDB — item-level operations on the table and its GSI.
-    //     No Scan, no DescribeTable, no BatchGet/BatchWrite (not used by the app).
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'DynamoDBTableAccess',
-        effect: iam.Effect.ALLOW,
-        actions: [
-          'dynamodb:GetItem',
-          'dynamodb:PutItem',
-          'dynamodb:UpdateItem',
-          'dynamodb:DeleteItem',
-          'dynamodb:Query',
-        ],
-        resources: [
-          this.table.tableArn,
-          `${this.table.tableArn}/index/*`,
-        ],
-      }),
-    );
-
-    // 9c. S3 — TTS cache: read + write audio files.
+    // 9b. S3 — TTS cache: read + write audio files.
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'S3TtsCache',
@@ -391,8 +364,8 @@ export class InstructorStack extends cdk.Stack {
     );
 
     // 9e. SES — send OTP verification emails.
-    //     Scoped to the specific verified sender identity only.
-    const sesIdentityArn = `arn:aws:ses:${this.region}:${this.account}:identity/${sesFromEmail}`;
+    //     Scoped to the layersiq.com domain identity.
+    const sesIdentityArn = `arn:aws:ses:${this.region}:${this.account}:identity/layersiq.com`;
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'SESSendEmail',
@@ -484,7 +457,6 @@ export class InstructorStack extends cdk.Stack {
         // (reduces per-request latency on warm invocations by ~10–30 ms).
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1',
         // Application config — non-secret values passed directly.
-        DYNAMODB_TABLE_NAME: this.table.tableName,
         AWS_S3_BUCKET: this.bucket.bucketName,
         SES_FROM_EMAIL: sesFromEmail,
         // Lambda extension config — the extension listens on this port.
@@ -511,30 +483,32 @@ export class InstructorStack extends cdk.Stack {
         // Externalized modules — NOT bundled and NOT installed in the Lambda zip.
         // These are either:
         //   (a) Native addons that cannot be bundled (better-sqlite3), or
-        //   (b) Modules removed from the Lambda build by other tasks (ioredis, drizzle-orm).
+        //   (b) Legacy modules removed from the build that must not be imported at runtime.
         // If the Lambda handler still imports these at runtime, it will throw.
         // Ensure server/src/lambda.ts does NOT import these modules.
         externalModules: [
-          'better-sqlite3',   // Native addon — replaced by DynamoDB (TASK-001)
-          'ioredis',          // Redis client — replaced by DynamoDB rate limiter (TASK-003)
-          'drizzle-orm',      // SQLite ORM — replaced by DynamoDB service (TASK-001)
+          'better-sqlite3',               // Native addon — removed; Neon HTTP driver used instead
+          'ioredis',                       // TCP Redis client — removed; Upstash HTTP client used instead
+          '@nestjs/websockets',            // Optional NestJS peer dep — not used
+          '@nestjs/microservices',         // Optional NestJS peer dep — not used
+          '@nestjs/platform-socket.io',    // Optional NestJS peer dep — not used
+          'class-transformer/storage',     // Optional — dynamically required by NestJS
         ],
       },
     });
 
-    // ── 12. API Gateway HTTP API v2 ───────────────────────────────────────────
-    // HTTP API (not REST API):
-    //   • ~70% cheaper: $1.00/million vs $3.50/million requests
-    //   • Lower latency: ~5 ms vs ~15 ms per request
+    // ── 12. API Gateway REST API ──────────────────────────────────────────────────
+    // REST API (required for WAFv2 support):
+    //   • Required for WAFv2 association (HTTP API v2 not supported by WAFv2)
+    //   • Higher cost (~$3.50/million) but enables security features
     //   • Built-in CORS + throttling; sufficient for this project
 
-    const httpApi = new apigwv2.CfnApi(this, 'HttpApi', {
-      name: `instructor-api-${envName}`,
-      protocolType: 'HTTP',
-      description: `Instructor backend API — ${envName}`,
-      corsConfiguration: {
-        allowOrigins: ['*'],
-        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+    const restApi = new apigw.RestApi(this, 'RestApi', {
+      restApiName: `instructor-api-${envName}`,
+      description: `Instructor backend API - ${envName}`,
+      defaultCorsPreflightOptions: {
+        allowOrigins: apigw.Cors.ALL_ORIGINS,
+        allowMethods: apigw.Cors.ALL_METHODS,
         allowHeaders: [
           'Content-Type',
           'Authorization',
@@ -542,92 +516,70 @@ export class InstructorStack extends cdk.Stack {
           'x-amz-date',
           'x-amz-security-token',
         ],
-        // 5 minutes preflight cache.
-        maxAge: 300,
+        maxAge: Duration.minutes(5),
       },
+      deploy: false,
     });
 
-    // Lambda proxy integration using payload format 2.0
-    // (simpler event shape; supported by @codegenie/serverless-express).
-    const lambdaIntegration = new apigwv2.CfnIntegration(this, 'LambdaIntegration', {
-      apiId: httpApi.ref,
-      integrationType: 'AWS_PROXY',
-      integrationUri: this.lambdaFn.functionArn,
-      payloadFormatVersion: '2.0',
+    // Lambda proxy integration
+    const lambdaIntegration = new apigw.LambdaIntegration(this.lambdaFn, {
+      proxy: true,
       // 29 s — just under API Gateway's 30 s hard limit.
       // Lambda timeout is 120 s, but clients will get a 503 after 29 s anyway.
-      timeoutInMillis: 29000,
+      timeout: Duration.seconds(29),
     });
 
-    // Single catch-all route: ANY /api/{proxy+}
+    // Single catch-all resource: /api/{proxy+}
     // Captures all NestJS routes: /api/auth/*, /api/tts/*, /api/plans/*, /api/sync/*
-    const apiProxyRoute = new apigwv2.CfnRoute(this, 'ApiProxyRoute', {
-      apiId: httpApi.ref,
-      routeKey: 'ANY /api/{proxy+}',
-      target: `integrations/${lambdaIntegration.ref}`,
-    });
+    const apiResource = restApi.root.addResource('api');
+    apiResource.addResource('{proxy+}').addMethod('ANY', lambdaIntegration);
 
-    // Default stage with auto-deploy (deploys automatically on route/integration changes).
-    const defaultStage = new apigwv2.CfnStage(this, 'DefaultStage', {
-      apiId: httpApi.ref,
-      stageName: '$default',
-      autoDeploy: true,
-      defaultRouteSettings: {
-        // Throttle at the stage level as a safety backstop.
-        // Per-route throttling can be added later via route-level settings.
-        throttlingBurstLimit: 200,
-        throttlingRateLimit: 100,
-      },
+    // Deploy with default stage
+    const deployment = new apigw.Deployment(this, 'ApiDeployment', { api: restApi });
+    const defaultStage = new apigw.Stage(this, 'DefaultStage', {
+      deployment,
+      stageName: 'default',
     });
-
-    // Ensure stage is (re)deployed after route and integration changes.
-    defaultStage.addDependency(apiProxyRoute);
 
     // Grant API Gateway permission to invoke the Lambda function.
     // sourceArn scoped to this API only — prevents confused-deputy attacks.
     this.lambdaFn.addPermission('ApiGatewayInvoke', {
       principal: new iam.ServicePrincipal('apigateway.amazonaws.com'),
       action: 'lambda:InvokeFunction',
-      sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${httpApi.ref}/*/*`,
+      sourceArn: `arn:aws:execute-api:${this.region}:${this.account}:${restApi.restApiId}/*/*`,
     });
 
-    // ── 13. SES Email Identity ────────────────────────────────────────────────
-    // Registers the sender email address (or domain) with AWS SES.
+    // ── 11. SES Domain Identity — layersiq.com ────────────────────────────────
+    // Registers the layersiq.com domain with AWS SES for DKIM-signed sending.
     //
-    // For email-address identities: AWS sends a verification email to sesFromEmail.
-    //   The identity is not usable until the link in the verification email is clicked.
+    // Domain verification generates:
+    //   - Three CNAME records for DKIM (DkimDnsTokenName1/2/3 outputs)
+    //   - A TXT record for domain verification
+    // Add these DNS records in your registrar / Route 53 hosted zone.
     //
-    // For domain identities: add DKIM + DMARC DNS records provided in the
-    //   SES console or returned by the CfnEmailIdentity's DkimDnsTokenName outputs.
+    // Sender email instructor.app@layersiq.com is authorised once the domain is verified.
     //
     // IMPORTANT: New AWS accounts start in the SES sandbox (can only send to
     //   verified addresses). Request SES production access before going live:
     //   https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html
 
-    new ses.CfnEmailIdentity(this, 'SesFromIdentity', {
-      emailIdentity: sesFromEmail,
-    });
+    // In prod, the layersiq.com SES identity is managed by the LayersIq-Production stack.
+    // Only create it in non-prod environments.
+    if (!isProd) {
+      new ses.CfnEmailIdentity(this, 'SesFromIdentity', {
+        emailIdentity: 'layersiq.com',
+      });
+    }
 
     // ── 14. CloudFormation Outputs — new resources ────────────────────────────
 
-    // API URL: https://<apiId>.execute-api.<region>.amazonaws.com
-    this.apiUrl = `https://${httpApi.ref}.execute-api.${this.region}.amazonaws.com`;
+    // API URL: https://<apiId>.execute-api.<region>.amazonaws.com/<stage>
+    this.apiUrl = `https://${restApi.restApiId}.execute-api.${this.region}.amazonaws.com/${defaultStage.stageName}`;
 
     new CfnOutput(this, 'ApiUrl', {
       value: this.apiUrl,
-      description: 'HTTP API invoke URL — set as BACKEND_URL in Flutter app',
+      description: 'REST API invoke URL - set as BACKEND_URL in Flutter app',
       exportName: `InstructorApiUrl-${envName}`,
-    });
-
-    new CfnOutput(this, 'DynamoTableName', {
-      value: this.table.tableName,
-      description: 'DynamoDB table name → DYNAMODB_TABLE_NAME env var',
-      exportName: `InstructorTableName-${envName}`,
-    });
-
-    new CfnOutput(this, 'DynamoTableArn', {
-      value: this.table.tableArn,
-      description: 'DynamoDB table ARN (for IAM policy debugging)',
     });
 
     new CfnOutput(this, 'LambdaFunctionName', {
@@ -643,7 +595,7 @@ export class InstructorStack extends cdk.Stack {
 
     new CfnOutput(this, 'AppSecretsArn', {
       value: appSecrets.secretArn,
-      description: 'Secrets Manager ARN for app secrets — populate all REPLACE_ME values before deploy',
+      description: 'Secrets Manager ARN for app secrets - populate all REPLACE_ME values before deploy',
       exportName: `InstructorAppSecretsArn-${envName}`,
     });
 
@@ -654,7 +606,7 @@ export class InstructorStack extends cdk.Stack {
 
     new CfnOutput(this, 'SesFromEmail', {
       value: sesFromEmail,
-      description: 'SES sender identity — must be verified before sending emails',
+      description: 'SES sender identity - must be verified before sending emails',
     });
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -663,13 +615,16 @@ export class InstructorStack extends cdk.Stack {
 
     // ── 13. WAF CloudWatch Log Group ──────────────────────────────────────────
     // AWS WAF requires the destination log group name to START WITH 'aws-waf-logs-'.
-    // Any other prefix causes the CfnLoggingConfiguration to fail at deploy time.
+    // Import existing log group if prod, otherwise create a new one for non-prod.
 
-    const wafLogGroup = new logs.LogGroup(this, 'WafLogGroup', {
-      logGroupName: `aws-waf-logs-instructor-${envName}`,
-      retention: isProd ? logs.RetentionDays.THREE_MONTHS : logs.RetentionDays.ONE_WEEK,
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-    });
+    const wafLogGroupName = `aws-waf-logs-instructor-${envName}`;
+    const wafLogGroup = isProd
+      ? logs.LogGroup.fromLogGroupName(this, 'WafLogGroup', wafLogGroupName)
+      : new logs.LogGroup(this, 'WafLogGroup', {
+          logGroupName: wafLogGroupName,
+          retention: logs.RetentionDays.ONE_WEEK,
+          removalPolicy: RemovalPolicy.DESTROY,
+        });
 
     // Grant WAF log delivery service permission to write to the log group.
     // WAF uses the 'delivery.logs.amazonaws.com' service principal for CloudWatch delivery.
@@ -707,7 +662,7 @@ export class InstructorStack extends cdk.Stack {
 
     const webAcl = new wafv2.CfnWebACL(this, 'WafWebAcl', {
       name: `instructor-waf-${envName}`,
-      description: `WAF WebACL for Instructor API (${envName}) — per-IP rate limiting`,
+      description: `WAF WebACL for Instructor API ${envName} - per-IP rate limiting`,
       scope: 'REGIONAL',
       // Allow traffic that does not match any rule.
       defaultAction: { allow: {} },
@@ -756,16 +711,15 @@ export class InstructorStack extends cdk.Stack {
     // Ensure the log group resource policy is in place before WAF tries to write.
     wafLoggingConfig.node.addDependency(wafLogGroup);
 
-    // ── 16. WAF WebACL Association — API Gateway HTTP API ─────────────────────
-    // Associates the WebACL with the API Gateway HTTP API $default stage.
+    // ── 16. WAF WebACL Association — API Gateway REST API ─────────────────────
+    // Associates the WebACL with the API Gateway REST API default stage.
     //
-    // Resource ARN format for HTTP API stage:
-    //   arn:aws:apigateway:{region}::/apis/{apiId}/stages/{stageName}
+    // Resource ARN format for REST API stage:
+    //   arn:aws:apigateway:{region}::/restapis/{apiId}/stages/{stageName}
     //
-    // Note: this is the execute-api ARN format, NOT the apigateway REST API format.
-    // The leading '//' (double slash) after 'apigateway' is intentional and required.
+    // Note: The leading '//' (double slash) after 'apigateway' is intentional and required.
 
-    const apiStageArn = `arn:aws:apigateway:${this.region}::/apis/${httpApi.ref}/stages/${defaultStage.stageName}`;
+    const apiStageArn = `arn:aws:apigateway:${this.region}::/restapis/${restApi.restApiId}/stages/${defaultStage.stageName}`;
 
     const wafAssociation = new wafv2.CfnWebACLAssociation(this, 'WafWebAclAssociation', {
       resourceArn: apiStageArn,
@@ -779,7 +733,7 @@ export class InstructorStack extends cdk.Stack {
 
     new CfnOutput(this, 'WafWebAclArn', {
       value: webAcl.attrArn,
-      description: 'WAF WebACL ARN — rate-limited to 100 req/5-min per source IP',
+      description: 'WAF WebACL ARN - rate-limited to 100 req/5-min per source IP',
       exportName: `InstructorWafWebAclArn-${envName}`,
     });
 
@@ -805,7 +759,6 @@ export class InstructorStack extends cdk.Stack {
     // Dashboard: instructor-<env>
     //   Row 1 — Lambda invocations, errors, error rate %, throttles
     //   Row 2 — Lambda duration p50/p99, alarm status widget
-    //   Row 3 — DynamoDB consumed capacity, throttles, request latency p99
     // ══════════════════════════════════════════════════════════════════════════
 
     // ── SNS topic for alarm notifications ─────────────────────────────────────
@@ -908,8 +861,8 @@ export class InstructorStack extends cdk.Stack {
     const alarmThrottles = new cloudwatch.Alarm(this, 'AlarmLambdaThrottles', {
       alarmName: `instructor-${envName}-lambda-throttles`,
       alarmDescription:
-        'Lambda throttling detected — concurrent execution limit may need raising. ' +
-        'Check Lambda → Configuration → Concurrency in the AWS console.',
+        'Lambda throttling detected - concurrent execution limit may need raising. ' +
+        'Check Lambda -> Configuration -> Concurrency in the AWS console.',
       metric: mThrottles,
       // Threshold = 0: trigger on ANY throttle event (> 0).
       threshold: 0,
@@ -944,65 +897,6 @@ export class InstructorStack extends cdk.Stack {
     alarmDuration.addAlarmAction(snsAlarmAction);
     alarmDuration.addOkAction(snsAlarmAction);
 
-    // ── DynamoDB metric definitions ────────────────────────────────────────────
-
-    const dynamoDbDimensions = { TableName: this.table.tableName };
-
-    const mDdbReadCapacity = new cloudwatch.Metric({
-      namespace: 'AWS/DynamoDB',
-      metricName: 'ConsumedReadCapacityUnits',
-      dimensionsMap: dynamoDbDimensions,
-      statistic: 'Sum',
-      period: evalPeriod,
-      label: 'Read Capacity Units',
-    });
-
-    const mDdbWriteCapacity = new cloudwatch.Metric({
-      namespace: 'AWS/DynamoDB',
-      metricName: 'ConsumedWriteCapacityUnits',
-      dimensionsMap: dynamoDbDimensions,
-      statistic: 'Sum',
-      period: evalPeriod,
-      label: 'Write Capacity Units',
-    });
-
-    const mDdbThrottledRequests = new cloudwatch.Metric({
-      namespace: 'AWS/DynamoDB',
-      metricName: 'ThrottledRequests',
-      dimensionsMap: dynamoDbDimensions,
-      statistic: 'Sum',
-      period: evalPeriod,
-      label: 'Throttled Requests',
-    });
-
-    // Per-operation latency p99 — separate metrics for read vs write vs query.
-    const mDdbGetLatency = new cloudwatch.Metric({
-      namespace: 'AWS/DynamoDB',
-      metricName: 'SuccessfulRequestLatency',
-      dimensionsMap: { ...dynamoDbDimensions, Operation: 'GetItem' },
-      statistic: 'p99',
-      period: evalPeriod,
-      label: 'GetItem p99 (ms)',
-    });
-
-    const mDdbPutLatency = new cloudwatch.Metric({
-      namespace: 'AWS/DynamoDB',
-      metricName: 'SuccessfulRequestLatency',
-      dimensionsMap: { ...dynamoDbDimensions, Operation: 'PutItem' },
-      statistic: 'p99',
-      period: evalPeriod,
-      label: 'PutItem p99 (ms)',
-    });
-
-    const mDdbQueryLatency = new cloudwatch.Metric({
-      namespace: 'AWS/DynamoDB',
-      metricName: 'SuccessfulRequestLatency',
-      dimensionsMap: { ...dynamoDbDimensions, Operation: 'Query' },
-      statistic: 'p99',
-      period: evalPeriod,
-      label: 'Query p99 (ms)',
-    });
-
     // ── CloudWatch Dashboard ───────────────────────────────────────────────────
     //
     // Open: https://<region>.console.aws.amazon.com/cloudwatch/home#dashboards:name=instructor-<env>
@@ -1015,7 +909,7 @@ export class InstructorStack extends cdk.Stack {
     // Row 1 — Lambda traffic and error signals
     dashboard.addWidgets(
       new cloudwatch.GraphWidget({
-        title: 'Lambda — Invocations & Errors',
+        title: 'Lambda - Invocations & Errors',
         left: [mInvocations],
         right: [mErrors],
         leftYAxis: { label: 'Invocations', showUnits: false },
@@ -1024,7 +918,7 @@ export class InstructorStack extends cdk.Stack {
         height: 6,
       }),
       new cloudwatch.GraphWidget({
-        title: 'Lambda — Error Rate (%)',
+        title: 'Lambda - Error Rate (%)',
         left: [mErrorRate],
         leftYAxis: { label: 'Error Rate (%)', showUnits: false },
         leftAnnotations: [
@@ -1034,7 +928,7 @@ export class InstructorStack extends cdk.Stack {
         height: 6,
       }),
       new cloudwatch.GraphWidget({
-        title: 'Lambda — Throttles',
+        title: 'Lambda - Throttles',
         left: [mThrottles],
         leftYAxis: { label: 'Count', showUnits: false },
         width: 8,
@@ -1045,7 +939,7 @@ export class InstructorStack extends cdk.Stack {
     // Row 2 — Lambda duration and alarm status overview
     dashboard.addWidgets(
       new cloudwatch.GraphWidget({
-        title: 'Lambda — Duration p50 / p99 (ms)',
+        title: 'Lambda - Duration p50 / p99 (ms)',
         left: [mDurationP50, mDurationP99],
         leftYAxis: { label: 'Milliseconds', showUnits: false },
         leftAnnotations: [
@@ -1063,33 +957,6 @@ export class InstructorStack extends cdk.Stack {
       }),
     );
 
-    // Row 3 — DynamoDB capacity and latency
-    dashboard.addWidgets(
-      new cloudwatch.GraphWidget({
-        title: 'DynamoDB — Consumed Capacity Units',
-        left: [mDdbReadCapacity],
-        right: [mDdbWriteCapacity],
-        leftYAxis:  { label: 'Read RCU',  showUnits: false },
-        rightYAxis: { label: 'Write WCU', showUnits: false },
-        width: 8,
-        height: 6,
-      }),
-      new cloudwatch.GraphWidget({
-        title: 'DynamoDB — Throttled Requests',
-        left: [mDdbThrottledRequests],
-        leftYAxis: { label: 'Count', showUnits: false },
-        width: 8,
-        height: 6,
-      }),
-      new cloudwatch.GraphWidget({
-        title: 'DynamoDB — Request Latency p99 (ms)',
-        left: [mDdbGetLatency, mDdbPutLatency, mDdbQueryLatency],
-        leftYAxis: { label: 'Milliseconds', showUnits: false },
-        width: 8,
-        height: 6,
-      }),
-    );
-
     // ── CloudFormation Outputs — observability resources ───────────────────────
 
     new CfnOutput(this, 'AlarmTopicArn', {
@@ -1102,7 +969,7 @@ export class InstructorStack extends cdk.Stack {
 
     new CfnOutput(this, 'DashboardUrl', {
       value: `https://${this.region}.console.aws.amazon.com/cloudwatch/home#dashboards:name=instructor-${envName}`,
-      description: 'CloudWatch dashboard — Lambda and DynamoDB operational metrics',
+      description: 'CloudWatch dashboard - Lambda operational metrics',
     });
 
     new CfnOutput(this, 'AlarmErrorRateName', {

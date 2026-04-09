@@ -12,7 +12,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 
-const DEFAULT_FROM_EMAIL = '"Instructor App" <noreply@instructor.app>';
+const DEFAULT_FROM_EMAIL = '"Instructor App" <instructor.app@layersiq.com>';
 
 @Injectable()
 export class SESEmailService {

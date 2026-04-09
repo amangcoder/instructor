@@ -2,12 +2,12 @@
  * AuthService — email + OTP authentication with JWT token issuance.
  *
  * Migrated from:
- *   DatabaseService (SQLite/Drizzle) → DynamoDBService
+ *   DynamoDBService               → DatabaseService (Neon PostgreSQL/Drizzle)
  *   Nodemailer SMTP               → SESEmailService
- *   Redis RateLimitService        → DynamoDBRateLimitService
+ *   DynamoDBRateLimitService      → UpstashRateLimitService
  *
  * onModuleInit is intentionally removed — all dependencies are lazy
- * (DynamoDB/SES clients connect on first use) so cold start is fast.
+ * (Neon/SES clients connect on first use) so cold start is fast.
  */
 
 import {
@@ -20,9 +20,9 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { randomInt, createHmac, createHash, timingSafeEqual } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { DynamoDBService } from '../dynamodb/dynamodb.service';
+import { DatabaseService } from '../database/database.service';
 import { SESEmailService } from '../email/ses-email.service';
-import { DynamoDBRateLimitService } from '../ratelimit/dynamodb-ratelimit.service';
+import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -52,19 +52,19 @@ export interface AuthResult {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  /** True when DynamoDB is not configured — OTP is bypassed for local dev. */
+  /** True when DATABASE_URL is not configured — OTP is bypassed for local dev. */
   private readonly localBypass: boolean;
 
   constructor(
-    private readonly db: DynamoDBService,
+    private readonly db: DatabaseService,
     private readonly ses: SESEmailService,
-    private readonly rateLimit: DynamoDBRateLimitService,
+    private readonly rateLimit: UpstashRateLimitService,
     private readonly jwt: JwtService,
   ) {
-    this.localBypass = !(process.env.DYNAMODB_TABLE || process.env.DYNAMODB_TABLE_NAME);
+    this.localBypass = !process.env.DATABASE_URL;
     if (this.localBypass) {
       this.logger.warn(
-        'DYNAMODB_TABLE not set — OTP verification bypassed. ' +
+        'DATABASE_URL not set — OTP verification bypassed. ' +
         'Any OTP code will be accepted (local dev mode).',
       );
     }
@@ -80,7 +80,7 @@ export class AuthService {
       return { message: 'OTP sent' };
     }
 
-    // Enforce rate limit: 3 per 5 minutes per email (DynamoDB-backed, atomic).
+    // Enforce rate limit: 3 per 5 minutes per email (Upstash Redis-backed, atomic).
     await this.checkOtpRateLimit(normalizedEmail);
 
     const code = this.generateOtp();
@@ -211,7 +211,7 @@ export class AuthService {
    */
   async revokeRefreshToken(token: string): Promise<void> {
     const hashedToken = this.hashRefreshToken(token);
-    // The DynamoDB update is a no-op if the item doesn't exist or is already revoked.
+    // The database update is a no-op if the item doesn't exist or is already revoked.
     await this.db.revokeRefreshToken('', hashedToken);
   }
 
@@ -243,7 +243,7 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  /** Issue tokens without persisting the refresh token to DynamoDB (local dev only). */
+  /** Issue tokens without persisting the refresh token to the database (local dev only). */
   private issueLocalTokens(
     userId: string,
     email: string,

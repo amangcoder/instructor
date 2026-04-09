@@ -9,7 +9,7 @@
     "cdk": "cdk",
     "deploy": "cdk deploy --all",
     "deploy:dev": "cdk deploy --all --context env=dev",
-    "deploy:prod": "cdk deploy --all --context env=prod",
+    "deploy:prod": "cdk deploy --all --context env=prod --context sesFromEmail=instructor.app@layersiq.com --require-approval broadening",
     "destroy": "cdk destroy --all",
     "diff": "cdk diff",
     "synth": "cdk synth",

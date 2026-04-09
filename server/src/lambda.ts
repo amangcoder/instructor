@@ -23,7 +23,7 @@
  *
  *  5. VPC — Lambda is NOT placed in a VPC. Redis and SMTP are removed, so
  *     there are no VPC-internal dependencies. Non-VPC Lambda has native internet
- *     access for outbound HTTPS to DynamoDB, S3, SES, Kokoro, and Gemini.
+ *     access for outbound HTTPS to S3, SES, Kokoro, and Gemini.
  *
  * ⚠ Express 5 compatibility check:
  *  NestJS 11 ships @nestjs/platform-express which depends on Express 5.
@@ -149,7 +149,8 @@ async function loadSecrets(): Promise<void> {
  */
 async function bootstrap(): Promise<Handler> {
   // ── 1. Inject secrets before any NestJS modules initialise ────────────────
-  // DynamoDB/SES/JWT modules read process.env during onModuleInit(); secrets
+  // DatabaseService (Neon), UpstashRateLimitService, SESEmailService, and
+  // JwtModule read process.env during NestJS provider construction; secrets
   // must be in place before NestFactory.create() scans providers.
   await loadSecrets();
 
@@ -210,7 +211,8 @@ async function bootstrap(): Promise<Handler> {
     {
       msg: 'Lambda cold start complete — handler cached for warm reuse',
       nodeEnv: process.env.NODE_ENV,
-      dynamoTable: process.env.DYNAMODB_TABLE_NAME,
+      databaseUrl: process.env.DATABASE_URL ? 'configured' : 'NOT SET',
+      upstashRedis: process.env.UPSTASH_REDIS_REST_URL ? 'configured' : 'NOT SET',
       s3Bucket: process.env.AWS_S3_BUCKET,
       sesFrom: process.env.SES_FROM_EMAIL,
       region: process.env.AWS_REGION,

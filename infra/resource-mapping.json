@@ -1,0 +1,11 @@
+{
+  "InstructorTableA626B8A6": {
+    "TableName": "instructor-prod"
+  },
+  "LambdaLogGroup2CA1C11F": {
+    "LogGroupName": "/aws/lambda/instructor-prod"
+  },
+  "WafLogGroupDFDE65B0": {
+    "LogGroupName": "aws-waf-logs-instructor-prod"
+  }
+}

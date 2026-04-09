@@ -38,6 +38,7 @@ import 'dart:developer';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -225,7 +226,9 @@ abstract class PlanExecutionEngine {
 ///
 /// Inject fakes for [AudioEngine], [TTSService], [NotificationService], and
 /// [AppDatabase] in unit tests to avoid platform channel calls.
-class PlanExecutionEngineImpl implements PlanExecutionEngine {
+class PlanExecutionEngineImpl
+    with WidgetsBindingObserver
+    implements PlanExecutionEngine {
   PlanExecutionEngineImpl({
     required AudioEngine audioEngine,
     required TTSService ttsService,
@@ -234,7 +237,9 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   })  : _audioEngine = audioEngine,
         _ttsService = ttsService,
         _notificationService = notificationService,
-        _db = db;
+        _db = db {
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   final AudioEngine _audioEngine;
   final TTSService _ttsService;
@@ -276,6 +281,20 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   ///
   /// Used to compute elapsed time when [pause] is called mid-wait.
   DateTime? _waitStepStartTime;
+
+  /// Wall-clock deadline for the current wait (WaitStep or ambientDisplay).
+  ///
+  /// Stored as an instance field so that [didChangeAppLifecycleState] can
+  /// detect an expired wait when iOS resumes the app after a long suspension
+  /// where [Timer.periodic] may have stopped firing entirely.
+  DateTime? _waitDeadline;
+
+  /// How often to persist elapsed time during a long WaitStep so that crash
+  /// recovery doesn't lose progress if iOS kills the app.
+  static const _waitStepPersistInterval = Duration(minutes: 2);
+
+  /// Tracks when we last persisted state mid-WaitStep.
+  DateTime? _lastMidWaitPersistTime;
 
   // ── Preview speed ─────────────────────────────────────────────────────────
 
@@ -527,6 +546,47 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     _currentStepIndex = 0;
     _waitStepElapsedMs = 0;
     _speedMultiplier = 1.0;
+    _waitDeadline = null;
+    _lastMidWaitPersistTime = null;
+  }
+
+  // ── App lifecycle observer ────────────────────────────────────────────────
+
+  /// Called by the framework when the app transitions between lifecycle states.
+  ///
+  /// When the app returns to the foreground after a long background period
+  /// (iOS suspension / Android Doze), [Timer.periodic] callbacks may have
+  /// stopped firing entirely. This observer catches up by checking whether
+  /// the active wait deadline has already passed and, if so, completing the
+  /// wait immediately. It also restarts the silence keep-alive in case the
+  /// OS killed the audio session during suspension.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (_status != ExecutionStatus.running) return;
+
+    final deadline = _waitDeadline;
+    final completer = _waitCompleter;
+    if (deadline == null || completer == null || completer.isCompleted) return;
+
+    if (DateTime.now().isAfter(deadline)) {
+      // Deadline passed while the OS suspended us — complete immediately.
+      debugPrint(
+        'PlanExecutionEngine: app resumed after deadline passed '
+        '(deadline=$deadline) — completing wait.',
+      );
+      _waitTimer?.cancel();
+      _waitTimer = null;
+      completer.complete();
+    } else {
+      // Still within the wait — restart silence keep-alive in case the OS
+      // killed the audio session during suspension.
+      debugPrint(
+        'PlanExecutionEngine: app resumed, wait still active — '
+        'restarting silence keep-alive.',
+      );
+      unawaited(_audioEngine.startSilenceKeepAlive().catchError((_) {}));
+    }
   }
 
   @override
@@ -956,6 +1016,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
 
     try {
       _waitCompleter = Completer<void>();
+      _waitDeadline = DateTime.now().add(const Duration(seconds: 2));
       _waitTimer = Timer(const Duration(seconds: 2), () {
         if (!(_waitCompleter?.isCompleted ?? true)) {
           _waitCompleter!.complete();
@@ -964,6 +1025,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
 
       await _waitCompleter!.future;
       _waitCompleter = null;
+      _waitDeadline = null;
       _waitTimer?.cancel();
       _waitTimer = null;
     } finally {
@@ -983,7 +1045,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   Future<void> _executeWaitStep(Duration duration) async {
     if (_cancelled) return;
 
-    // Start silent keep-alive so iOS doesn't suspend the app during silence.
+    // Start silent keep-alive so the OS doesn't suspend the app during silence.
     try {
       await _audioEngine.startSilenceKeepAlive();
     } catch (e) {
@@ -1009,10 +1071,12 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
 
     _waitCompleter = Completer<void>();
     _waitStepStartTime = DateTime.now();
+    _lastMidWaitPersistTime = _waitStepStartTime;
 
     // Compute the wall-clock deadline so the periodic timer can detect
     // completion even if the Dart isolate was briefly suspended by the OS.
     final deadline = _waitStepStartTime!.add(remaining);
+    _waitDeadline = deadline;
 
     debugPrint(
       'PlanExecutionEngine: WaitStep started — '
@@ -1032,13 +1096,25 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
         return;
       }
 
-      if (DateTime.now().isAfter(deadline)) {
+      final now = DateTime.now();
+
+      if (now.isAfter(deadline)) {
         _waitTimer?.cancel();
         _waitTimer = null;
         if (!(_waitCompleter?.isCompleted ?? true)) {
           _waitCompleter!.complete();
         }
         return;
+      }
+
+      // Periodically persist elapsed time so that if the OS kills the app,
+      // crash recovery can resume close to where we left off instead of
+      // restarting the entire WaitStep from zero.
+      if (_lastMidWaitPersistTime != null &&
+          now.difference(_lastMidWaitPersistTime!) >=
+              _waitStepPersistInterval) {
+        _lastMidWaitPersistTime = now;
+        unawaited(_persistState());
       }
 
       // Update the foreground notification so the OS sees the service as
@@ -1058,6 +1134,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
     await _waitCompleter!.future;
 
     _waitCompleter = null;
+    _waitDeadline = null;
     _waitTimer?.cancel();
     _waitTimer = null;
 
@@ -1066,6 +1143,8 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
       _waitStepElapsedMs = 0;
       _waitStepStartTime = null;
     }
+
+    _lastMidWaitPersistTime = null;
 
     try {
       await _audioEngine.stopSilenceKeepAlive();
@@ -1116,9 +1195,12 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
 
     _waitCompleter?.complete();
     _waitCompleter = null;
+    _waitDeadline = null;
 
     _waitTimer?.cancel();
     _waitTimer = null;
+
+    _lastMidWaitPersistTime = null;
 
     // Yield to the event loop so step handlers observe [_cancelled].
     await Future<void>.delayed(Duration.zero);
@@ -1333,6 +1415,7 @@ class PlanExecutionEngineImpl implements PlanExecutionEngine {
   /// Called by the Riverpod provider's [onDispose] callback and in tests
   /// during tearDown. Idempotent — safe to call multiple times.
   Future<void> dispose() async {
+    WidgetsBinding.instance.removeObserver(this);
     if (!_stateController.isClosed) {
       await _stateController.close();
     }
