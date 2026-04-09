@@ -172,9 +172,10 @@ async function bootstrap(): Promise<Handler> {
   );
 
   // ── 4. Global prefix ───────────────────────────────────────────────────────
-  // Must match the API Gateway route key: ANY /api/{proxy+}
-  // All NestJS controllers are reachable under /api/* (e.g. /api/auth/login).
-  app.setGlobalPrefix('api');
+  // NOT set here because API Gateway REST API proxy integration at /{proxy+}
+  // routes /api/* directly without the /api resource prefix being preserved in
+  // the event that serverless-express receives. NestJS routes are registered
+  // without the prefix (e.g., /tts/synthesize instead of /api/tts/synthesize).
 
   // ── 5. Initialise (runs onModuleInit hooks) ────────────────────────────────
   // app.init() completes dependency injection without binding to a TCP port.

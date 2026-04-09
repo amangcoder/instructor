@@ -24,7 +24,9 @@ async function bootstrap() {
   // Validate and strip unknown fields from all request bodies.
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  app.setGlobalPrefix('api');
+  // Global prefix is NOT set here because API Gateway already routes /api/* directly to this handler.
+  // With REST API proxy integration, the proxy path doesn't include the /api resource prefix,
+  // so NestJS routes are registered without it (e.g., /tts/synthesize instead of /api/tts/synthesize).
 
   const port = process.env.PORT ?? 3071;
   await app.listen(port);

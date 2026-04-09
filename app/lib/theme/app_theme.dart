@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Material 3 theme configuration for the Instructor app.
 ///
@@ -34,10 +35,47 @@ abstract final class AppTheme {
   // ────────────────────────────────────────────────────────────────────────────
 
   static ThemeData _build(Brightness brightness) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: _seedColor,
-      brightness: brightness,
-    );
+    // Use explicit "Curated Stillness" color scheme from Stitch design
+    final colorScheme = brightness == Brightness.light
+        ? const ColorScheme(
+            brightness: Brightness.light,
+            primary: Color(0xFF565C8C),
+            onPrimary: Color(0xFFFBF8FF),
+            primaryContainer: Color(0xFFC0C6FD),
+            onPrimaryContainer: Color(0xFF393E6D),
+            secondary: Color(0xFF5C5E72),
+            onSecondary: Color(0xFFFBF8FF),
+            secondaryContainer: Color(0xFFE0E0F9),
+            onSecondaryContainer: Color(0xFF4F5065),
+            tertiary: Color(0xFF72557B),
+            onTertiary: Color(0xFFFFF7FB),
+            tertiaryContainer: Color(0xFFEDC8F5),
+            onTertiaryContainer: Color(0xFF5A3F64),
+            error: Color(0xFFA8364B),
+            onError: Color(0xFFFFF7F7),
+            errorContainer: Color(0xFFF97386),
+            onErrorContainer: Color(0xFF6E0523),
+            surface: Color(0xFFFBF8FE),
+            onSurface: Color(0xFF31323B),
+            onSurfaceVariant: Color(0xFF5E5E68),
+            surfaceContainerLowest: Color(0xFFFFFFFF),
+            surfaceContainerLow: Color(0xFFF5F2FB),
+            surfaceContainer: Color(0xFFEFECF6),
+            surfaceContainerHigh: Color(0xFFE9E7F1),
+            surfaceContainerHighest: Color(0xFFE3E1ED),
+            outline: Color(0xFF7A7A84),
+            outlineVariant: Color(0xFFB2B1BC),
+            shadow: Color(0xFF000000),
+            inverseSurface: Color(0xFF0E0E12),
+            onInverseSurface: Color(0xFF9E9CA2),
+            inversePrimary: Color(0xFFC0C6FD),
+            surfaceTint: Color(0xFF565C8C),
+            scrim: Color(0xFF000000),
+          )
+        : ColorScheme.fromSeed(
+            seedColor: _seedColor,
+            brightness: brightness,
+          );
 
     return ThemeData(
       useMaterial3: true,
@@ -58,10 +96,9 @@ abstract final class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 2,
         centerTitle: false,
-        titleTextStyle: TextStyle(
+        titleTextStyle: GoogleFonts.manrope(
           color: colorScheme.onSurface,
-          // Use inherited font size — no fixed pixels — so system scaling works.
-          fontSize: 20, // M3 titleLarge = 22sp, kept slightly tighter
+          fontSize: 20,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.25,
         ),
@@ -73,10 +110,7 @@ abstract final class AppTheme {
         color: colorScheme.surfaceContainerLow,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(
-            color: colorScheme.outlineVariant,
-            width: 1,
-          ),
+          // No border line (Curated Stillness: no-border design rule)
         ),
         margin: EdgeInsets.zero,
       ),
@@ -87,7 +121,7 @@ abstract final class AppTheme {
           fontSize: 13, // M3 labelMedium — relative to system scale
           fontWeight: FontWeight.w500,
         ),
-        side: BorderSide(color: colorScheme.outlineVariant),
+        side: BorderSide.none,
         shape: const StadiumBorder(),
       ),
 
@@ -192,9 +226,10 @@ abstract final class AppTheme {
       ),
 
       // ── Divider ────────────────────────────────────────────────────────────
-      dividerTheme: DividerThemeData(
-        color: colorScheme.outlineVariant,
-        thickness: 1,
+      // No-line rule: dividers are invisible by default (tonal layering instead)
+      dividerTheme: const DividerThemeData(
+        color: Colors.transparent,
+        thickness: 0,
         space: 1,
       ),
 
@@ -244,31 +279,75 @@ abstract final class AppTheme {
   // Typography helper
   // ────────────────────────────────────────────────────────────────────────────
 
-  /// Builds a [TextTheme] using only font-weight / letter-spacing tweaks.
+  /// Builds a [TextTheme] using Manrope (headlines/display) + Inter (body/labels).
   ///
-  /// Font sizes are intentionally left at Flutter's defaults (which use `sp`
-  /// units that scale with the OS text-size setting). This ensures REQ-027
-  /// (Dynamic Type / system font scaling) is satisfied without any extra work.
+  /// Manrope provides the "Editorial Authority" for headlines, while Inter offers
+  /// high-utility legibility for instructional body text. Font sizes follow Flutter's
+  /// M3 defaults (using `sp` units) to respect system font scaling (REQ-027).
   static TextTheme _buildTextTheme(ColorScheme colorScheme) {
-    // Use M3 defaults; only adjust weight/spacing for brand feel.
-    return const TextTheme(
-      displayLarge: TextStyle(fontWeight: FontWeight.w300, letterSpacing: -1.5),
-      displayMedium:
-          TextStyle(fontWeight: FontWeight.w300, letterSpacing: -0.5),
-      displaySmall: TextStyle(fontWeight: FontWeight.w400),
-      headlineLarge: TextStyle(fontWeight: FontWeight.w600, letterSpacing: -0.5),
-      headlineMedium:
-          TextStyle(fontWeight: FontWeight.w600, letterSpacing: -0.25),
-      headlineSmall: TextStyle(fontWeight: FontWeight.w600),
-      titleLarge: TextStyle(fontWeight: FontWeight.w600, letterSpacing: -0.25),
-      titleMedium: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.1),
-      titleSmall: TextStyle(fontWeight: FontWeight.w500, letterSpacing: 0.1),
-      bodyLarge: TextStyle(fontWeight: FontWeight.w400, letterSpacing: 0.15),
-      bodyMedium: TextStyle(fontWeight: FontWeight.w400, letterSpacing: 0.25),
-      bodySmall: TextStyle(fontWeight: FontWeight.w400, letterSpacing: 0.4),
-      labelLarge: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.1),
-      labelMedium: TextStyle(fontWeight: FontWeight.w500, letterSpacing: 0.5),
-      labelSmall: TextStyle(fontWeight: FontWeight.w500, letterSpacing: 0.5),
+    final manrope = GoogleFonts.manropeTextTheme();
+    final inter = GoogleFonts.interTextTheme();
+    return TextTheme(
+      // Display & Headlines → Manrope (editorial voice)
+      displayLarge: manrope.displayLarge?.copyWith(
+        fontWeight: FontWeight.w300,
+        letterSpacing: -1.5,
+      ),
+      displayMedium: manrope.displayMedium?.copyWith(
+        fontWeight: FontWeight.w300,
+        letterSpacing: -0.5,
+      ),
+      displaySmall: manrope.displaySmall?.copyWith(
+        fontWeight: FontWeight.w400,
+      ),
+      headlineLarge: manrope.headlineLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.5,
+      ),
+      headlineMedium: manrope.headlineMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.25,
+      ),
+      headlineSmall: manrope.headlineSmall?.copyWith(
+        fontWeight: FontWeight.w600,
+      ),
+      titleLarge: manrope.titleLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.25,
+      ),
+      // Body & Labels → Inter (instructional voice)
+      titleMedium: inter.titleMedium?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+      ),
+      titleSmall: inter.titleSmall?.copyWith(
+        fontWeight: FontWeight.w500,
+        letterSpacing: 0.1,
+      ),
+      bodyLarge: inter.bodyLarge?.copyWith(
+        fontWeight: FontWeight.w400,
+        letterSpacing: 0.15,
+      ),
+      bodyMedium: inter.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w400,
+        letterSpacing: 0.25,
+      ),
+      bodySmall: inter.bodySmall?.copyWith(
+        fontWeight: FontWeight.w400,
+        letterSpacing: 0.4,
+      ),
+      labelLarge: inter.labelLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+      ),
+      labelMedium: inter.labelMedium?.copyWith(
+        fontWeight: FontWeight.w500,
+        letterSpacing: 0.5,
+      ),
+      labelSmall: inter.labelSmall?.copyWith(
+        fontWeight: FontWeight.w500,
+        letterSpacing: 0.5,
+      ),
     );
   }
 }

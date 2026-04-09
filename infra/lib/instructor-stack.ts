@@ -376,13 +376,23 @@ export class InstructorStack extends cdk.Stack {
     );
 
     // 9f. Secrets Manager — read app secrets via the Lambda extension.
-    //     GetSecretValue is the only action needed; scoped to the exact secret ARN.
+    //     GetSecretValue is the only action needed; scoped to the app-secrets.
+    //     AWS Secrets Manager appends a random suffix to secret ARNs (e.g., -4du3Fk),
+    //     so we use a wildcard to match the actual ARN at runtime.
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'SecretsManagerRead',
         effect: iam.Effect.ALLOW,
         actions: ['secretsmanager:GetSecretValue'],
-        resources: [appSecrets.secretArn],
+        resources: [
+          cdk.Arn.format(
+            {
+              service: 'secretsmanager',
+              resource: `secret:${appSecretsName}-*`,
+            },
+            cdk.Stack.of(this),
+          ),
+        ],
       }),
     );
 
@@ -529,10 +539,10 @@ export class InstructorStack extends cdk.Stack {
       timeout: Duration.seconds(29),
     });
 
-    // Single catch-all resource: /api/{proxy+}
-    // Captures all NestJS routes: /api/auth/*, /api/tts/*, /api/plans/*, /api/sync/*
-    const apiResource = restApi.root.addResource('api');
-    apiResource.addResource('{proxy+}').addMethod('ANY', lambdaIntegration);
+    // Single catch-all proxy at root: /{proxy+}
+    // Captures all NestJS routes including /api/*
+    // REST API will forward the full path to Lambda (e.g., /api/tts/synthesize)
+    restApi.root.addResource('{proxy+}').addMethod('ANY', lambdaIntegration);
 
     // Deploy with default stage
     const deployment = new apigw.Deployment(this, 'ApiDeployment', { api: restApi });

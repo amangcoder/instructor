@@ -81,7 +81,7 @@ class PlanLibraryScreen extends ConsumerWidget {
           // ── Category filter chips ──────────────────────────────────────────
           const CategoryFilter(),
 
-          const Divider(height: 1),
+          const SizedBox(height: 8),
 
           // ── Plan list ─────────────────────────────────────────────────────
           Expanded(

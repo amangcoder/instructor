@@ -46,15 +46,15 @@ abstract final class StepColors {
       );
 
   // ────────────────────────────────────────────────────────────────────────────
-  // Private palette
+  // Private palette (harmonized for light-theme "Curated Stillness" design)
   // ────────────────────────────────────────────────────────────────────────────
 
-  static const Color _wait = Color(0xFF2196F3); // Material Blue 500
-  static const Color _say = Color(0xFF4CAF50); // Material Green 500
-  static const Color _notify = Color(0xFFFF9800); // Material Orange 500
-  static const Color _play = Color(0xFF9C27B0); // Material Purple 500
-  static const Color _repeat = Color(0xFFF44336); // Material Red 500
-  static const Color _stopAudio = Color(0xFF9E9E9E); // Material Grey 500
+  static const Color _wait = Color(0xFF1565C0); // Deep blue (calm)
+  static const Color _say = Color(0xFF2E7D32); // Deep green (positive voice)
+  static const Color _notify = Color(0xFFE65100); // Deep orange (attention)
+  static const Color _play = Color(0xFF6A1B9A); // Deep purple (ambient)
+  static const Color _repeat = Color(0xFFC62828); // Deep red (loop/warning)
+  static const Color _stopAudio = Color(0xFF546E7A); // Blue-grey (neutral end)
 
   static IconData _iconDataForType(StepType type) => switch (type) {
         StepType.wait => Icons.timer_outlined,

@@ -580,7 +580,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
             colorScheme: colorScheme,
             theme: theme,
           ),
-          const Divider(height: 1),
+          const SizedBox(height: 1), // Minimal spacing (no visible divider)
 
           // ── Step list ────────────────────────────────────────────────────
           Expanded(

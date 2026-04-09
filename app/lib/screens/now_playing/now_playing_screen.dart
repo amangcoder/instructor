@@ -296,75 +296,78 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     });
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: stateAsync.when(
         data: (state) => _buildContent(context, state),
         loading: () => const Center(
           child: CircularProgressIndicator(),
         ),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 48),
-              const SizedBox(height: 16),
-              Text(
-                'Session error',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(color: Colors.white),
-              ),
-              // Show the raw error in debug builds so developers can diagnose
-              // without needing to attach a debugger.
-              if (kDebugMode) ...[
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
-                  child: Text(
-                    e.toString(),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.red.shade300,
-                          fontFamily: 'monospace',
-                        ),
-                    textAlign: TextAlign.center,
-                    maxLines: 6,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+        error: (e, _) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.error_outline, color: colorScheme.error, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  'Session error',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: colorScheme.onSurface),
                 ),
-              ],
-              const SizedBox(height: 24),
-              // Retry re-subscribes to the execution state stream and
-              // attempts to resume from a recoverable session.
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      ref.invalidate(executionStateProvider);
-                      final engine = ref.read(planExecutionEngineProvider);
-                      final session = await engine.getRecoverableSession();
-                      if (session != null) {
-                        await engine.resume();
-                      }
-                    },
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Retry'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white38),
+                // Show the raw error in debug builds so developers can diagnose
+                // without needing to attach a debugger.
+                if (kDebugMode) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      e.toString(),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: colorScheme.error,
+                            fontFamily: 'monospace',
+                          ),
+                      textAlign: TextAlign.center,
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  TextButton(
-                    onPressed: () => context.go(AppRoutes.library),
-                    child: const Text('Return to Library'),
-                  ),
                 ],
-              ),
-            ],
-          ),
-        ),
+                const SizedBox(height: 24),
+                // Retry re-subscribes to the execution state stream and
+                // attempts to resume from a recoverable session.
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        ref.invalidate(executionStateProvider);
+                        final engine = ref.read(planExecutionEngineProvider);
+                        final session = await engine.getRecoverableSession();
+                        if (session != null) {
+                          await engine.resume();
+                        }
+                      },
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Retry'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colorScheme.primary,
+                        side: BorderSide(color: colorScheme.outline),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    TextButton(
+                      onPressed: () => context.go(AppRoutes.library),
+                      child: const Text('Return to Library'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -382,9 +385,9 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     final nextStepText = state.nextStepText;
     final stepType = state.currentStepType ?? StepType.wait;
 
-    // Determine step-type colour for the background accent.
+    // Determine step-type colour for accents.
     final stepColor = StepColors.colorForType(stepType);
-    final stepBgColor = stepColor.withValues(alpha: 0.18);
+    final colorScheme = Theme.of(context).colorScheme;
 
     final isPaused = state.status == ExecutionStatus.paused;
 
@@ -432,7 +435,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                           timeRemaining: state.timeRemaining,
                           totalDuration: state.currentStepDuration,
                           isPaused: isPaused,
-                          color: stepColor,
+                          color: null, // Uses colorScheme.primary (indigo-violet)
                         ),
 
                       const SizedBox(height: 32),
@@ -442,7 +445,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         child: _CurrentStepCard(
                           text: currentStepText,
                           stepType: stepType,
-                          backgroundColor: stepBgColor,
+                          backgroundColor: colorScheme.surfaceContainerLow,
                           accentColor: stepColor,
                         ),
                       ),
@@ -565,7 +568,7 @@ class _TopBar extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Colors.white,
+                  color: colorScheme.onSurface,
                   fontWeight: FontWeight.w600,
                 ),
           ),
@@ -580,18 +583,18 @@ class _TopBar extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.15),
+                color: colorScheme.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.pause, size: 14, color: Colors.white.withValues(alpha: 0.8)),
+                  Icon(Icons.pause, size: 14, color: colorScheme.onSurface),
                   const SizedBox(width: 4),
                   Text(
                     'Paused',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
+                      color: colorScheme.onSurface,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -604,7 +607,7 @@ class _TopBar extends StatelessWidget {
         IconButton(
           onPressed: onClose,
           icon: const Icon(Icons.close),
-          color: Colors.white.withValues(alpha: 0.6),
+          color: colorScheme.onSurfaceVariant,
           tooltip: 'End session',
         ),
       ],
@@ -639,9 +642,12 @@ class _CurrentStepCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: accentColor.withValues(alpha: 0.3),
-            width: 1.5,
+          // Colored left accent bar (3px) for step type
+          border: Border(
+            left: BorderSide(
+              color: accentColor,
+              width: 3,
+            ),
           ),
         ),
         child: Column(
@@ -672,11 +678,11 @@ class _CurrentStepCard extends StatelessWidget {
               child: SingleChildScrollView(
                 child: Text(
                   text.isEmpty ? '—' : text,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w500,
                     height: 1.4,
-                    color: Colors.white,
+                    color: colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -705,6 +711,7 @@ class _TtsLoadingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 220,
       height: 220,
@@ -724,7 +731,7 @@ class _TtsLoadingIndicator extends StatelessWidget {
             Text(
               'Loading audio...',
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: colorScheme.onSurfaceVariant,
                 fontSize: 14,
                 fontWeight: FontWeight.w400,
               ),
@@ -744,6 +751,7 @@ class _GestureHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final hintText = isPaused
         ? 'Tap to resume  •  Swipe right to skip'
         : 'Tap to pause  •  Swipe to skip  •  Hold 2s to end';
@@ -751,9 +759,7 @@ class _GestureHint extends StatelessWidget {
     return Text(
       hintText,
       style: TextStyle(
-        // alpha 0.60 → ~5:1 contrast on black, meeting WCAG 2.1 AA (4.5:1
-        // minimum for 12 sp text). The previous 0.35 produced ~2:1.
-        color: Colors.white.withValues(alpha: 0.60),
+        color: colorScheme.onSurfaceVariant,
         fontSize: 12,
         letterSpacing: 0.3,
       ),

@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// A large circular countdown timer widget.
 ///
@@ -186,31 +187,40 @@ class _StepCountdownTimerState extends State<StepCountdownTimer>
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Background track arc
+                // Center circle background (surface-container-lowest)
+                Container(
+                  width: widget.size - 16,
+                  height: widget.size - 16,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colorScheme.surfaceContainerLowest,
+                  ),
+                ),
+                // Background track arc (thin 2px per Stitch spec)
                 SizedBox(
                   width: widget.size,
                   height: widget.size,
                   child: CircularProgressIndicator(
                     value: 1.0,
-                    strokeWidth: 10,
+                    strokeWidth: 2,
                     color: arcColor.withValues(alpha: 0.15),
                   ),
                 ),
-                // Foreground progress arc
+                // Foreground progress arc (thin 2px precision ring)
                 SizedBox(
                   width: widget.size,
                   height: widget.size,
                   child: CircularProgressIndicator(
                     value: fraction,
-                    strokeWidth: 10,
+                    strokeWidth: 2,
                     color: arcColor,
                     strokeCap: StrokeCap.round,
                   ),
                 ),
-                // Time label
+                // Time label (Manrope font for editorial authority)
                 Text(
                   _formatDuration(displayed),
-                  style: TextStyle(
+                  style: GoogleFonts.manrope(
                     fontSize: 48,
                     fontWeight: FontWeight.w300,
                     letterSpacing: -1,
