@@ -112,7 +112,7 @@ const ELEVENLABS_LOCALES: LocaleOption[] = [
 // plan voices when the user switches providers.
 
 /** Maps Kokoro + ElevenLabs voice IDs → nearest Gemini equivalent. */
-const GEMINI_VOICE_MAP: Record<string, string> = {
+export const GEMINI_VOICE_MAP: Record<string, string> = {
   // Kokoro → Gemini
   af_heart: 'aoede',
   af_sky: 'zephyr',

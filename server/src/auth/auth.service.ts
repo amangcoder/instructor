@@ -52,17 +52,33 @@ export interface AuthResult {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  /** True when DynamoDB is not configured — OTP is bypassed for local dev. */
+  private readonly localBypass: boolean;
+
   constructor(
     private readonly db: DynamoDBService,
     private readonly ses: SESEmailService,
     private readonly rateLimit: DynamoDBRateLimitService,
     private readonly jwt: JwtService,
-  ) {}
+  ) {
+    this.localBypass = !(process.env.DYNAMODB_TABLE || process.env.DYNAMODB_TABLE_NAME);
+    if (this.localBypass) {
+      this.logger.warn(
+        'DYNAMODB_TABLE not set — OTP verification bypassed. ' +
+        'Any OTP code will be accepted (local dev mode).',
+      );
+    }
+  }
 
   // ── OTP request ───────────────────────────────────────────────────────────
 
   async requestOtp(email: string): Promise<{ message: string }> {
     const normalizedEmail = email.toLowerCase().trim();
+
+    if (this.localBypass) {
+      this.logger.log(`[LOCAL] OTP requested for ${normalizedEmail} — use any 6-digit code to verify`);
+      return { message: 'OTP sent' };
+    }
 
     // Enforce rate limit: 3 per 5 minutes per email (DynamoDB-backed, atomic).
     await this.checkOtpRateLimit(normalizedEmail);
@@ -93,6 +109,14 @@ export class AuthService {
   async verifyOtp(email: string, otp: string): Promise<AuthResult> {
     const normalizedEmail = email.toLowerCase().trim();
 
+    // ── Local dev bypass: accept any OTP, use a deterministic user ID ──
+    if (this.localBypass) {
+      const userId = uuidv4();
+      this.logger.log(`[LOCAL] OTP bypassed for ${normalizedEmail} — issuing tokens (userId=${userId})`);
+      const tokens = await this.issueLocalTokens(userId, normalizedEmail);
+      return { ...tokens, user: { id: userId, email: normalizedEmail } };
+    }
+
     // Retrieve all active (unused, non-expired) OTP records for this email.
     const records = await this.db.getActiveOtps(normalizedEmail);
 
@@ -119,7 +143,7 @@ export class AuthService {
     );
 
     if (!otpMatch) {
-      await this.db.incrementOtpAttempts(normalizedEmail, record.sk, record.attempts);
+      await this.db.incrementOtpAttempts(normalizedEmail, record.sk);
 
       const remaining = OTP_MAX_ATTEMPTS - (record.attempts + 1);
       throw new UnauthorizedException(
@@ -217,6 +241,18 @@ export class AuthService {
     await this.db.createRefreshToken(userId, hashedRefreshToken, expiresAt);
 
     return { accessToken, refreshToken };
+  }
+
+  /** Issue tokens without persisting the refresh token to DynamoDB (local dev only). */
+  private issueLocalTokens(
+    userId: string,
+    email: string,
+  ): { accessToken: string; refreshToken: string } {
+    const accessToken = this.jwt.sign(
+      { sub: userId, email } satisfies JwtPayload,
+      { expiresIn: ACCESS_TOKEN_TTL },
+    );
+    return { accessToken, refreshToken: uuidv4() };
   }
 
   private generateOtp(): string {

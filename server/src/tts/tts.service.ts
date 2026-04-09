@@ -14,7 +14,10 @@ import {
   GetObjectCommand,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { ProviderRegistryService } from './providers/provider-registry.service';
+import {
+  ProviderRegistryService,
+  GEMINI_VOICE_MAP,
+} from './providers/provider-registry.service';
 import { KokoroProxyService } from './providers/kokoro-proxy.service';
 import { ElevenLabsProxyService } from './providers/elevenlabs-proxy.service';
 
@@ -318,12 +321,28 @@ export class TtsService {
     // Voice remapping is handled by the frontend when the user switches providers.
     this.validateVoice(rawVoice, provider);
 
-    // Route to appropriate provider.
+    // Route to appropriate provider, falling back to Gemini on failure.
     let audio: Buffer;
     if (provider === 'kokoro') {
-      audio = await this.synthesizeKokoro(text, rawVoice, locale ?? 'en-us');
+      try {
+        audio = await this.synthesizeKokoro(text, rawVoice, locale ?? 'en-us');
+      } catch (err: unknown) {
+        const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'charon';
+        this.logger.warn(
+          `Kokoro failed (${err instanceof Error ? err.message : err}) — falling back to Gemini voice=${geminiVoice}`,
+        );
+        audio = await this.synthesizeGemini(text, geminiVoice, locale);
+      }
     } else if (provider === 'elevenlabs') {
-      audio = await this.synthesizeElevenLabs(text, rawVoice);
+      try {
+        audio = await this.synthesizeElevenLabs(text, rawVoice);
+      } catch (err: unknown) {
+        const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'charon';
+        this.logger.warn(
+          `ElevenLabs failed (${err instanceof Error ? err.message : err}) — falling back to Gemini voice=${geminiVoice}`,
+        );
+        audio = await this.synthesizeGemini(text, geminiVoice, locale);
+      }
     } else {
       audio = await this.synthesizeGemini(text, rawVoice, locale);
     }

@@ -16,3 +16,6 @@ __pycache__/
 
 # Modal
 .modal/
+
+*.onnx
+voices-v1.0.bin

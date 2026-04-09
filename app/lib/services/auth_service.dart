@@ -372,18 +372,69 @@ class AuthServiceImpl implements AuthService {
     final email = await _storage.read(key: _StorageKeys.userEmail);
     final token = await _storage.read(key: _StorageKeys.accessToken);
 
-    if (token != null && token.isNotEmpty &&
-        id != null && id.isNotEmpty &&
-        email != null && email.isNotEmpty) {
-      // Populate in-memory cache.
-      _cachedUser = AuthUser(id: id, email: email);
-      _isAuthenticated = true;
-      return true;
+    if (token == null || token.isEmpty ||
+        id == null || id.isEmpty ||
+        email == null || email.isEmpty) {
+      _cachedUser = null;
+      _isAuthenticated = false;
+      return false;
     }
 
-    _cachedUser = null;
-    _isAuthenticated = false;
-    return false;
+    // Check whether the stored access token is already expired.
+    // If it is, attempt a silent refresh before deciding the auth state.
+    // This ensures that the in-memory cache is initialised with a valid token
+    // on every app launch, not just after the first API call returns 401.
+    if (_isTokenExpired(token)) {
+      debugPrint('AuthService.isLoggedIn: access token expired, attempting silent refresh…');
+      try {
+        await refreshToken();
+        // Ensure in-memory cache is populated — refreshToken() only updates
+        // the stream if _cachedUser is already non-null, so set it explicitly.
+        _cachedUser = AuthUser(id: id, email: email);
+        _isAuthenticated = true;
+        return true;
+      } catch (e) {
+        debugPrint('AuthService.isLoggedIn: silent refresh failed ($e), clearing state');
+        _cachedUser = null;
+        _isAuthenticated = false;
+        return false;
+      }
+    }
+
+    // Token is present and not yet expired — populate in-memory cache.
+    _cachedUser = AuthUser(id: id, email: email);
+    _isAuthenticated = true;
+    return true;
+  }
+
+  /// Returns `true` when the JWT [token]'s `exp` claim is in the past.
+  ///
+  /// Returns `false` (i.e. "not expired") when the token cannot be decoded,
+  /// to avoid accidentally locking out users with unusual JWT formats — the
+  /// first API call will return a 401 and trigger the normal refresh path.
+  bool _isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return false;
+
+      // JWT payload is base64url-encoded — pad to a multiple of 4 chars.
+      final payload = parts[1];
+      final padded = payload.padRight(
+        (payload.length + 3) ~/ 4 * 4,
+        '=',
+      );
+      final decoded = utf8.decode(base64Url.decode(padded));
+      final json = jsonDecode(decoded) as Map<String, dynamic>;
+
+      final exp = json['exp'];
+      if (exp == null) return false;
+
+      final expiry = DateTime.fromMillisecondsSinceEpoch((exp as int) * 1000);
+      return DateTime.now().isAfter(expiry);
+    } catch (e) {
+      debugPrint('AuthService._isTokenExpired: could not decode token ($e)');
+      return false;
+    }
   }
 
   // ── Private helpers ────────────────────────────────────────────────────
