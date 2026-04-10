@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
@@ -7,7 +8,6 @@ import 'package:instructor/models/plan.dart';
 // Shared category helpers (used by PlanCard and CategoryFilter)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Returns the Material icon associated with [category].
 IconData planCategoryIcon(PlanCategory category) {
   switch (category) {
     case PlanCategory.yoga:
@@ -27,7 +27,6 @@ IconData planCategoryIcon(PlanCategory category) {
   }
 }
 
-/// Returns the display label for [category].
 String planCategoryLabel(PlanCategory category) {
   switch (category) {
     case PlanCategory.yoga:
@@ -47,7 +46,6 @@ String planCategoryLabel(PlanCategory category) {
   }
 }
 
-/// Formats [duration] as a human-readable string (e.g. "5m 30s", "1h 10m").
 String formatPlanDuration(Duration duration) {
   final h = duration.inHours;
   final m = duration.inMinutes.remainder(60);
@@ -61,9 +59,6 @@ String formatPlanDuration(Duration duration) {
   return '${s}s';
 }
 
-/// Formats [dateTime] as a relative human-readable string (e.g. "2 hours ago").
-///
-/// Returns "Never used" when [dateTime] is null.
 String formatRelativeTime(DateTime? dateTime) {
   if (dateTime == null) return 'Never used';
   final diff = DateTime.now().difference(dateTime);
@@ -89,220 +84,247 @@ String formatRelativeTime(DateTime? dateTime) {
   return years == 1 ? '1 year ago' : '$years years ago';
 }
 
+/// Returns a tonal container color appropriate for [category].
+Color _categoryBadgeColor(PlanCategory category, ColorScheme cs) {
+  switch (category) {
+    case PlanCategory.yoga:
+    case PlanCategory.meditation:
+      return cs.tertiaryContainer;
+    case PlanCategory.workout:
+    case PlanCategory.cooking:
+      return cs.secondaryContainer;
+    case PlanCategory.focus:
+    case PlanCategory.routine:
+    case PlanCategory.custom:
+      return cs.primaryContainer;
+  }
+}
+
+Color _categoryBadgeForeground(PlanCategory category, ColorScheme cs) {
+  switch (category) {
+    case PlanCategory.yoga:
+    case PlanCategory.meditation:
+      return cs.onTertiaryContainer;
+    case PlanCategory.workout:
+    case PlanCategory.cooking:
+      return cs.onSecondaryContainer;
+    case PlanCategory.focus:
+    case PlanCategory.routine:
+    case PlanCategory.custom:
+      return cs.onPrimaryContainer;
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
-// PlanCard
+// PlanCard — Stitch "Square Card" style
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Displays a [Plan] summary in the library list.
 ///
-/// Shows the plan name (bold), category icon, total duration, and relative
-/// last-used date. A [PopupMenuButton] provides Edit, Duplicate, and Delete
-/// actions.
+/// Stitch design: bg-surface-container-low p-6 rounded-xl, with icon badge,
+/// category tag, title, description, duration, and play button.
 class PlanCard extends StatelessWidget {
   const PlanCard({
     super.key,
     required this.plan,
     required this.onTap,
+    this.onPlay,
     this.onEdit,
     this.onDuplicate,
     this.onDelete,
   });
 
   final Plan plan;
-
-  /// Called when the user taps the card body (triggers countdown → start).
+  /// Called when the card body is tapped (navigate to detail/editor).
   final VoidCallback onTap;
-
-  /// Called when the user selects Edit from the popup menu.
-  /// When null the overflow menu is hidden (e.g. for non-authenticated users).
+  /// Called when the play button is tapped (start plan).
+  final VoidCallback? onPlay;
   final VoidCallback? onEdit;
-
-  /// Called when the user selects Duplicate from the popup menu.
   final VoidCallback? onDuplicate;
-
-  /// Called when the user selects Delete from the popup menu.
   final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    var colorScheme = Theme.of(context).colorScheme;
+    var badgeColor = _categoryBadgeColor(plan.category, colorScheme);
+    var badgeFg = _categoryBadgeForeground(plan.category, colorScheme);
 
     return Semantics(
       button: true,
       label: '${plan.name}, ${planCategoryLabel(plan.category)}, '
           '${formatPlanDuration(plan.totalDuration)}, '
           '${formatRelativeTime(plan.lastUsedAt)}',
-      child: Card(
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
-            child: Row(
-              children: [
-                // Category icon badge
-                _CategoryBadge(
-                  category: plan.category,
-                  colorScheme: colorScheme,
-                ),
-                const SizedBox(width: 12),
-
-                // Plan name + meta row
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        plan.name,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      _MetaRow(plan: plan, colorScheme: colorScheme),
-                    ],
-                  ),
-                ),
-
-                // Overflow menu (hidden for non-authenticated users)
-                if (onEdit != null || onDuplicate != null || onDelete != null)
-                  ExcludeSemantics(
-                    child: _OverflowMenu(
-                      onEdit: onEdit!,
-                      onDuplicate: onDuplicate!,
-                      onDelete: onDelete!,
+      child: GestureDetector(
+        onTap: onTap,
+        onLongPress: (onEdit != null || onDuplicate != null || onDelete != null)
+            ? () => _showContextMenu(context)
+            : null,
+        child: Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Top row: icon badge + category tag ──────────────────────
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // 48x48 icon badge
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: badgeColor,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      planCategoryIcon(plan.category),
+                      color: badgeFg,
+                      size: 24,
                     ),
                   ),
-              ],
-            ),
+                  // Category tag pill
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      planCategoryLabel(plan.category).toUpperCase(),
+                      style: TextStyle(
+                        color: badgeFg,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Title ──────────────────────────────────────────────────
+              Text(
+                plan.name,
+                style: GoogleFonts.manrope(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+
+              const SizedBox(height: 4),
+
+              // ── Description / last used ────────────────────────────────
+              Text(
+                plan.description ??
+                    '${plan.steps.length} steps · ${formatRelativeTime(plan.lastUsedAt)}',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+
+              const SizedBox(height: 24),
+
+              // ── Bottom row: duration + play button ─────────────────────
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${formatPlanDuration(plan.totalDuration)} SESSION'
+                        .toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: colorScheme.outline,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  // Round play button
+                  GestureDetector(
+                    onTap: onPlay,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: colorScheme.shadow.withValues(alpha: 0.08),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.play_arrow,
+                        color: colorScheme.onPrimaryContainer,
+                        size: 24,
+                        fill: 1.0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
     );
   }
-}
 
-// ── Private sub-widgets ───────────────────────────────────────────────────
-
-class _CategoryBadge extends StatelessWidget {
-  const _CategoryBadge({
-    required this.category,
-    required this.colorScheme,
-  });
-
-  final PlanCategory category;
-  final ColorScheme colorScheme;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(12),
+  void _showContextMenu(BuildContext context) {
+    var colorScheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onEdit != null)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onEdit!();
+                },
+              ),
+            if (onDuplicate != null)
+              ListTile(
+                leading: const Icon(Icons.copy_outlined),
+                title: const Text('Duplicate'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onDuplicate!();
+                },
+              ),
+            if (onDelete != null)
+              ListTile(
+                leading: Icon(Icons.delete_outline, color: colorScheme.error),
+                title: Text('Delete',
+                    style: TextStyle(color: colorScheme.error)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  onDelete!();
+                },
+              ),
+          ],
+        ),
       ),
-      child: Icon(
-        planCategoryIcon(category),
-        color: colorScheme.onPrimaryContainer,
-        size: 22,
-        semanticLabel: planCategoryLabel(category),
-      ),
-    );
-  }
-}
-
-class _MetaRow extends StatelessWidget {
-  const _MetaRow({required this.plan, required this.colorScheme});
-
-  final Plan plan;
-  final ColorScheme colorScheme;
-
-  @override
-  Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: colorScheme.onSurfaceVariant,
-        );
-    return Row(
-      children: [
-        Icon(Icons.timer_outlined, size: 13, color: colorScheme.onSurfaceVariant),
-        const SizedBox(width: 3),
-        Text(formatPlanDuration(plan.totalDuration), style: style),
-        const SizedBox(width: 12),
-        Icon(Icons.access_time, size: 13, color: colorScheme.onSurfaceVariant),
-        const SizedBox(width: 3),
-        Expanded(
-          child: Text(
-            formatRelativeTime(plan.lastUsedAt),
-            style: style,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-enum _CardAction { edit, duplicate, delete }
-
-class _OverflowMenu extends StatelessWidget {
-  const _OverflowMenu({
-    required this.onEdit,
-    required this.onDuplicate,
-    required this.onDelete,
-  });
-
-  final VoidCallback onEdit;
-  final VoidCallback onDuplicate;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<_CardAction>(
-      tooltip: 'Plan options',
-      onSelected: (action) {
-        switch (action) {
-          case _CardAction.edit:
-            onEdit();
-          case _CardAction.duplicate:
-            onDuplicate();
-          case _CardAction.delete:
-            onDelete();
-        }
-      },
-      itemBuilder: (context) => [
-        const PopupMenuItem(
-          value: _CardAction.edit,
-          child: ListTile(
-            leading: Icon(Icons.edit_outlined),
-            title: Text('Edit'),
-            contentPadding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-          ),
-        ),
-        const PopupMenuItem(
-          value: _CardAction.duplicate,
-          child: ListTile(
-            leading: Icon(Icons.copy_outlined),
-            title: Text('Duplicate'),
-            contentPadding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-          ),
-        ),
-        const PopupMenuItem(
-          value: _CardAction.delete,
-          child: ListTile(
-            leading: Icon(Icons.delete_outline),
-            title: Text('Delete'),
-            contentPadding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-          ),
-        ),
-      ],
     );
   }
 }

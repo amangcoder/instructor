@@ -16,10 +16,12 @@
  *     (http://localhost:2773) before NestJS boots, so all NestJS modules see
  *     the correct process.env values from the first DI scan.
  *
- *  4. Binary media — binarySettings.contentTypes is required so audio/wav TTS
- *     responses are base64-encoded correctly for API Gateway HTTP API v2.
- *     API Gateway v2 handles binary natively (unlike v1, which needed separate
- *     binary media type configuration on the stage).
+ *  4. Binary media — binarySettings.contentTypes causes serverless-express to
+ *     base64-encode audio/wav responses and set isBase64Encoded=true. API Gateway
+ *     REST API (v1) decodes this base64 before sending to the client, but ONLY
+ *     when binaryMediaTypes is set on the RestApi (see infra/lib/instructor-stack.ts).
+ *     Without that CDK setting, API Gateway forwards the raw base64 string and the
+ *     client receives text instead of binary audio bytes (ExoPlayer WavExtractor fail).
  *
  *  5. VPC — Lambda is NOT placed in a VPC. Redis and SMTP are removed, so
  *     there are no VPC-internal dependencies. Non-VPC Lambda has native internet
@@ -49,6 +51,15 @@ import { ValidationPipe } from '@nestjs/common';
 
 import { AppModule } from './app.module';
 import { JsonLoggerService } from './common/json-logger.service';
+import { SESEmailService } from './email/ses-email.service';
+
+// ── Background task types ─────────────────────────────────────────────────────
+
+export interface SendOtpEmailTask {
+  task: 'sendOtpEmail';
+  to: string;
+  code: string;
+}
 
 // ── Module-level handler cache ────────────────────────────────────────────────
 // Persists for the lifetime of the Lambda execution environment.
@@ -172,10 +183,9 @@ async function bootstrap(): Promise<Handler> {
   );
 
   // ── 4. Global prefix ───────────────────────────────────────────────────────
-  // NOT set here because API Gateway REST API proxy integration at /{proxy+}
-  // routes /api/* directly without the /api resource prefix being preserved in
-  // the event that serverless-express receives. NestJS routes are registered
-  // without the prefix (e.g., /tts/synthesize instead of /api/tts/synthesize).
+  // All routes are prefixed with /api (e.g., /api/auth/request-otp).
+  // The REST API proxy at /{proxy+} forwards the full path including /api.
+  app.setGlobalPrefix('api');
 
   // ── 5. Initialise (runs onModuleInit hooks) ────────────────────────────────
   // app.init() completes dependency injection without binding to a TCP port.
@@ -184,13 +194,15 @@ async function bootstrap(): Promise<Handler> {
   await app.init();
 
   // ── 6. Wrap with serverless-express ───────────────────────────────────────
-  // configure() translates API Gateway HTTP API v2 events (payload format 2.0)
-  // into Express-compatible request/response objects and back again.
+  // configure() translates API Gateway REST API (v1) proxy events into
+  // Express-compatible request/response objects and back again.
   //
   // binarySettings.contentTypes: responses with these Content-Type values are
-  // base64-encoded by serverless-express and flagged with isBase64Encoded=true
-  // so API Gateway transmits raw binary bytes to the mobile client.
-  // API Gateway HTTP API v2 payload limit: 6 MB (≈ 4.4 MB effective after base64).
+  // base64-encoded by serverless-express and flagged with isBase64Encoded=true.
+  // API Gateway REST API v1 then decodes the base64 body back to binary before
+  // forwarding to the client — requires binaryMediaTypes on the RestApi CDK
+  // construct (infra/lib/instructor-stack.ts) to work correctly.
+  // API Gateway REST API payload limit: 10 MB (≈ 7.3 MB effective after base64).
   // Typical TTS audio: 50 KB – 2 MB → safely within limit.
   const expressInstance = app.getHttpAdapter().getInstance() as Express.Application;
 
@@ -247,6 +259,22 @@ export const handler: Handler = async (
   event: unknown,
   context: Context,
 ): Promise<unknown> => {
+  // ── Background task routing ───────────────────────────────────────────────
+  // When this Lambda invokes itself asynchronously (InvocationType: 'Event'),
+  // the event contains a `task` field instead of an API Gateway HTTP payload.
+  // Handle these tasks directly without going through the HTTP adapter.
+  if (event && typeof event === 'object' && 'task' in event) {
+    const taskEvent = event as SendOtpEmailTask;
+    if (taskEvent.task === 'sendOtpEmail') {
+      const emailService = new SESEmailService();
+      await emailService.sendOtpEmail(taskEvent.to, taskEvent.code);
+      return { success: true };
+    }
+    console.error('[Lambda] Unknown background task:', taskEvent.task);
+    return { success: false };
+  }
+
+  // ── HTTP request routing ──────────────────────────────────────────────────
   if (!cachedHandler) {
     cachedHandler = await bootstrap();
   }

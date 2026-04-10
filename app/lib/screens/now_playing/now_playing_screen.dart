@@ -11,6 +11,7 @@ import 'package:instructor/models/enums.dart';
 import 'package:instructor/providers/execution_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:instructor/theme/step_colors.dart';
 import 'package:instructor/screens/now_playing/widgets/next_up_preview.dart';
 import 'package:instructor/screens/now_playing/widgets/session_gesture_detector.dart';
@@ -391,13 +392,28 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
     final isPaused = state.status == ExecutionStatus.paused;
 
-    // The full-screen gesture detector is excluded from the semantics tree
-    // because its tap/swipe controls conflict with VoiceOver/TalkBack
-    // navigation gestures. A dedicated Semantics button below provides the
-    // pause action for screen-reader users.
+    // Stitch "Active Session" layout: header, timer, instruction, controls,
+    // next-up card. Full-screen gesture detector kept for tap/swipe support.
     return Stack(
       fit: StackFit.expand,
       children: [
+        // ── Atmospheric background gradient ─────────────────────────────
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  colorScheme.surface,
+                  colorScheme.surfaceContainerLow,
+                  colorScheme.surface,
+                ],
+              ),
+            ),
+          ),
+        ),
+
         // ── Full-screen gesture layer (excluded from semantics) ─────────
         ExcludeSemantics(
           child: Listener(
@@ -409,72 +425,83 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
               onEnd: _onEndRequested,
               onTouchDetected: _onTouchDetected,
               child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // ── Top bar: plan name + pause indicator ──────────
-                      _TopBar(
-                        planName: state.plan.name,
-                        isPaused: isPaused,
-                        onClose: _onEndRequested,
-                      ),
+                child: Column(
+                  children: [
+                    // ── Header: close | Instructor | more ──────────────
+                    _TopBar(onClose: _onEndRequested),
 
-                      const Spacer(),
+                    // ── Timer & Instruction Area ───────────────────────
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Timer / loading indicator
+                            if (state.stepPhase == StepPhase.loadingTts)
+                              _TtsLoadingIndicator(color: stepColor)
+                            else
+                              StepCountdownTimer(
+                                timeRemaining: state.timeRemaining,
+                                totalDuration: state.currentStepDuration,
+                                isPaused: isPaused,
+                              ),
 
-                      // ── Countdown timer / loading indicator ────────────
-                      // Show a loading spinner while TTS is being fetched
-                      // from the backend on a cache miss. Otherwise show
-                      // the countdown timer arc.
-                      if (state.stepPhase == StepPhase.loadingTts)
-                        _TtsLoadingIndicator(color: stepColor)
-                      else
-                        StepCountdownTimer(
-                          timeRemaining: state.timeRemaining,
-                          totalDuration: state.currentStepDuration,
-                          isPaused: isPaused,
-                          color: null, // Uses colorScheme.primary (indigo-violet)
+                            const SizedBox(height: 32),
+
+                            // ── Current instruction (centered text) ────
+                            Text(
+                              currentStepText,
+                              style: GoogleFonts.manrope(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                                color: colorScheme.onSurface,
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _stepTypeLabel(stepType),
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              ),
+                            ),
+
+                            const SizedBox(height: 32),
+
+                            // ── Controls row ───────────────────────────
+                            _ControlsRow(
+                              isPaused: isPaused,
+                              onTogglePause: _togglePause,
+                              onSkipForward: _skipForward,
+                              onSkipBackward: _skipBackward,
+                            ),
+                          ],
                         ),
-
-                      const SizedBox(height: 32),
-
-                      // ── Current step text with step-type color bg ─────
-                      Flexible(
-                        child: _CurrentStepCard(
-                          text: currentStepText,
-                          stepType: stepType,
-                          backgroundColor: colorScheme.surfaceContainerLow,
-                          accentColor: stepColor,
-                        ),
                       ),
+                    ),
 
-                      const SizedBox(height: 24),
-
-                      // ── Next-up preview ───────────────────────────────
-                      NextUpPreview(
+                    // ── Next Up card + bottom area ─────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                      child: NextUpPreview(
                         nextStepText: nextStepText,
                         nextStepType: state.nextStepType,
                       ),
-
-                      const Spacer(),
-
-                      // ── Gesture hint ──────────────────────────────────
-                      _GestureHint(isPaused: isPaused),
-
-                      const SizedBox(height: 8),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
         ),
 
-        // ── Dedicated accessible pause/resume button for screen readers ─
-        // Positioned at bottom-centre; invisible visually but reachable by
-        // VoiceOver/TalkBack swipe navigation.
+        // ── Accessible buttons for screen readers (invisible) ───────────
         Positioned(
           bottom: 96,
           left: 0,
@@ -486,53 +513,37 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
               hint: isPaused
                   ? 'Activates to resume plan playback'
                   : 'Activates to pause plan playback',
-              onTap: () {
-                _togglePause();
-              },
+              onTap: _togglePause,
               child: const SizedBox(width: 80, height: 80),
             ),
           ),
         ),
-
-        // ── Accessible skip-forward button for screen readers ────────────
-        // Visually invisible but reachable via VoiceOver/TalkBack focus
-        // traversal. The physical swipe gesture (handled by
-        // SessionGestureDetector) conflicts with screen-reader navigation
-        // gestures, so these semantic buttons provide an accessible path for
-        // motor- and vision-impaired users — satisfying WCAG 2.1 AA.
         Positioned(
           bottom: 96,
           right: 40,
           child: Semantics(
             button: true,
             label: 'Skip forward to next step',
-            hint: 'Activates to advance to the next plan step',
             onTap: _skipForward,
             child: const SizedBox(width: 64, height: 80),
           ),
         ),
-
-        // ── Accessible skip-backward button for screen readers ───────────
         Positioned(
           bottom: 96,
           left: 40,
           child: Semantics(
             button: true,
             label: 'Go back to previous step',
-            hint: 'Activates to return to the previous plan step',
             onTap: _skipBackward,
             child: const SizedBox(width: 64, height: 80),
           ),
         ),
-
-        // ── Dedicated accessible end-session button for screen readers ──
         Positioned(
           top: MediaQuery.of(context).padding.top + 8,
           right: 8,
           child: Semantics(
             button: true,
             label: 'End session',
-            hint: 'Activates to stop the session and return to the library',
             onTap: _onEndRequested,
             child: const SizedBox(width: 48, height: 48),
           ),
@@ -544,167 +555,128 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
 // ── Sub-widgets ──────────────────────────────────────────────────────────────
 
-/// Top bar showing the plan name and a small pause/playing badge.
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.planName,
-    required this.isPaused,
-    required this.onClose,
-  });
+String _stepTypeLabel(StepType type) => switch (type) {
+      StepType.say => 'Say',
+      StepType.notify => 'Notify',
+      StepType.play => 'Play',
+      StepType.wait => 'Wait',
+      StepType.repeat => 'Repeat',
+      StepType.stopAudio => 'Stop Audio',
+    };
 
-  final String planName;
-  final bool isPaused;
+/// Stitch header: close (left) | "Instructor" centered | more_vert (right).
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.onClose});
+
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            planName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: colorScheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: onClose,
+            icon: const Icon(Icons.close),
+            color: colorScheme.primary,
+            tooltip: 'End session',
           ),
-        ),
-        if (isPaused)
-          // Merge the icon + text into one coherent announcement for screen
-          // readers. Without this, VoiceOver/TalkBack announce the pause icon
-          // and 'Paused' as two separate (confusing) elements.
-          Semantics(
-            label: 'Session paused',
-            excludeSemantics: true,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.pause, size: 14, color: colorScheme.onSurface),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Paused',
-                    style: TextStyle(
-                      color: colorScheme.onSurface,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+          Expanded(
+            child: Center(
+              child: Text(
+                'Instructor',
+                style: GoogleFonts.manrope(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  letterSpacing: -0.25,
+                  color: colorScheme.primary,
+                ),
               ),
             ),
           ),
-        const SizedBox(width: 8),
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.more_vert),
+            color: colorScheme.primary,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Stitch controls: skip_previous | gradient pause/play circle | skip_next.
+class _ControlsRow extends StatelessWidget {
+  const _ControlsRow({
+    required this.isPaused,
+    required this.onTogglePause,
+    required this.onSkipForward,
+    required this.onSkipBackward,
+  });
+
+  final bool isPaused;
+  final VoidCallback onTogglePause;
+  final VoidCallback onSkipForward;
+  final VoidCallback onSkipBackward;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Skip previous
         IconButton(
-          onPressed: onClose,
-          icon: const Icon(Icons.close),
-          color: colorScheme.onSurfaceVariant,
-          tooltip: 'End session',
+          onPressed: onSkipBackward,
+          icon: const Icon(Icons.skip_previous, size: 32),
+          color: colorScheme.primary.withValues(alpha: 0.7),
+        ),
+        const SizedBox(width: 24),
+        // Pause/Play — large gradient circle (Stitch: w-20 h-20)
+        GestureDetector(
+          onTap: onTogglePause,
+          child: Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [colorScheme.primary, colorScheme.primaryContainer],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.primary.withValues(alpha: 0.25),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(
+              isPaused ? Icons.play_arrow : Icons.pause,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+        ),
+        const SizedBox(width: 24),
+        // Skip next
+        IconButton(
+          onPressed: onSkipForward,
+          icon: const Icon(Icons.skip_next, size: 32),
+          color: colorScheme.primary.withValues(alpha: 0.7),
         ),
       ],
     );
   }
 }
 
-/// Displays the current step's instruction text with the step-type colour
-/// as a background tint.
-class _CurrentStepCard extends StatelessWidget {
-  const _CurrentStepCard({
-    required this.text,
-    required this.stepType,
-    required this.backgroundColor,
-    required this.accentColor,
-  });
-
-  final String text;
-  final StepType stepType;
-  final Color backgroundColor;
-  final Color accentColor;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Semantics(
-      label: 'Current step: $text',
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(20),
-          // Colored left accent bar (3px) for step type
-          border: Border(
-            left: BorderSide(
-              color: accentColor,
-              width: 3,
-            ),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Step-type label
-            Row(
-              children: [
-                StepColors.iconForType(stepType, size: 16),
-                const SizedBox(width: 6),
-                Text(
-                  _stepTypeLabel(stepType),
-                  style: TextStyle(
-                    color: accentColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            // Main instruction text (≥ 24sp as required).
-            // Wrapped in Flexible + SingleChildScrollView so long
-            // texts scroll instead of overflowing the screen.
-            Flexible(
-              child: SingleChildScrollView(
-                child: Text(
-                  text.isEmpty ? '—' : text,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                    color: colorScheme.onSurface,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _stepTypeLabel(StepType type) => switch (type) {
-        StepType.say => 'SAY',
-        StepType.notify => 'NOTIFY',
-        StepType.play => 'PLAY',
-        StepType.wait => 'WAIT',
-        StepType.repeat => 'REPEAT',
-        StepType.stopAudio => 'STOP AUDIO',
-      };
-}
-
-/// Indeterminate loading spinner shown while TTS audio is being fetched from
-/// the backend on a cache miss. Matches the size of [StepCountdownTimer].
+/// Indeterminate loading spinner shown while TTS audio is being fetched.
 class _TtsLoadingIndicator extends StatelessWidget {
   const _TtsLoadingIndicator({required this.color});
   final Color color;
@@ -713,8 +685,8 @@ class _TtsLoadingIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 220,
-      height: 220,
+      width: 288,
+      height: 288,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -739,31 +711,6 @@ class _TtsLoadingIndicator extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Small hint text at the bottom explaining available gestures.
-class _GestureHint extends StatelessWidget {
-  const _GestureHint({required this.isPaused});
-
-  final bool isPaused;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final hintText = isPaused
-        ? 'Tap to resume  •  Swipe right to skip'
-        : 'Tap to pause  •  Swipe to skip  •  Hold 2s to end';
-
-    return Text(
-      hintText,
-      style: TextStyle(
-        color: colorScheme.onSurfaceVariant,
-        fontSize: 12,
-        letterSpacing: 0.3,
-      ),
-      textAlign: TextAlign.center,
     );
   }
 }

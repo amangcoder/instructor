@@ -52,32 +52,25 @@ export interface AuthResult {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
-  /** True when DATABASE_URL is not configured — OTP is bypassed for local dev. */
-  private readonly localBypass: boolean;
-
   constructor(
     private readonly db: DatabaseService,
     private readonly ses: SESEmailService,
     private readonly rateLimit: UpstashRateLimitService,
     private readonly jwt: JwtService,
-  ) {
-    this.localBypass = !process.env.DATABASE_URL;
-    if (this.localBypass) {
-      this.logger.warn(
-        'DATABASE_URL not set — OTP verification bypassed. ' +
-        'Any OTP code will be accepted (local dev mode).',
-      );
-    }
-  }
+  ) {}
 
   // ── OTP request ───────────────────────────────────────────────────────────
 
   async requestOtp(email: string): Promise<{ message: string }> {
     const normalizedEmail = email.toLowerCase().trim();
 
-    if (this.localBypass) {
-      this.logger.log(`[LOCAL] OTP requested for ${normalizedEmail} — use any 6-digit code to verify`);
-      return { message: 'OTP sent' };
+    // Only allow pre-existing users (invited accounts) to authenticate.
+    const existingUser = await this.db.getUserByEmail(normalizedEmail);
+    if (!existingUser) {
+      throw new HttpException(
+        'This email is not authorized. Please contact the administrator.',
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // Enforce rate limit: 3 per 5 minutes per email (Upstash Redis-backed, atomic).
@@ -93,12 +86,9 @@ export class AuthService {
     // Store new OTP record — the hash, never plaintext.
     await this.db.createOtp(normalizedEmail, hashedCode, expiresAt);
 
-    // Send plaintext code via SES (fire-and-forget — don't block the response).
-    this.ses
-      .sendOtpEmail(normalizedEmail, code)
-      .catch((err: Error) =>
-        this.logger.error(`Failed to send OTP email to ${normalizedEmail}: ${err.message}`),
-      );
+    // Dispatch email via async Lambda self-invocation (returns 202 immediately).
+    // The email Lambda runs independently — no risk of dying with this request.
+    await this.ses.dispatchOtpEmail(normalizedEmail, code);
 
     this.logger.log(`OTP requested for ${normalizedEmail}`);
     return { message: 'OTP sent' };
@@ -108,14 +98,6 @@ export class AuthService {
 
   async verifyOtp(email: string, otp: string): Promise<AuthResult> {
     const normalizedEmail = email.toLowerCase().trim();
-
-    // ── Local dev bypass: accept any OTP, use a deterministic user ID ──
-    if (this.localBypass) {
-      const userId = uuidv4();
-      this.logger.log(`[LOCAL] OTP bypassed for ${normalizedEmail} — issuing tokens (userId=${userId})`);
-      const tokens = await this.issueLocalTokens(userId, normalizedEmail);
-      return { ...tokens, user: { id: userId, email: normalizedEmail } };
-    }
 
     // Retrieve all active (unused, non-expired) OTP records for this email.
     const records = await this.db.getActiveOtps(normalizedEmail);
@@ -172,6 +154,26 @@ export class AuthService {
     const tokens = await this.issueTokens(user.id, user.email);
     this.logger.log(`OTP verified for ${normalizedEmail}`);
     return { ...tokens, user: { id: user.id, email: user.email } };
+  }
+
+  // ── Invite user ───────────────────────────────────────────────────────────
+
+  async inviteUser(email: string): Promise<{ message: string; email: string }> {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existing = await this.db.getUserByEmail(normalizedEmail);
+    if (existing) {
+      return { message: 'User already exists', email: normalizedEmail };
+    }
+
+    await this.db.createUser({
+      id: uuidv4(),
+      email: normalizedEmail,
+      createdAt: new Date(),
+    });
+
+    this.logger.log(`User invited: ${normalizedEmail}`);
+    return { message: 'User invited', email: normalizedEmail };
   }
 
   // ── Refresh token ─────────────────────────────────────────────────────────
@@ -241,18 +243,6 @@ export class AuthService {
     await this.db.createRefreshToken(userId, hashedRefreshToken, expiresAt);
 
     return { accessToken, refreshToken };
-  }
-
-  /** Issue tokens without persisting the refresh token to the database (local dev only). */
-  private issueLocalTokens(
-    userId: string,
-    email: string,
-  ): { accessToken: string; refreshToken: string } {
-    const accessToken = this.jwt.sign(
-      { sub: userId, email } satisfies JwtPayload,
-      { expiresIn: ACCESS_TOKEN_TTL },
-    );
-    return { accessToken, refreshToken: uuidv4() };
   }
 
   private generateOtp(): string {

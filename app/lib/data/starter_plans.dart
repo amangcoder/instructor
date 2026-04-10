@@ -80,7 +80,7 @@ Plan _oneHundredEightSuryaNamaskar(DateTime now) => Plan(
           'chime markers and periodic encouragement.',
       category: PlanCategory.yoga,
       tags: const ['yoga', 'surya namaskar', '108', 'advanced', 'endurance'],
-      defaultVoice: PlanVoice.leda.name,
+      defaultVoice: PlanVoice.af_bella.name,
       createdAt: now,
       updatedAt: now,
       steps: const [
@@ -606,7 +606,7 @@ Plan _yogaNidra(DateTime now) => Plan(
           'consciousness, breath awareness, and visualization.',
       category: PlanCategory.meditation,
       tags: const ['meditation', 'yoga nidra', 'deep relaxation', 'sleep', 'traditional'],
-      defaultVoice: PlanVoice.leda.name,
+      defaultVoice: PlanVoice.af_bella.name,
       createdAt: now,
       updatedAt: now,
       steps: const [
@@ -856,7 +856,7 @@ Plan _fullBodyStrengthCircuit(DateTime now) => Plan(
           'form cues, plus a 5-minute guided cooldown stretch.',
       category: PlanCategory.workout,
       tags: const ['workout', 'strength', 'circuit', 'bodyweight', 'full body'],
-      defaultVoice: PlanVoice.charon.name,
+      defaultVoice: PlanVoice.am_adam.name,
       createdAt: now,
       updatedAt: now,
       steps: const [
@@ -1411,7 +1411,7 @@ Plan _morningRoutine(DateTime now) => Plan(
           'setting — with guided prompts throughout.',
       category: PlanCategory.routine,
       tags: const ['routine', 'morning', 'productivity', 'wellbeing', 'mindfulness'],
-      defaultVoice: PlanVoice.aoede.name,
+      defaultVoice: PlanVoice.af_heart.name,
       createdAt: now,
       updatedAt: now,
       steps: const [
@@ -1747,7 +1747,7 @@ Plan _deepWorkSession(DateTime now) => Plan(
           'progress check-ins, and a closing reflection.',
       category: PlanCategory.focus,
       tags: const ['focus', 'deep work', 'productivity', 'flow', 'work'],
-      defaultVoice: PlanVoice.puck.name,
+      defaultVoice: PlanVoice.am_michael.name,
       createdAt: now,
       updatedAt: now,
       steps: const [

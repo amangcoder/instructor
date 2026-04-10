@@ -3,9 +3,12 @@ import {
   Post,
   Body,
   HttpCode,
+  HttpException,
+  HttpStatus,
   Logger,
   Req,
   UseGuards,
+  Headers,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
@@ -21,6 +24,25 @@ export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
   constructor(private readonly authService: AuthService) {}
+
+  /**
+   * POST /api/auth/invite
+   * Pre-creates a user account so they can authenticate.
+   * Requires the x-admin-key header matching ADMIN_API_KEY env var.
+   */
+  @Post('invite')
+  @HttpCode(200)
+  async invite(
+    @Body() body: { email: string },
+    @Headers('x-admin-key') adminKey: string,
+  ): Promise<{ message: string; email: string }> {
+    const expectedKey = process.env.ADMIN_API_KEY;
+    if (!expectedKey || adminKey !== expectedKey) {
+      throw new HttpException('Unauthorized', HttpStatus.UNAUTHORIZED);
+    }
+    this.logger.log(`POST /auth/invite — email=${body.email}`);
+    return this.authService.inviteUser(body.email);
+  }
 
   /**
    * POST /api/auth/request-otp

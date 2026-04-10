@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
@@ -9,6 +10,7 @@ import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/theme/app_branding.dart';
 
 import 'widgets/category_filter.dart';
 import 'widgets/countdown_overlay.dart';
@@ -58,30 +60,55 @@ class PlanLibraryScreen extends ConsumerWidget {
       ),
     );
 
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Plans'),
+      appBar: AppBranding.brandedAppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.menu),
+          onPressed: () {},
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
             onPressed: () => context.push(AppRoutes.settings),
           ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: colorScheme.surfaceContainer,
+              child: Icon(Icons.person, size: 18, color: colorScheme.onSurfaceVariant),
+            ),
+          ),
         ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── "Plan Library" heading ─────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Text(
+              'Plan Library',
+              style: GoogleFonts.manrope(
+                fontSize: 30,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+                color: colorScheme.onSurface,
+              ),
+            ),
+          ),
+
           // ── Search bar ─────────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
             child: _SearchBar(),
           ),
 
           // ── Category filter chips ──────────────────────────────────────────
           const CategoryFilter(),
-
-          const SizedBox(height: 8),
 
           // ── Plan list ─────────────────────────────────────────────────────
           Expanded(
@@ -101,12 +128,10 @@ class PlanLibraryScreen extends ConsumerWidget {
         ],
       ),
 
-      // ── FAB: new Plan (only for authenticated users) ───────────────────────
+      // ── FAB: gradient (Stitch design) ─────────────────────────────────────
       floatingActionButton: isLoggedIn
-          ? FloatingActionButton(
+          ? _GradientFab(
               onPressed: () => context.push(AppRoutes.editorNew),
-              tooltip: 'New Plan',
-              child: const Icon(Icons.add),
             )
           : null,
     );
@@ -138,7 +163,8 @@ class _PlanList extends ConsumerWidget {
           padding: const EdgeInsets.only(bottom: 8),
           child: PlanCard(
             plan: plan,
-            onTap: () => _onPlanTap(context, ref, plan),
+            onTap: () => context.push('/editor/${plan.id}'),
+            onPlay: () => _onPlanTap(context, ref, plan),
             onEdit: isAuthenticated
                 ? () => context.push('/editor/${plan.id}')
                 : null,
@@ -291,7 +317,7 @@ class _SearchBarState extends ConsumerState<_SearchBar> {
             ref.read(searchQueryProvider.notifier).state = value,
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
-          hintText: 'Search plans…',
+          hintText: 'Search your routines...',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: query.isNotEmpty
               ? IconButton(
@@ -391,6 +417,48 @@ class _ErrorState extends StatelessWidget {
               label: const Text('Retry'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Gradient FAB (Stitch: bg-gradient-to-br from-primary to-primary-container)
+// ────────────────────────────────────────────────────────────────────────────
+
+class _GradientFab extends StatelessWidget {
+  const _GradientFab({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      label: 'New Plan',
+      child: GestureDetector(
+        onTap: onPressed,
+        child: Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [colorScheme.primary, colorScheme.primaryContainer],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.primary.withValues(alpha: 0.4),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.add, color: Colors.white, size: 28),
         ),
       ),
     );

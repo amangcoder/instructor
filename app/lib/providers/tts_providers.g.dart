@@ -6,11 +6,10 @@ part of 'tts_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$ttsProvidersHash() => r'31e9c6b6ed14eb020b3a239640527ad978e91a84';
+String _$ttsProvidersHash() => r'f26491c2b4ce235a22f860f29b13eae1f8c0348d';
 
 /// Fetches the list of TTS providers + their voices/locales from the backend.
 ///
-/// Re-fetches whenever the backend server URL changes.
 /// Returns an [AsyncValue<TtsProvidersResponse>] for error/loading handling.
 ///
 /// Copied from [ttsProviders].
@@ -29,11 +28,11 @@ final ttsProvidersProvider =
 // ignore: unused_element
 typedef TtsProvidersRef = AutoDisposeFutureProviderRef<TtsProvidersResponse>;
 String _$selectedTtsProviderHash() =>
-    r'c948f6cfc26e5735e80be237cbf1bd6ea444a406';
+    r'8e0fbd86e1ee9573977fba510fc4fc848c721625';
 
 /// Reactive stream of the currently selected TTS provider ID.
 ///
-/// Defaults to 'gemini' when no preference is stored.
+/// Always returns 'kokoro'.
 ///
 /// Copied from [selectedTtsProvider].
 @ProviderFor(selectedTtsProvider)
@@ -51,7 +50,7 @@ final selectedTtsProviderProvider = AutoDisposeStreamProvider<String>.internal(
 // ignore: unused_element
 typedef SelectedTtsProviderRef = AutoDisposeStreamProviderRef<String>;
 String _$selectedProviderConfigHash() =>
-    r'5bd6231a3e0f6e64a3ccd9a800958c964269db0a';
+    r'0a2aa46b8c481cbcc3e1f382f4b53f5887a16ce3';
 
 /// Returns the [TtsProviderConfig] for the currently selected provider,
 /// or `null` if the providers haven't loaded yet.
@@ -138,7 +137,7 @@ final rawTtsLocaleSettingProvider = AutoDisposeStreamProvider<String>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef RawTtsLocaleSettingRef = AutoDisposeStreamProviderRef<String>;
-String _$rawVoiceSettingHash() => r'2a20206d0690de680e34a7a4753173c94979c6c6';
+String _$rawVoiceSettingHash() => r'3a8f03c4037ea30f92ff60ad9459a49661404e87';
 
 /// Reactive stream of the raw voice setting string (e.g. 'aoede', 'af_bella').
 ///

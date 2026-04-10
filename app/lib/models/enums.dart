@@ -19,15 +19,15 @@ enum PlanCategory {
   custom,
 }
 
-/// Available TTS voice identifiers (Google Gemini voices + platform fallback).
+/// Available TTS voice identifiers (Kokoro voices + platform fallback).
 enum PlanVoice {
-  aoede,    // warm, clear — female (default)
-  leda,     // soft, calming — female
-  charon,   // deep, energetic — male
-  puck,     // neutral — male
-  kore,     // reserved — female
-  fenrir,   // expressive — male
-  platform, // device platform TTS fallback
+  af_heart,   // warm, clear — female US (default)
+  af_bella,   // soft, calming — female US
+  af_nicole,  // light — female US
+  am_adam,    // deep, energetic — male US
+  am_michael, // neutral — male US
+  am_eric,    // expressive — male US
+  platform,   // device platform TTS fallback
 }
 
 /// Supported TTS locale / accent options.

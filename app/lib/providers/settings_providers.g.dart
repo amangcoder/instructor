@@ -182,5 +182,27 @@ final batteryPromptDismissedSettingProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef BatteryPromptDismissedSettingRef = AutoDisposeStreamProviderRef<bool>;
+String _$themeModeSettingHash() => r'8733b103629feb463e6aef025a1508238b18bbc6';
+
+/// Reactive stream of the app theme mode preference.
+///
+/// Emits [ThemeMode.system] when the key is absent or unrecognised, meaning
+/// the OS light/dark preference is followed by default.
+///
+/// Copied from [themeModeSetting].
+@ProviderFor(themeModeSetting)
+final themeModeSettingProvider = AutoDisposeStreamProvider<ThemeMode>.internal(
+  themeModeSetting,
+  name: r'themeModeSettingProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$themeModeSettingHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef ThemeModeSettingRef = AutoDisposeStreamProviderRef<ThemeMode>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

@@ -13,6 +13,9 @@ import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:instructor/services/tts_service.dart';
+import 'package:instructor/theme/app_branding.dart';
+import 'package:instructor/theme/gradient_button.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'widgets/plan_metadata_sheet.dart';
 import 'widgets/repeat_block_card.dart';
@@ -113,7 +116,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           _tags = List<String>.from(plan.tags);
           _defaultVoice = PlanVoice.values.map((v) => v.name).contains(plan.defaultVoice)
               ? plan.defaultVoice
-              : 'aoede';
+              : 'af_heart';
           _steps = List<PlanStep>.from(plan.steps);
           _originalCreatedAt = plan.createdAt;
           _originalLastUsedAt = plan.lastUsedAt;
@@ -466,108 +469,78 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    final title =
-        _name.trim().isEmpty ? (widget.planId == null ? 'New Plan' : 'Edit Plan') : _name;
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: AppBranding.gradientTitle(fontSize: 18),
+        centerTitle: false,
         actions: [
           // Preview at 4x speed
           if (_steps.isNotEmpty)
-            Semantics(
-              button: true,
-              label: 'Preview plan at 4x speed',
-              child: IconButton(
-                icon: const Icon(Icons.play_circle_outline),
-                tooltip: 'Preview at 4x speed',
-                onPressed: _startPreview,
-              ),
+            IconButton(
+              icon: const Icon(Icons.play_circle_outline),
+              tooltip: 'Preview at 4x speed',
+              onPressed: _startPreview,
             ),
           // Download all voices
           if (_steps.isNotEmpty)
-            Semantics(
-              button: true,
-              label: _isDownloading
-                  ? 'Downloading voices: $_downloadedCount of $_downloadTotal'
-                  : _downloadComplete
-                      ? 'Voices downloaded'
-                      : 'Download all voices',
-              child: _isDownloading
-                  ? Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              value: _downloadTotal > 0
-                                  ? _downloadedCount / _downloadTotal
-                                  : null,
-                            ),
-                            if (_downloadTotal > 0)
-                              Text(
-                                '$_downloadedCount\n$_downloadTotal',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 6,
-                                  height: 1.1,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                          ],
-                        ),
+            _isDownloading
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        value: _downloadTotal > 0
+                            ? _downloadedCount / _downloadTotal
+                            : null,
                       ),
-                    )
-                  : IconButton(
-                      icon: Icon(
-                        _downloadComplete
-                            ? Icons.check_circle
-                            : Icons.download_outlined,
-                      ),
-                      tooltip: _downloadComplete
-                          ? 'Voices downloaded'
-                          : 'Download all voices',
-                      onPressed: _downloadComplete ? null : _downloadVoices,
                     ),
-            ),
+                  )
+                : IconButton(
+                    icon: Icon(
+                      _downloadComplete
+                          ? Icons.check_circle
+                          : Icons.download_outlined,
+                    ),
+                    tooltip: _downloadComplete
+                        ? 'Voices downloaded'
+                        : 'Download all voices',
+                    onPressed: _downloadComplete ? null : _downloadVoices,
+                  ),
           // Edit metadata
-          Semantics(
-            button: true,
-            label: 'Edit plan details',
-            child: IconButton(
-              icon: const Icon(Icons.tune_outlined),
-              tooltip: 'Plan details',
-              onPressed: _openMetadataSheet,
-            ),
+          IconButton(
+            icon: const Icon(Icons.tune_outlined),
+            tooltip: 'Plan details',
+            onPressed: _openMetadataSheet,
           ),
-          // Save
-          Semantics(
-            button: true,
-            label: 'Save plan',
+          // Save — gradient button (Stitch design)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
             child: _isSaving
                 ? const Padding(
-                    padding: EdgeInsets.all(16),
+                    padding: EdgeInsets.all(12),
                     child: SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : IconButton(
-                    icon: const Icon(Icons.save_outlined),
-                    tooltip: 'Save',
+                : GradientButton(
                     onPressed: _save,
+                    height: 36,
+                    borderRadius: 12,
+                    width: 80,
+                    child: Text(
+                      'Save',
+                      style: GoogleFonts.manrope(
+                        color: colorScheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
                   ),
           ),
-          const SizedBox(width: 4),
         ],
       ),
       body: Column(
@@ -755,28 +728,36 @@ class _DurationHeader extends StatelessWidget {
     return Semantics(
       label:
           'Total duration: $durationText, $stepCount step${stepCount == 1 ? '' : 's'}',
-      child: Container(
-        color: colorScheme.surfaceContainerLowest,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         child: Row(
           children: [
-            Icon(
-              Icons.timer_outlined,
-              size: 18,
-              color: colorScheme.primary,
-            ),
-            const SizedBox(width: 6),
+            // "Editing Plan" label (Stitch: primary xs uppercase tracking-widest)
             Text(
-              'Total: $durationText',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: colorScheme.onSurface,
+              'EDITING PLAN',
+              style: GoogleFonts.manrope(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 2,
+                color: colorScheme.primary.withValues(alpha: 0.7),
               ),
             ),
             const Spacer(),
-            Text(
-              '$stepCount step${stepCount == 1 ? '' : 's'}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            // Step count badge
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(9999),
+              ),
+              child: Text(
+                '$stepCount Steps · $durationText',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.primary.withValues(alpha: 0.8),
+                ),
               ),
             ),
           ],

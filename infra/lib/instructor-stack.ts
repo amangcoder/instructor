@@ -8,6 +8,7 @@ import {
   aws_lambda_nodejs as nodejs,
   aws_logs as logs,
   aws_apigateway as apigw,
+  aws_certificatemanager as acm,
   aws_ses as ses,
   aws_wafv2 as wafv2,
   aws_cloudwatch as cloudwatch,
@@ -264,37 +265,9 @@ export class InstructorStack extends cdk.Stack {
     //     --secret-id instructor/<env>/app-secrets \
     //     --secret-string '{"JWT_SECRET":"...","JWT_REFRESH_SECRET":"...","API_KEY":"...","OTP_SALT":"...","GEMINI_API_KEY":"..."}'
 
-    const appSecretsName = `instructor/${envName}/app-secrets`;
-    let appSecrets: secretsmanager.ISecret;
-
-    if (isProd) {
-      // Secret already exists (created before stack was managed by CDK).
-      appSecrets = secretsmanager.Secret.fromSecretNameV2(this, 'AppSecrets', appSecretsName);
-    } else {
-      appSecrets = new secretsmanager.Secret(this, 'AppSecrets', {
-        secretName: appSecretsName,
-        description: [
-          'Application secrets for Instructor Lambda.',
-          'Keys: JWT_SECRET, JWT_REFRESH_SECRET, API_KEY, OTP_SALT, GEMINI_API_KEY, KOKORO_SERVER_URL,',
-          'DATABASE_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN.',
-          'MUST be populated before first deploy - replace all REPLACE_ME values.',
-        ].join(' '),
-        secretStringValue: cdk.SecretValue.unsafePlainText(
-          JSON.stringify({
-            JWT_SECRET: 'REPLACE_ME',              // openssl rand -hex 32
-            JWT_REFRESH_SECRET: 'REPLACE_ME',      // openssl rand -hex 32
-            API_KEY: 'REPLACE_ME',                 // openssl rand -hex 32
-            OTP_SALT: 'REPLACE_ME',                // openssl rand -hex 32
-            GEMINI_API_KEY: 'REPLACE_ME',          // https://aistudio.google.com/app/apikey
-            KOKORO_SERVER_URL: '',                 // Optional: URL of standalone Kokoro server
-            DATABASE_URL: 'REPLACE_ME',            // Neon pooler connection string
-            UPSTASH_REDIS_REST_URL: 'REPLACE_ME',  // Upstash Redis REST URL
-            UPSTASH_REDIS_REST_TOKEN: 'REPLACE_ME',// Upstash Redis REST token
-          }),
-        ),
-        removalPolicy: RemovalPolicy.DESTROY,
-      });
-    }
+    // Both dev and prod share the same prod secret — single source of truth for credentials.
+    const appSecretsName = 'instructor/prod/app-secrets';
+    const appSecrets = secretsmanager.Secret.fromSecretNameV2(this, 'AppSecrets', appSecretsName);
 
     // ── 8. CloudWatch Log Group ───────────────────────────────────────────────
     // Import existing log group if prod, otherwise create a new one for non-prod
@@ -341,37 +314,42 @@ export class InstructorStack extends cdk.Stack {
     );
 
     // 9d. S3 — User backups: generate pre-signed PUT/GET URLs; read size for /sync/status.
-    //     ListBucket is scoped to backups/ prefix via condition.
+    //     Object-level actions are scoped to backups/* by the resource ARN — no extra condition.
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: 'S3SyncBackups',
+        sid: 'S3SyncBackupsObjects',
         effect: iam.Effect.ALLOW,
-        actions: [
-          's3:GetObject',
-          's3:PutObject',
-          's3:GetObjectAttributes',
-          's3:ListBucket',
-        ],
-        resources: [
-          this.bucket.arnForObjects('backups/*'),
-          this.bucket.bucketArn,
-        ],
+        actions: ['s3:GetObject', 's3:PutObject', 's3:GetObjectAttributes'],
+        resources: [this.bucket.arnForObjects('backups/*')],
+      }),
+    );
+    //     ListBucket scoped to backups/ prefix; prevents TTS key enumeration.
+    //     s3:prefix is only a valid condition key for ListBucket, so it must be
+    //     in a separate statement from the object-level actions above.
+    lambdaRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'S3SyncBackupsList',
+        effect: iam.Effect.ALLOW,
+        actions: ['s3:ListBucket'],
+        resources: [this.bucket.bucketArn],
         conditions: {
-          // Restrict ListBucket to backups/ prefix; prevents TTS key enumeration.
           StringLike: { 's3:prefix': ['backups/*'] },
         },
       }),
     );
 
     // 9e. SES — send OTP verification emails.
-    //     Scoped to the layersiq.com domain identity.
-    const sesIdentityArn = `arn:aws:ses:${this.region}:${this.account}:identity/layersiq.com`;
+    //     Covers both the domain identity (layersiq.com) and any email-level
+    //     identities under it (e.g. noreply@layersiq.com). SES checks the
+    //     sender identity in IAM — the FROM address must match a resource here.
+    const sesDomainIdentityArn = `arn:aws:ses:${this.region}:${this.account}:identity/layersiq.com`;
+    const sesFromIdentityArn = `arn:aws:ses:${this.region}:${this.account}:identity/${sesFromEmail}`;
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'SESSendEmail',
         effect: iam.Effect.ALLOW,
         actions: ['ses:SendEmail', 'ses:SendRawEmail'],
-        resources: [sesIdentityArn],
+        resources: [sesDomainIdentityArn, sesFromIdentityArn],
       }),
     );
 
@@ -393,6 +371,23 @@ export class InstructorStack extends cdk.Stack {
             cdk.Stack.of(this),
           ),
         ],
+      }),
+    );
+
+    // 9g. Lambda self-invocation — for async email dispatch.
+    //     The function invokes itself with InvocationType='Event' to send OTP
+    //     emails in a separate execution context (fire-and-forget from the API).
+    //     ARN uses '*' for version/alias to cover $LATEST and any future aliases.
+    const selfLambdaArn = cdk.Arn.format(
+      { service: 'lambda', resource: `function:instructor-${envName}` },
+      cdk.Stack.of(this),
+    );
+    lambdaRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'LambdaSelfInvoke',
+        effect: iam.Effect.ALLOW,
+        actions: ['lambda:InvokeFunction'],
+        resources: [selfLambdaArn, `${selfLambdaArn}:*`],
       }),
     );
 
@@ -446,14 +441,15 @@ export class InstructorStack extends cdk.Stack {
     // NOT in a VPC: eliminates NAT Gateway cost (~$32/month) and
     //               ENI cold-start penalty (100–400 ms per cold start).
 
-    this.lambdaFn = new nodejs.NodejsFunction(this, 'ApiHandler', {
+    this.lambdaFn = new lambda.Function(this, 'ApiHandler', {
       functionName: `instructor-${envName}`,
-      // Prerequisite: server/src/lambda.ts must exist (created by TASK-008).
-      entry: path.join(__dirname, '../../server/src/lambda.ts'),
-      handler: 'handler',
+      // esbuild bundles all dependencies into a single file, so only dist/ is needed.
+      // esbuild-plugin-tsc preserves emitDecoratorMetadata for NestJS DI.
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../server/dist')),
+      handler: 'lambda.handler',
       runtime: lambda.Runtime.NODEJS_22_X,
       memorySize: 1024,
-      // 120 s — well under API Gateway HTTP API's 30 s integration timeout.
+      // 120 s — well under API Gateway REST API's 30 s integration timeout.
       // TTS synthesis peaks at ~15 s; keep room for cold starts.
       timeout: Duration.seconds(120),
       role: lambdaRole,
@@ -475,35 +471,8 @@ export class InstructorStack extends cdk.Stack {
         SECRETS_MANAGER_TTL: '300',
         // The secret ID that the Lambda code fetches from the extension.
         APP_SECRETS_ID: appSecrets.secretName,
-      },
-      bundling: {
-        // Do not minify — preserves stack traces in CloudWatch logs.
-        minify: false,
-        // REQUIRED for NestJS: esbuild must not mangle class/function names
-        // because NestJS DI resolves providers by constructor name at runtime.
-        keepNames: true,
-        sourceMap: true,
-        sourceMapMode: nodejs.SourceMapMode.INLINE,
-        target: 'node22',
-        // CommonJS format for Node.js Lambda runtime.
-        format: nodejs.OutputFormat.CJS,
-        // Use the server's tsconfig — gives esbuild paths config and decorator flags.
-        // Note: esbuild ignores emitDecoratorMetadata; keepNames is the compensating control.
-        tsconfig: path.join(__dirname, '../../server/tsconfig.json'),
-        // Externalized modules — NOT bundled and NOT installed in the Lambda zip.
-        // These are either:
-        //   (a) Native addons that cannot be bundled (better-sqlite3), or
-        //   (b) Legacy modules removed from the build that must not be imported at runtime.
-        // If the Lambda handler still imports these at runtime, it will throw.
-        // Ensure server/src/lambda.ts does NOT import these modules.
-        externalModules: [
-          'better-sqlite3',               // Native addon — removed; Neon HTTP driver used instead
-          'ioredis',                       // TCP Redis client — removed; Upstash HTTP client used instead
-          '@nestjs/websockets',            // Optional NestJS peer dep — not used
-          '@nestjs/microservices',         // Optional NestJS peer dep — not used
-          '@nestjs/platform-socket.io',    // Optional NestJS peer dep — not used
-          'class-transformer/storage',     // Optional — dynamically required by NestJS
-        ],
+        // Build version — updated to force Lambda rebuild
+        BUILD_VERSION: new Date().toISOString(),
       },
     });
 
@@ -516,6 +485,18 @@ export class InstructorStack extends cdk.Stack {
     const restApi = new apigw.RestApi(this, 'RestApi', {
       restApiName: `instructor-api-${envName}`,
       description: `Instructor backend API - ${envName}`,
+      // Required for audio/wav TTS responses: tells API Gateway REST API to
+      // base64-decode the Lambda response body before forwarding to the client.
+      // Without this, API Gateway passes the raw base64 string from the Lambda
+      // response to the client instead of the binary audio bytes.
+      binaryMediaTypes: [
+        'audio/wav',
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/ogg',
+        'audio/webm',
+        'application/octet-stream',
+      ],
       defaultCorsPreflightOptions: {
         allowOrigins: apigw.Cors.ALL_ORIGINS,
         allowMethods: apigw.Cors.ALL_METHODS,
@@ -542,10 +523,14 @@ export class InstructorStack extends cdk.Stack {
     // Single catch-all proxy at root: /{proxy+}
     // Captures all NestJS routes including /api/*
     // REST API will forward the full path to Lambda (e.g., /api/tts/synthesize)
-    restApi.root.addResource('{proxy+}').addMethod('ANY', lambdaIntegration);
+    restApi.root.addResource('{proxy+}').addMethod('ANY', lambdaIntegration, {
+      authorizationType: apigw.AuthorizationType.NONE,
+    });
 
-    // Deploy with default stage
+    // Deploy with default stage — addToLogicalId forces a new deployment
+    // whenever the API definition changes (auth type, routes, integrations).
     const deployment = new apigw.Deployment(this, 'ApiDeployment', { api: restApi });
+    deployment.addToLogicalId(new Date().toISOString());
     const defaultStage = new apigw.Stage(this, 'DefaultStage', {
       deployment,
       stageName: 'default',
@@ -560,31 +545,56 @@ export class InstructorStack extends cdk.Stack {
     });
 
     // ── 11. SES Domain Identity — layersiq.com ────────────────────────────────
-    // Registers the layersiq.com domain with AWS SES for DKIM-signed sending.
-    //
-    // Domain verification generates:
-    //   - Three CNAME records for DKIM (DkimDnsTokenName1/2/3 outputs)
-    //   - A TXT record for domain verification
-    // Add these DNS records in your registrar / Route 53 hosted zone.
-    //
-    // Sender email instructor.app@layersiq.com is authorised once the domain is verified.
-    //
-    // IMPORTANT: New AWS accounts start in the SES sandbox (can only send to
-    //   verified addresses). Request SES production access before going live:
-    //   https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html
+    // The layersiq.com SES identity is managed by the LayersIq-Production stack
+    // and exists in the shared AWS account. Both dev and prod stacks reference it
+    // but do not own it — creating it here would conflict with the existing resource.
 
-    // In prod, the layersiq.com SES identity is managed by the LayersIq-Production stack.
-    // Only create it in non-prod environments.
-    if (!isProd) {
-      new ses.CfnEmailIdentity(this, 'SesFromIdentity', {
-        emailIdentity: 'layersiq.com',
+    // ── 12. Custom Domain — instructor.api.layersiq.com (prod only) ──────────
+    //
+    // Only provisioned for prod. Dev uses the raw execute-api URL.
+    // Certificate is REGIONAL — must be in the same region as API Gateway (ap-south-1).
+
+    const rawApiUrl = `https://${restApi.restApiId}.execute-api.${this.region}.amazonaws.com/${defaultStage.stageName}`;
+
+    if (isProd) {
+      const customDomainName = 'instructor.api.layersiq.com';
+
+      const certificate = acm.Certificate.fromCertificateArn(
+        this,
+        'ApiCertificate',
+        `arn:aws:acm:${this.region}:${this.account}:certificate/c05d4c51-2193-4993-b2ec-186c7a56a2fc`,
+      );
+
+      const customDomain = new apigw.DomainName(this, 'ApiCustomDomain', {
+        domainName: customDomainName,
+        certificate,
+        endpointType: apigw.EndpointType.REGIONAL,
+        securityPolicy: apigw.SecurityPolicy.TLS_1_2,
       });
+
+      new apigw.BasePathMapping(this, 'ApiBasePathMapping', {
+        domainName: customDomain,
+        restApi,
+        stage: defaultStage,
+      });
+
+      this.apiUrl = `https://${customDomainName}`;
+
+      new CfnOutput(this, 'ApiGatewayDomainName', {
+        value: customDomain.domainNameAliasDomainName,
+        description: `Add DNS CNAME: ${customDomainName} → <this value>`,
+      });
+    } else {
+      this.apiUrl = rawApiUrl;
     }
 
     // ── 14. CloudFormation Outputs — new resources ────────────────────────────
 
-    // API URL: https://<apiId>.execute-api.<region>.amazonaws.com/<stage>
-    this.apiUrl = `https://${restApi.restApiId}.execute-api.${this.region}.amazonaws.com/${defaultStage.stageName}`;
+    // Raw execute-api URL kept as fallback (useful before DNS propagates).
+    new CfnOutput(this, 'ApiUrlRaw', {
+      value: rawApiUrl,
+      description: 'Direct execute-api URL (fallback — use custom domain in production)',
+    });
 
     new CfnOutput(this, 'ApiUrl', {
       value: this.apiUrl,

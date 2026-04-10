@@ -116,38 +116,48 @@ abstract final class AppTheme {
       ),
 
       // ── Chips ──────────────────────────────────────────────────────────────
+      // Stitch: px-6 py-2.5 rounded-full, selected bg-primary text-on-primary
       chipTheme: ChipThemeData(
         labelStyle: TextStyle(
-          fontSize: 13, // M3 labelMedium — relative to system scale
+          fontSize: 14,
           fontWeight: FontWeight.w500,
         ),
         side: BorderSide.none,
         shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        backgroundColor: colorScheme.surfaceContainerLow,
+        selectedColor: colorScheme.primary,
+        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+        showCheckmark: false,
       ),
 
       // ── Input / TextField ──────────────────────────────────────────────────
+      // Stitch: filled surface-container-highest, rounded-xl, no visible border
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colorScheme.outline),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colorScheme.outlineVariant),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colorScheme.primary, width: 2),
+          borderSide: BorderSide(
+            color: colorScheme.primary.withValues(alpha: 0.4),
+            width: 1,
+          ),
         ),
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
+          horizontal: 20,
+          vertical: 16,
         ),
         filled: true,
-        fillColor: colorScheme.surfaceContainerLowest,
+        fillColor: colorScheme.surfaceContainerHighest,
         labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
         hintStyle: TextStyle(
-          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+          color: colorScheme.outlineVariant,
         ),
       ),
 
@@ -285,8 +295,12 @@ abstract final class AppTheme {
   /// high-utility legibility for instructional body text. Font sizes follow Flutter's
   /// M3 defaults (using `sp` units) to respect system font scaling (REQ-027).
   static TextTheme _buildTextTheme(ColorScheme colorScheme) {
-    final manrope = GoogleFonts.manropeTextTheme();
-    final inter = GoogleFonts.interTextTheme();
+    // Pass a colour-aware base text theme so Google Fonts inherits the correct
+    // foreground colour (onSurface) for the current brightness instead of
+    // defaulting to black, which is invisible in dark mode.
+    final base = ThemeData(colorScheme: colorScheme, useMaterial3: true).textTheme;
+    final manrope = GoogleFonts.manropeTextTheme(base);
+    final inter = GoogleFonts.interTextTheme(base);
     return TextTheme(
       // Display & Headlines → Manrope (editorial voice)
       displayLarge: manrope.displayLarge?.copyWith(

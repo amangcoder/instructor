@@ -4,9 +4,12 @@
 /// PlanGenerationScreen can be tested without a live backend.
 library plan_generation_client;
 
+import 'dart:developer' show debugger;
+
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:uuid/uuid.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
@@ -68,19 +71,35 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
       body['category'] = category;
     }
 
+    // Breakpoint: inspect `uri` and `body` before the request fires.
+    debugger(message: 'PlanGen: about to POST');
+
     try {
       final response = await _apiClient.postJson(uri, body);
+
+      // Breakpoint: inspect raw `response` from the server.
+      debugger(message: 'PlanGen: received response');
+
       final planJson = response['plan'] as Map<String, dynamic>?;
 
       if (planJson == null) {
+        // Breakpoint: response unexpectedly missing the "plan" key.
+        debugger(message: 'PlanGen: missing plan key in response');
         throw const PlanGenerationException(
           'Server returned an invalid response (missing plan).',
           userMessage: 'Plan generation failed. Please try again.',
         );
       }
 
-      return _parsePlan(planJson);
+      final plan = _parsePlan(planJson);
+
+      // Breakpoint: inspect parsed `plan` before navigating away.
+      debugger(message: 'PlanGen: plan parsed successfully');
+
+      return plan;
     } on ApiException catch (e) {
+      // Breakpoint: inspect `e.statusCode` and `e.message` on API errors.
+      debugger(message: 'PlanGen: ApiException');
       throw PlanGenerationException(
         'API error: ${e.message}',
         userMessage: _friendlyError(e),
@@ -115,7 +134,7 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
   Plan _parsePlan(Map<String, dynamic> json) {
     final stepsRaw = json['steps'] as List<dynamic>? ?? [];
     final steps = stepsRaw
-        .map((s) => PlanStep.fromJson(s as Map<String, dynamic>))
+        .map((s) => PlanStep.fromJson(_normalizeStep(s as Map<String, dynamic>)))
         .toList();
 
     final categoryStr = json['category']?.toString() ?? 'custom';
@@ -129,11 +148,55 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
       name: json['name']?.toString() ?? 'Untitled Plan',
       description: json['description']?.toString(),
       category: category,
-      defaultVoice: json['defaultVoice']?.toString() ?? 'aoede',
+      defaultVoice: json['defaultVoice']?.toString() ?? 'af_heart',
       steps: steps,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
+  }
+
+  /// Converts a server-format step (uses `type`, field names from Gemini schema)
+  /// into the freezed-compatible format (uses `runtimeType`, Flutter field names).
+  Map<String, dynamic> _normalizeStep(Map<String, dynamic> step) {
+    final type = step['type'] as String?;
+    final id = const Uuid().v4();
+    return switch (type) {
+      'say' => {
+          'runtimeType': 'say',
+          'id': id,
+          'text': step['text'] as String,
+          if (step['voice'] != null) 'voiceId': step['voice'] as String,
+        },
+      'wait' => {
+          'runtimeType': 'wait',
+          'id': id,
+          'duration': Duration(seconds: (step['durationSeconds'] as num).toInt()).inMicroseconds,
+        },
+      'notify' => {
+          'runtimeType': 'notify',
+          'id': id,
+          'title': step['message'] as String,
+          'body': step['message'] as String,
+        },
+      'play' => {
+          'runtimeType': 'play',
+          'id': id,
+          'audioAssetKey': step['assetKey'] as String,
+        },
+      'stopAudio' => {
+          'runtimeType': 'stopAudio',
+          'id': id,
+        },
+      'repeat' => {
+          'runtimeType': 'repeat',
+          'id': id,
+          'count': (step['count'] as num).toInt(),
+          'children': (step['steps'] as List<dynamic>)
+              .map((s) => _normalizeStep(s as Map<String, dynamic>))
+              .toList(),
+        },
+      _ => throw PlanGenerationException('Unknown step type: $type'),
+    };
   }
 }
 

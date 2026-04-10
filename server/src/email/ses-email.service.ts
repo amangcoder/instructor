@@ -11,6 +11,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import type { SendOtpEmailTask } from '../lambda';
 
 const DEFAULT_FROM_EMAIL = '"Instructor App" <instructor.app@layersiq.com>';
 
@@ -18,14 +20,45 @@ const DEFAULT_FROM_EMAIL = '"Instructor App" <instructor.app@layersiq.com>';
 export class SESEmailService {
   private readonly logger = new Logger(SESEmailService.name);
   private readonly ses: SESClient;
+  private readonly lambda: LambdaClient;
   private readonly fromEmail: string;
 
   constructor() {
     const region = process.env.AWS_REGION ?? 'ap-south-1';
     this.ses = new SESClient({ region });
+    this.lambda = new LambdaClient({ region });
     this.fromEmail = process.env.SES_FROM_EMAIL ?? DEFAULT_FROM_EMAIL;
 
     this.logger.log(`SESEmailService initialised — from=${this.fromEmail}, region=${region}`);
+  }
+
+  /**
+   * Dispatch OTP email asynchronously by invoking this same Lambda function
+   * with InvocationType='Event'. Returns immediately — the email is sent in
+   * a separate Lambda invocation that runs independently of the HTTP response.
+   *
+   * Falls back to direct SES send if not running in Lambda (local dev).
+   */
+  async dispatchOtpEmail(recipientEmail: string, code: string): Promise<void> {
+    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+    if (!functionName) {
+      // Local dev: send directly (no async Lambda available).
+      await this.sendOtpEmail(recipientEmail, code);
+      return;
+    }
+
+    const payload: SendOtpEmailTask = { task: 'sendOtpEmail', to: recipientEmail, code };
+
+    await this.lambda.send(
+      new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: 'Event', // async — returns 202, doesn't wait for execution
+        Payload: Buffer.from(JSON.stringify(payload)),
+      }),
+    );
+
+    this.logger.log(`OTP email dispatched async for ${recipientEmail}`);
   }
 
   /**

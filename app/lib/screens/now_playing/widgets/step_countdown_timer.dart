@@ -18,7 +18,7 @@ class StepCountdownTimer extends StatefulWidget {
     required this.totalDuration,
     this.isPaused = false,
     this.color,
-    this.size = 220.0,
+    this.size = 288.0,
   });
 
   /// Time remaining as reported by the engine (updated approximately every
@@ -187,46 +187,78 @@ class _StepCountdownTimerState extends State<StepCountdownTimer>
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Center circle background (surface-container-lowest)
+                // Outer tonal ring — use surfaceContainer so it reads against
+                // both light and dark surface backgrounds.
                 Container(
-                  width: widget.size - 16,
-                  height: widget.size - 16,
+                  width: widget.size,
+                  height: widget.size,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: colorScheme.surfaceContainerLowest,
+                    color: colorScheme.surfaceContainer,
                   ),
                 ),
-                // Background track arc (thin 2px per Stitch spec)
+                // Inner disc — one step below the outer ring for a subtle depth.
+                Container(
+                  width: widget.size - 48,
+                  height: widget.size - 48,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colorScheme.surfaceContainerLow,
+                    boxShadow: [
+                      BoxShadow(
+                        color: colorScheme.primary.withValues(alpha: 0.08),
+                        blurRadius: 48,
+                        offset: const Offset(0, 24),
+                      ),
+                    ],
+                  ),
+                ),
+                // Background track arc — higher opacity for dark-mode legibility.
                 SizedBox(
-                  width: widget.size,
-                  height: widget.size,
+                  width: widget.size - 48,
+                  height: widget.size - 48,
                   child: CircularProgressIndicator(
                     value: 1.0,
-                    strokeWidth: 2,
-                    color: arcColor.withValues(alpha: 0.15),
+                    strokeWidth: 3,
+                    color: arcColor.withValues(alpha: 0.25),
                   ),
                 ),
-                // Foreground progress arc (thin 2px precision ring)
+                // Foreground progress arc.
                 SizedBox(
-                  width: widget.size,
-                  height: widget.size,
+                  width: widget.size - 48,
+                  height: widget.size - 48,
                   child: CircularProgressIndicator(
                     value: fraction,
-                    strokeWidth: 2,
+                    strokeWidth: 3,
                     color: arcColor,
                     strokeCap: StrokeCap.round,
                   ),
                 ),
-                // Time label (Manrope font for editorial authority)
-                Text(
-                  _formatDuration(displayed),
-                  style: GoogleFonts.manrope(
-                    fontSize: 48,
-                    fontWeight: FontWeight.w300,
-                    letterSpacing: -1,
-                    color: colorScheme.onSurface,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+                // Time + "Remaining" label
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatDuration(displayed),
+                      style: GoogleFonts.manrope(
+                        fontSize: 48,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -1,
+                        color: colorScheme.onSurface,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'REMAINING',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

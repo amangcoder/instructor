@@ -73,11 +73,14 @@ abstract final class AppSettingsKeys {
   /// When absent the header is omitted (useful for dev servers without auth).
   static const String backendApiKey = 'backend_api_key';
 
+  /// App colour-scheme preference: `'system'`, `'light'`, or `'dark'`.
+  ///
+  /// Defaults to `'system'` when absent.
+  static const String themeMode = 'theme_mode';
+
   // ── TTS Provider Settings ───────────────────────────────────────────────
 
-  /// The selected TTS provider identifier (e.g. 'gemini', 'kokoro').
-  ///
-  /// Defaults to `'gemini'` when absent.
+  /// The selected TTS provider identifier (always 'kokoro').
   static const String ttsProvider = 'tts_provider';
 
   // ── Sync Metadata ───────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/theme/app_theme.dart';
 
@@ -19,7 +20,7 @@ class InstructorApp extends ConsumerWidget {
       title: 'Instructor',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      themeMode: ThemeMode.light,
+      themeMode: ref.watch(themeModeSettingProvider).valueOrNull ?? ThemeMode.system,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
     );

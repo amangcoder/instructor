@@ -15,6 +15,7 @@ import 'package:instructor/screens/plan_generation/plan_review_screen.dart';
 import 'package:instructor/screens/plan_library/plan_library_screen.dart';
 import 'package:instructor/screens/settings/settings_screen.dart';
 import 'package:instructor/services/app_settings.dart';
+import 'package:instructor/widgets/bottom_nav_shell.dart';
 
 part 'router.g.dart';
 
@@ -131,23 +132,64 @@ GoRouter router(Ref ref) {
       }
     },
     routes: [
-      GoRoute(
-        path: AppRoutes.library,
-        builder: (BuildContext context, GoRouterState state) =>
-            const PlanLibraryScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.editorNew,
-        builder: (BuildContext context, GoRouterState state) =>
-            const PlanEditorScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.editorEdit,
-        builder: (BuildContext context, GoRouterState state) {
-          final planId = int.parse(state.pathParameters['planId']!);
-          return PlanEditorScreen(planId: planId);
+      // ── Shell with bottom nav bar ──────────────────────────────────────
+      ShellRoute(
+        builder: (context, state, child) {
+          // Determine which tab is active based on location
+          final location = state.matchedLocation;
+          int index = 0;
+          if (location == AppRoutes.editorNew ||
+              location.startsWith(AppRoutes.editor)) {
+            index = 1;
+          } else if (location == AppRoutes.generatePlan) {
+            index = 2;
+          } else if (location == AppRoutes.settings) {
+            index = 3;
+          }
+          return BottomNavShell(currentIndex: index, child: child);
         },
+        routes: [
+          GoRoute(
+            path: AppRoutes.library,
+            builder: (BuildContext context, GoRouterState state) =>
+                const PlanLibraryScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.editorNew,
+            builder: (BuildContext context, GoRouterState state) =>
+                const PlanEditorScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.editorEdit,
+            builder: (BuildContext context, GoRouterState state) {
+              final planId = int.parse(state.pathParameters['planId']!);
+              return PlanEditorScreen(planId: planId);
+            },
+          ),
+          GoRoute(
+            path: AppRoutes.settings,
+            builder: (BuildContext context, GoRouterState state) =>
+                const SettingsScreen(),
+          ),
+          // ── AI Plan Generation routes ─────────────────────────────────
+          GoRoute(
+            path: AppRoutes.generatePlan,
+            builder: (BuildContext context, GoRouterState state) =>
+                const PlanGenerationScreen(),
+            routes: [
+              GoRoute(
+                path: 'review',
+                builder: (BuildContext context, GoRouterState state) {
+                  final payload = state.extra as GeneratedPlanPayload?;
+                  return PlanReviewScreen(payload: payload);
+                },
+              ),
+            ],
+          ),
+        ],
       ),
+
+      // ── Full-screen routes (no bottom nav) ─────────────────────────────
       GoRoute(
         path: AppRoutes.nowPlaying,
         builder: (BuildContext context, GoRouterState state) =>
@@ -157,11 +199,6 @@ GoRouter router(Ref ref) {
         path: AppRoutes.onboarding,
         builder: (BuildContext context, GoRouterState state) =>
             const OnboardingScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.settings,
-        builder: (BuildContext context, GoRouterState state) =>
-            const SettingsScreen(),
       ),
 
       // ── Auth routes ──────────────────────────────────────────────────────
@@ -175,22 +212,6 @@ GoRouter router(Ref ref) {
             builder: (BuildContext context, GoRouterState state) {
               final email = state.extra as String? ?? '';
               return OtpVerificationScreen(email: email);
-            },
-          ),
-        ],
-      ),
-
-      // ── AI Plan Generation routes ────────────────────────────────────────
-      GoRoute(
-        path: AppRoutes.generatePlan,
-        builder: (BuildContext context, GoRouterState state) =>
-            const PlanGenerationScreen(),
-        routes: [
-          GoRoute(
-            path: 'review',
-            builder: (BuildContext context, GoRouterState state) {
-              final payload = state.extra as GeneratedPlanPayload?;
-              return PlanReviewScreen(payload: payload);
             },
           ),
         ],

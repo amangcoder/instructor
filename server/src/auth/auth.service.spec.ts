@@ -32,7 +32,7 @@ import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service'
 function createMockDatabaseService() {
   return {
     getUserById: jest.fn().mockResolvedValue(null),
-    getUserByEmail: jest.fn().mockResolvedValue(null),
+    getUserByEmail: jest.fn().mockResolvedValue(USER),
     createUser: jest.fn().mockResolvedValue(undefined),
     createOtp: jest.fn().mockResolvedValue(undefined),
     getActiveOtps: jest.fn().mockResolvedValue([]),
@@ -50,6 +50,7 @@ function createMockDatabaseService() {
 
 function createMockSESEmailService() {
   return {
+    dispatchOtpEmail: jest.fn().mockResolvedValue(undefined),
     sendOtpEmail: jest.fn().mockResolvedValue(undefined),
   };
 }
@@ -125,9 +126,6 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     process.env.OTP_SALT = 'test-otp-salt-32-chars-placeholder';
-    // Set DATABASE_URL so AuthService.localBypass = false and the full OTP
-    // flow (rate-limit → DB → SES) is exercised via the mock providers.
-    process.env.DATABASE_URL = 'postgresql://test:test@test/test';
 
     mockDynamo = createMockDatabaseService();
     mockSes = createMockSESEmailService();
@@ -152,7 +150,6 @@ describe('AuthService', () => {
     jest.restoreAllMocks();
     jest.useRealTimers();
     delete process.env.OTP_SALT;
-    delete process.env.DATABASE_URL;
   });
 
   // ── requestOtp ─────────────────────────────────────────────────────────────
@@ -178,19 +175,17 @@ describe('AuthService', () => {
       expect(mockDynamo.invalidateOtpsForEmail).toHaveBeenCalledWith('user@example.com');
     });
 
-    it('sends OTP email via SESEmailService.sendOtpEmail', async () => {
+    it('sends OTP email via SESEmailService.dispatchOtpEmail', async () => {
       await service.requestOtp('user@example.com');
-      await new Promise((r) => setImmediate(r));
-      expect(mockSes.sendOtpEmail).toHaveBeenCalledWith(
+      expect(mockSes.dispatchOtpEmail).toHaveBeenCalledWith(
         'user@example.com',
         expect.stringMatching(/^\d{6}$/),
       );
     });
 
-    it('passes a 6-digit OTP code to sendOtpEmail', async () => {
+    it('passes a 6-digit OTP code to dispatchOtpEmail', async () => {
       await service.requestOtp('user@example.com');
-      await new Promise((r) => setImmediate(r));
-      const [, code] = mockSes.sendOtpEmail.mock.calls[0] as [string, string];
+      const [, code] = mockSes.dispatchOtpEmail.mock.calls[0] as [string, string];
       expect(code).toMatch(/^\d{6}$/);
     });
 
@@ -207,6 +202,21 @@ describe('AuthService', () => {
     it('invalidateOtpsForEmail is called with the normalised (lowercase) email', async () => {
       await service.requestOtp('USER@EXAMPLE.COM');
       expect(mockDynamo.invalidateOtpsForEmail).toHaveBeenCalledWith('user@example.com');
+    });
+
+    // ── Invite-only gate ──────────────────────────────────────────────────
+
+    it('throws HTTP 403 when email is not in the users table', async () => {
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(null);
+      const err: any = await service.requestOtp('stranger@example.com').catch((e) => e);
+      const statusCode = err.getStatus?.() ?? err.status ?? err.statusCode;
+      expect(statusCode).toBe(403);
+    });
+
+    it('does NOT send OTP to uninvited email', async () => {
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(null);
+      await service.requestOtp('stranger@example.com').catch(() => null);
+      expect(mockSes.dispatchOtpEmail).not.toHaveBeenCalled();
     });
 
     // ── Rate limiting ─────────────────────────────────────────────────────
@@ -226,11 +236,10 @@ describe('AuthService', () => {
         expect(statusCode).toBe(429);
       });
 
-      it('does NOT call sendOtpEmail when rate-limited', async () => {
+      it('does NOT call dispatchOtpEmail when rate-limited', async () => {
         mockRateLimiter.consume.mockResolvedValue({ allowed: false, current: 4, retryAfterSec: 240 });
         await service.requestOtp('limited@example.com').catch(() => null);
-        await new Promise((r) => setImmediate(r));
-        expect(mockSes.sendOtpEmail).not.toHaveBeenCalled();
+        expect(mockSes.dispatchOtpEmail).not.toHaveBeenCalled();
       });
 
       it('does NOT call createOtp when rate-limited', async () => {
@@ -250,7 +259,7 @@ describe('AuthService', () => {
         await expect(service.requestOtp('email-b@example.com')).resolves.toEqual({ message: 'OTP sent' });
       });
 
-      it('does NOT send email when rate-limited (conserves SES quota)', async () => {
+      it('does NOT dispatch email when rate-limited (conserves SES quota)', async () => {
         // First 3 allowed, 4th blocked
         mockRateLimiter.consume
           .mockResolvedValueOnce({ allowed: true, current: 1, retryAfterSec: 0 })
@@ -263,8 +272,7 @@ describe('AuthService', () => {
         await service.requestOtp('quota@example.com');
         await service.requestOtp('quota@example.com').catch(() => null);
 
-        await new Promise((r) => setImmediate(r));
-        expect(mockSes.sendOtpEmail).toHaveBeenCalledTimes(3);
+        expect(mockSes.dispatchOtpEmail).toHaveBeenCalledTimes(3);
       });
     });
   });
@@ -282,7 +290,7 @@ describe('AuthService', () => {
       let capturedOtp = '';
       let capturedHash = '';
 
-      mockSes.sendOtpEmail.mockImplementationOnce(async (_: string, code: string) => {
+      mockSes.dispatchOtpEmail.mockImplementationOnce(async (_: string, code: string) => {
         capturedOtp = code;
       });
       mockDynamo.createOtp.mockImplementationOnce(
@@ -292,12 +300,10 @@ describe('AuthService', () => {
       );
 
       await service.requestOtp(overrideEmail);
-      await new Promise((r) => setImmediate(r));
 
       mockDynamo.getActiveOtps.mockResolvedValueOnce([
         makeOtpRecord({ email: overrideEmail, code: capturedHash }),
       ]);
-      mockDynamo.getUserByEmail.mockResolvedValueOnce(USER);
 
       return { capturedOtp, capturedHash };
     }
@@ -325,11 +331,11 @@ describe('AuthService', () => {
       expect(mockDynamo.createRefreshToken).toHaveBeenCalled();
     });
 
-    it('creates a new user if one does not exist yet', async () => {
+    it('creates a new user if one does not exist at verify time', async () => {
       let capturedOtp = '';
       let capturedHash = '';
 
-      mockSes.sendOtpEmail.mockImplementationOnce(async (_: string, code: string) => {
+      mockSes.dispatchOtpEmail.mockImplementationOnce(async (_: string, code: string) => {
         capturedOtp = code;
       });
       mockDynamo.createOtp.mockImplementationOnce(
@@ -338,13 +344,14 @@ describe('AuthService', () => {
         },
       );
 
+      // requestOtp uses default getUserByEmail → USER (invite check passes)
       await service.requestOtp(email);
-      await new Promise((r) => setImmediate(r));
 
       mockDynamo.getActiveOtps.mockResolvedValueOnce([
         makeOtpRecord({ email, code: capturedHash }),
       ]);
-      mockDynamo.getUserByEmail.mockResolvedValueOnce(null); // user not found
+      // verifyOtp sees no user (e.g. deleted between OTP request and verification)
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(null);
 
       await service.verifyOtp(email, capturedOtp);
       expect(mockDynamo.createUser).toHaveBeenCalled();
@@ -478,6 +485,32 @@ describe('AuthService', () => {
 
     it('resolves without throwing', async () => {
       await expect(service.revokeAllRefreshTokens(USER.id)).resolves.toBeUndefined();
+    });
+  });
+
+  // ── inviteUser ──────────────────────────────────────────────────────────────
+
+  describe('inviteUser', () => {
+    it('creates a user and returns { message: "User invited", email }', async () => {
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(null);
+      const result = await service.inviteUser('new@example.com');
+      expect(result).toEqual({ message: 'User invited', email: 'new@example.com' });
+      expect(mockDynamo.createUser).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'new@example.com' }),
+      );
+    });
+
+    it('normalises email to lowercase', async () => {
+      mockDynamo.getUserByEmail.mockResolvedValueOnce(null);
+      const result = await service.inviteUser('NEW@EXAMPLE.COM');
+      expect(result.email).toBe('new@example.com');
+    });
+
+    it('returns { message: "User already exists" } without creating duplicate', async () => {
+      // default getUserByEmail returns USER (already exists)
+      const result = await service.inviteUser(USER.email);
+      expect(result).toEqual({ message: 'User already exists', email: USER.email });
+      expect(mockDynamo.createUser).not.toHaveBeenCalled();
     });
   });
 });

@@ -789,13 +789,13 @@ class TTSServiceImpl implements TTSService {
 
   /// Reads the selected TTS provider from [AppSettingsTable].
   ///
-  /// Returns `'gemini'` when the key is absent or empty.
+  /// Returns `'kokoro'` when the key is absent or empty.
   Future<String> _readTtsProvider() async {
     final row = await (_db.select(_db.appSettingsTable)
           ..where((t) => t.key.equals(AppSettingsKeys.ttsProvider)))
         .getSingleOrNull();
     final raw = row?.value;
-    if (raw == null || raw.trim().isEmpty) return 'gemini';
+    if (raw == null || raw.trim().isEmpty) return 'kokoro';
     return raw;
   }
 

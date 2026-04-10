@@ -1202,7 +1202,10 @@ class ExecutionStateTableData extends DataClass
   final int ambientPositionMs;
 
   /// Asset key of the ambient track that was playing when the session was
-  /// paused (null when no ambient track was active).
+  /// paused (e.g. 'ambient_rain'). Null when no ambient track was active.
+  ///
+  /// Persisted alongside [ambientPositionMs] so that crash recovery can
+  /// restart the correct track before seeking to the saved position.
   final String? ambientAssetKey;
 
   /// [ExecutionStatus] name string.
@@ -1299,8 +1302,9 @@ class ExecutionStateTableData extends DataClass
         repeatCounters: repeatCounters ?? this.repeatCounters,
         elapsedMs: elapsedMs ?? this.elapsedMs,
         ambientPositionMs: ambientPositionMs ?? this.ambientPositionMs,
-        ambientAssetKey:
-            ambientAssetKey.present ? ambientAssetKey.value : this.ambientAssetKey,
+        ambientAssetKey: ambientAssetKey.present
+            ? ambientAssetKey.value
+            : this.ambientAssetKey,
         status: status ?? this.status,
         savedAt: savedAt ?? this.savedAt,
       );
@@ -2536,6 +2540,7 @@ typedef $$ExecutionStateTableTableCreateCompanionBuilder
   Value<String> repeatCounters,
   Value<int> elapsedMs,
   Value<int> ambientPositionMs,
+  Value<String?> ambientAssetKey,
   Value<String> status,
   Value<DateTime> savedAt,
 });
@@ -2547,6 +2552,7 @@ typedef $$ExecutionStateTableTableUpdateCompanionBuilder
   Value<String> repeatCounters,
   Value<int> elapsedMs,
   Value<int> ambientPositionMs,
+  Value<String?> ambientAssetKey,
   Value<String> status,
   Value<DateTime> savedAt,
 });
@@ -2597,6 +2603,10 @@ class $$ExecutionStateTableTableFilterComposer
 
   ColumnFilters<int> get ambientPositionMs => $composableBuilder(
       column: $table.ambientPositionMs,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get ambientAssetKey => $composableBuilder(
+      column: $table.ambientAssetKey,
       builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get status => $composableBuilder(
@@ -2653,6 +2663,10 @@ class $$ExecutionStateTableTableOrderingComposer
       column: $table.ambientPositionMs,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get ambientAssetKey => $composableBuilder(
+      column: $table.ambientAssetKey,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get status => $composableBuilder(
       column: $table.status, builder: (column) => ColumnOrderings(column));
 
@@ -2703,6 +2717,9 @@ class $$ExecutionStateTableTableAnnotationComposer
 
   GeneratedColumn<int> get ambientPositionMs => $composableBuilder(
       column: $table.ambientPositionMs, builder: (column) => column);
+
+  GeneratedColumn<String> get ambientAssetKey => $composableBuilder(
+      column: $table.ambientAssetKey, builder: (column) => column);
 
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
@@ -2763,6 +2780,7 @@ class $$ExecutionStateTableTableTableManager extends RootTableManager<
             Value<String> repeatCounters = const Value.absent(),
             Value<int> elapsedMs = const Value.absent(),
             Value<int> ambientPositionMs = const Value.absent(),
+            Value<String?> ambientAssetKey = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<DateTime> savedAt = const Value.absent(),
           }) =>
@@ -2773,6 +2791,7 @@ class $$ExecutionStateTableTableTableManager extends RootTableManager<
             repeatCounters: repeatCounters,
             elapsedMs: elapsedMs,
             ambientPositionMs: ambientPositionMs,
+            ambientAssetKey: ambientAssetKey,
             status: status,
             savedAt: savedAt,
           ),
@@ -2783,6 +2802,7 @@ class $$ExecutionStateTableTableTableManager extends RootTableManager<
             Value<String> repeatCounters = const Value.absent(),
             Value<int> elapsedMs = const Value.absent(),
             Value<int> ambientPositionMs = const Value.absent(),
+            Value<String?> ambientAssetKey = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<DateTime> savedAt = const Value.absent(),
           }) =>
@@ -2793,6 +2813,7 @@ class $$ExecutionStateTableTableTableManager extends RootTableManager<
             repeatCounters: repeatCounters,
             elapsedMs: elapsedMs,
             ambientPositionMs: ambientPositionMs,
+            ambientAssetKey: ambientAssetKey,
             status: status,
             savedAt: savedAt,
           ),

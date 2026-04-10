@@ -1,17 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/theme/step_colors.dart';
 
-/// A compact preview row showing the next step's type icon and a summary.
-///
-/// Displayed below the current step text on [NowPlayingScreen]. Uses a
-/// muted / subdued visual treatment so it doesn't compete with the main
-/// content area.
-///
-/// Accepts pre-resolved text from [ExecutionState.nextStepText] so that plans
-/// with [RepeatStep] blocks show the correct flattened next step rather than a
-/// top-level step object.
+/// Stitch "Next Up" card: bg-surface-container-low rounded-2xl p-5, with
+/// icon placeholder, "Next Up" label, title, and duration.
 class NextUpPreview extends StatelessWidget {
   const NextUpPreview({
     super.key,
@@ -19,12 +13,7 @@ class NextUpPreview extends StatelessWidget {
     this.nextStepType,
   });
 
-  /// The human-readable summary of the next flattened step, or null when the
-  /// current step is the last one in the plan.
   final String? nextStepText;
-
-  /// The [StepType] of the next step (for icon/colour), or null when unknown
-  /// or when there is no next step.
   final StepType? nextStepType;
 
   @override
@@ -34,65 +23,117 @@ class NextUpPreview extends StatelessWidget {
     if (nextStepText == null) {
       return Semantics(
         label: 'Last step — no next step',
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.check_circle_outline,
-              size: 18,
-              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Last step',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-                    fontStyle: FontStyle.italic,
-                  ),
-            ),
-          ],
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.check_circle_outline,
+                  color: colorScheme.primary.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'FINAL STEP',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1,
+                        color: colorScheme.primary.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Last step in this session',
+                      style: GoogleFonts.manrope(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     final text = nextStepText!;
     final stepType = nextStepType;
-    final iconData = stepType != null
-        ? StepColors.iconForType(stepType, size: 18).icon
-        : Icons.chevron_right;
-    final iconColor = stepType != null
-        ? StepColors.colorForType(stepType).withValues(alpha: 0.7)
-        : colorScheme.onSurfaceVariant.withValues(alpha: 0.7);
 
     return Semantics(
       label: 'Next up: $text',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Next: ',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                  fontWeight: FontWeight.w500,
-                ),
-          ),
-          Icon(
-            iconData,
-            size: 18,
-            color: iconColor,
-          ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                  ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            // 56x56 icon placeholder
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: stepType != null
+                  ? StepColors.iconForType(stepType, size: 24)
+                  : Icon(Icons.chevron_right,
+                      color: colorScheme.onSurfaceVariant),
             ),
-          ),
-        ],
+            const SizedBox(width: 16),
+            // Title + "Next Up" label
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'NEXT UP',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                      color: colorScheme.primary.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    text,
+                    style: GoogleFonts.manrope(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      color: colorScheme.onSurface,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

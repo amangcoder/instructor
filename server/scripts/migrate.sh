@@ -59,7 +59,7 @@ echo "Host: $(echo "$DATABASE_URL_DIRECT" | sed 's|postgres://[^@]*@||' | cut -d
 echo ""
 
 # Run migrations using the direct connection string
-DATABASE_URL="$DATABASE_URL_DIRECT" npx drizzle-kit migrate
+DATABASE_URL="$DATABASE_URL_DIRECT" npx drizzle-kit migrate --config drizzle.config.js
 
 echo ""
 echo "Migrations applied successfully."

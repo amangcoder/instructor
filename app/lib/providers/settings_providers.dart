@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -11,7 +12,7 @@ part 'settings_providers.g.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Default TTS voice used when no preference has been saved.
-const PlanVoice kDefaultVoice = PlanVoice.aoede;
+const PlanVoice kDefaultVoice = PlanVoice.af_heart;
 
 /// Default ambient audio master volume (70%).
 const double kDefaultAmbientVolume = 0.7;
@@ -134,5 +135,24 @@ Stream<bool> batteryPromptDismissedSetting(Ref ref) {
   return settings.watch(AppSettingsKeys.batteryPromptDismissed).map((raw) {
     if (raw == null) return false;
     return raw == 'true';
+  });
+}
+
+/// Reactive stream of the app theme mode preference.
+///
+/// Emits [ThemeMode.system] when the key is absent or unrecognised, meaning
+/// the OS light/dark preference is followed by default.
+@riverpod
+Stream<ThemeMode> themeModeSetting(Ref ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.watch(AppSettingsKeys.themeMode).map((raw) {
+    switch (raw) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
   });
 }

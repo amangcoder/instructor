@@ -23,7 +23,7 @@ part 'tts_providers.g.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 extension TtsProviderSettingsKeys on AppSettingsKeys {
-  /// The selected TTS provider identifier (e.g. 'gemini', 'kokoro').
+  /// The selected TTS provider identifier (always 'kokoro').
   static const String ttsProvider = 'tts_provider';
 }
 
@@ -54,12 +54,12 @@ Future<TtsProvidersResponse> ttsProviders(Ref ref) async {
 
 /// Reactive stream of the currently selected TTS provider ID.
 ///
-/// Defaults to 'gemini' when no preference is stored.
+/// Always returns 'kokoro'.
 @riverpod
 Stream<String> selectedTtsProvider(Ref ref) {
   final settings = ref.watch(appSettingsProvider);
   return settings.watch(TtsProviderSettingsKeys.ttsProvider).map((raw) {
-    return raw?.isNotEmpty == true ? raw! : 'gemini';
+    return raw?.isNotEmpty == true ? raw! : 'kokoro';
   });
 }
 
@@ -72,7 +72,7 @@ Stream<String> selectedTtsProvider(Ref ref) {
 @riverpod
 Future<TtsProviderConfig?> selectedProviderConfig(Ref ref) async {
   final providerIdAsync = ref.watch(selectedTtsProviderProvider);
-  final providerId = providerIdAsync.valueOrNull ?? 'gemini';
+  final providerId = providerIdAsync.valueOrNull ?? 'kokoro';
 
   final response = await ref.watch(ttsProvidersProvider.future);
   try {
@@ -121,6 +121,6 @@ Stream<String> rawTtsLocaleSetting(Ref ref) {
 Stream<String> rawVoiceSetting(Ref ref) {
   final settings = ref.watch(appSettingsProvider);
   return settings.watch(AppSettingsKeys.defaultVoice).map((raw) {
-    return raw?.isNotEmpty == true ? raw! : 'aoede';
+    return raw?.isNotEmpty == true ? raw! : 'af_heart';
   });
 }

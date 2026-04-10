@@ -1,17 +1,14 @@
 /// PlanGenerationScreen — AI-assisted plan creation via natural-language prompt.
 library plan_generation_screen;
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:instructor/models/plan.dart';
-import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/router.dart';
-import 'package:instructor/services/api_client.dart';
+import 'package:instructor/services/plan_generation_client.dart';
 import 'plan_review_screen.dart';
 
 /// Payload passed from [PlanGenerationScreen] to [PlanReviewScreen].
@@ -58,18 +55,8 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
     HapticFeedback.lightImpact();
 
     try {
-      final apiClient = ref.read(apiClientProvider);
-      final baseUrl = await apiClient.backendBaseUrl;
-      final uri = Uri.parse('$baseUrl/api/plans/generate');
-
-      final response = await apiClient.postJson(uri, {'prompt': prompt});
-
-      final planJson = response['plan'] as Map<String, dynamic>?;
-      if (planJson == null) {
-        throw Exception('Server returned an invalid response.');
-      }
-
-      final plan = _parsePlan(planJson);
+      final client = ref.read(planGenerationClientProvider);
+      final plan = await client.generatePlan(prompt);
 
       if (mounted) {
         context.push(
@@ -77,9 +64,9 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
           extra: GeneratedPlanPayload(plan: plan),
         );
       }
-    } on ApiException catch (e) {
+    } on PlanGenerationException catch (e) {
       if (mounted) {
-        setState(() => _errorMessage = _friendlyApiError(e));
+        setState(() => _errorMessage = e.userMessage);
       }
     } catch (e) {
       if (mounted) {
@@ -90,37 +77,6 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
         setState(() => _isGenerating = false);
       }
     }
-  }
-
-  String _friendlyApiError(ApiException e) {
-    if (e.statusCode == 429) {
-      return 'Your plan generation request was rate-limited. Try again in 30 minutes.';
-    }
-    if (e.statusCode == 401) {
-      return 'Please log in to use AI plan generation.';
-    }
-    if (e.statusCode == 422) {
-      return 'The AI could not generate a valid plan. Try rephrasing your description.';
-    }
-    return 'Plan generation failed (${e.statusCode ?? 'network error'}). Please try again.';
-  }
-
-  /// Parses the server-side Plan JSON into a domain [Plan] object.
-  Plan _parsePlan(Map<String, dynamic> json) {
-    final stepsRaw = json['steps'] as List<dynamic>? ?? [];
-    final steps = stepsRaw
-        .map((s) => PlanStep.fromJson(s as Map<String, dynamic>))
-        .toList();
-
-    return Plan(
-      id: 0, // temporary — will be assigned on save
-      name: json['name']?.toString() ?? 'Untitled Plan',
-      description: json['description']?.toString(),
-      defaultVoice: json['defaultVoice']?.toString() ?? 'aoede',
-      steps: steps,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
   }
 
   @override

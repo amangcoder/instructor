@@ -17,6 +17,13 @@
         "--tools",
         "memory,session,task,workflow,system,coordination,hooks,agent,terminal,browser,progress,performance,neural,embeddings,claims,hive-mind,analyze,config,transfer,wasm,autopilot,guidance,github,ruvllm"
       ]
+    },
+    "test-runner": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/amangupta/Projects/sdlc-mcp-servers/test-runner/dist/index.js"
+      ]
     }
   }
 }

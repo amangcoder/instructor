@@ -36,12 +36,12 @@ String formatAudioAssetKey(String key) => switch (key) {
 
 /// Returns a human-readable display name for [voiceId].
 String formatVoiceId(String voiceId) => switch (voiceId) {
-      'aoede' => 'Aoede (warm, clear)',
-      'leda' => 'Leda (soft, calming)',
-      'charon' => 'Charon (deep, energetic)',
-      'puck' => 'Puck (neutral)',
-      'kore' => 'Kore (reserved)',
-      'fenrir' => 'Fenrir (expressive)',
+      'af_heart' => 'Heart (warm, clear)',
+      'af_bella' => 'Bella (soft, calming)',
+      'af_nicole' => 'Nicole (light)',
+      'am_adam' => 'Adam (deep, energetic)',
+      'am_michael' => 'Michael (neutral)',
+      'am_eric' => 'Eric (expressive)',
       'platform' => 'Platform TTS (device)',
       _ => voiceId,
     };
@@ -273,9 +273,9 @@ class SayStepEditorState extends State<SayStepEditor> {
   void initState() {
     super.initState();
     _textController = TextEditingController(text: widget.step.text);
-    final vid = widget.step.voiceId ?? 'aoede';
+    final vid = widget.step.voiceId ?? 'af_heart';
     final validVoices = PlanVoice.values.map((v) => v.name).toSet();
-    _voiceId = validVoices.contains(vid) ? vid : 'aoede';
+    _voiceId = validVoices.contains(vid) ? vid : 'af_heart';
   }
 
   @override

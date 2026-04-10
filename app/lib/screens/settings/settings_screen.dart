@@ -1,13 +1,14 @@
+import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/providers/tts_providers.dart';
-import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/services/app_settings.dart';
+import 'package:instructor/theme/app_branding.dart';
+
 import 'widgets/auth_section.dart';
 import 'widgets/battery_optimization_prompt.dart';
 import 'widgets/sync_section.dart';
@@ -27,49 +28,95 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBranding.brandedAppBar(
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.account_circle),
+            onPressed: () {},
+          ),
+        ],
+      ),
       body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
         children: [
-          // ── Account ───────────────────────────────────────────────────────
-          _SectionHeader(title: 'Account'),
-          const AuthSection(),
+          // ── Core Settings ──────────────────────────────────────────────
+          const _SectionHeader(title: 'Core Settings'),
+          _SettingsCard(
+            children: [
+              const AuthSection(),
+              const SyncSection(),
+              const _ThemeModeSelector(),
+              const _TtsProviderSelector(),
+              const _LocaleSelector(),
+              const _VoiceSelector(),
+            ],
+          ),
 
-          // ── Sync ──────────────────────────────────────────────────────────
-          _SectionHeader(title: 'Sync'),
-          const SyncSection(),
+          // ── Audio & Speech ────────────────────────────────────────────
+          const _SectionHeader(title: 'Audio & Speech'),
+          _SettingsCard(
+            children: [
+              const _SpeechRateSlider(),
+              const _AmbientVolumeSlider(),
+              const _VoiceVolumeSlider(),
+            ],
+          ),
 
-          // ── TTS Provider ─────────────────────────────────────────────────
-          _SectionHeader(title: 'TTS Provider'),
-          const _ProviderSelector(),
+          // ── Notifications ─────────────────────────────────────────────
+          const _SectionHeader(title: 'Notifications'),
+          _SettingsCard(
+            children: [
+              const _NotificationSoundSwitch(),
+              const _VibrationSwitch(),
+            ],
+          ),
 
-          // ── Locale ────────────────────────────────────────────────────────
-          _SectionHeader(title: 'Language'),
-          const _LocaleSelector(),
-
-          // ── Voice ───────────────────────────────────────────────────────
-          _SectionHeader(title: 'Voice'),
-          const _VoiceSelector(),
-
-          // ── Speed ──────────────────────────────────────────────────────
-          _SectionHeader(title: 'Speed'),
-          const _SpeechRateSlider(),
-
-          // ── Volume ──────────────────────────────────────────────────────
-          _SectionHeader(title: 'Volume'),
-          const _AmbientVolumeSlider(),
-          const _VoiceVolumeSlider(),
-
-          // ── Notifications ───────────────────────────────────────────────
-          _SectionHeader(title: 'Notifications'),
-          const _NotificationSoundSwitch(),
-          const _VibrationSwitch(),
-
-          // ── Battery (Android only) ───────────────────────────────────────
+          // ── Battery (Android only) ────────────────────────────────────
           if (Platform.isAndroid) ...[
-            _SectionHeader(title: 'Battery'),
-            const BatteryOptimizationPrompt(),
+            const _SectionHeader(title: 'Battery'),
+            _SettingsCard(
+              children: [const BatteryOptimizationPrompt()],
+            ),
           ],
+
+          // ── Logout button ─────────────────────────────────────────────
+          const SizedBox(height: 32),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () {},
+              style: TextButton.styleFrom(
+                backgroundColor: colorScheme.surfaceContainerLow,
+                foregroundColor: colorScheme.error,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+              child: const Text('Logout'),
+            ),
+          ),
+
+          // ── Footer ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Text(
+              'Instructor for iOS & Android\nCrafted for The Curated Stillness',
+              style: TextStyle(
+                fontSize: 11,
+                color: colorScheme.outlineVariant,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
 
           const SizedBox(height: 32),
         ],
@@ -82,6 +129,7 @@ class SettingsScreen extends ConsumerWidget {
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Stitch section header: xs font-bold uppercase tracking-[2px] text-primary.
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.title});
 
@@ -90,32 +138,101 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+      padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
       child: Text(
-        title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.6,
-            ),
+        title.toUpperCase(),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 2,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
+/// Stitch settings group card: bg-surface-container-lowest rounded-2xl p-2.
+class _SettingsCard extends StatelessWidget {
+  const _SettingsCard({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: children,
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TTS Provider selector (dynamic — fetched from API)
+// Theme mode section
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ProviderSelector extends ConsumerWidget {
-  const _ProviderSelector();
+class _ThemeModeSelector extends ConsumerWidget {
+  const _ThemeModeSelector();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final current =
+        ref.watch(themeModeSettingProvider).valueOrNull ?? ThemeMode.system;
+
+    const options = [
+      (value: ThemeMode.system, label: 'System'),
+      (value: ThemeMode.light, label: 'Light'),
+      (value: ThemeMode.dark, label: 'Dark'),
+    ];
+
+    return ListTile(
+      title: const Text('Appearance'),
+      subtitle: const Text('App colour scheme'),
+      trailing: DropdownButton<ThemeMode>(
+        value: current,
+        underline: const SizedBox.shrink(),
+        items: options
+            .map(
+              (o) => DropdownMenuItem(
+                value: o.value,
+                child: Text(o.label),
+              ),
+            )
+            .toList(),
+        onChanged: (mode) {
+          if (mode == null) return;
+          final raw = switch (mode) {
+            ThemeMode.light => 'light',
+            ThemeMode.dark => 'dark',
+            ThemeMode.system => 'system',
+          };
+          unawaited(
+            ref.read(appSettingsProvider).write(AppSettingsKeys.themeMode, raw),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TTS Provider section
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TtsProviderSelector extends ConsumerWidget {
+  const _TtsProviderSelector();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final providersAsync = ref.watch(ttsProvidersProvider);
-    final selectedAsync = ref.watch(selectedTtsProviderProvider);
-
-    final currentId = selectedAsync.valueOrNull ?? 'gemini';
+    final currentProvider =
+        ref.watch(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
 
     return ListTile(
       title: const Text('TTS Provider'),
@@ -124,50 +241,30 @@ class _ProviderSelector extends ConsumerWidget {
         data: (response) {
           final providers = response.providers;
           if (providers.isEmpty) return const Text('—');
-          // Ensure current value exists in list (fallback to first).
-          final validId = providers.any((p) => p.id == currentId)
-              ? currentId
+          final validId = providers.any((p) => p.id == currentProvider)
+              ? currentProvider
               : providers.first.id;
-          return DropdownButton<String>(
-            value: validId,
-            underline: const SizedBox.shrink(),
-            items: providers
-                .map(
-                  (p) => DropdownMenuItem(
-                    value: p.id,
-                    child: Text(p.label),
-                  ),
-                )
-                .toList(),
-            onChanged: (newId) async {
-              if (newId == null) return;
-              final settings = ref.read(appSettingsProvider);
-              await settings.write(
-                  TtsProviderSettingsKeys.ttsProvider, newId);
-
-              final newProvider = response.providers
-                  .cast<TtsProviderConfig?>()
-                  .firstWhere((p) => p!.id == newId,
-                      orElse: () => null);
-              if (newProvider != null) {
-                // Remap all plan voices to the new provider's equivalents.
-                if (newProvider.voiceMap.isNotEmpty) {
-                  final repo = ref.read(planRepositoryProvider);
-                  await repo.remapPlanVoices(newProvider.voiceMap);
-                }
-                // Update the default voice setting to the mapped equivalent,
-                // or fall back to the first voice of the new provider.
-                final currentVoice = await settings.read(
-                    AppSettingsKeys.defaultVoice);
-                final mappedVoice = currentVoice != null
-                    ? newProvider.voiceMap[currentVoice]
-                    : null;
-                await settings.write(
-                    AppSettingsKeys.defaultVoice,
-                    mappedVoice ?? newProvider.voices.firstOrNull?.id ?? '');
-              }
-              ref.invalidate(selectedTtsProviderProvider);
-            },
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 130),
+            child: DropdownButton<String>(
+              value: validId,
+              underline: const SizedBox.shrink(),
+              isExpanded: true,
+              items: providers
+                  .map(
+                    (p) => DropdownMenuItem(
+                      value: p.id,
+                      child: Text(p.label, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (newProvider) {
+                if (newProvider == null) return;
+                ref
+                    .read(appSettingsProvider)
+                    .write(AppSettingsKeys.ttsProvider, newProvider);
+              },
+            ),
           );
         },
         loading: () => const SizedBox(

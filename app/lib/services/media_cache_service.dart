@@ -44,7 +44,7 @@ part 'media_cache_service.g.dart';
 const String kDefaultLocale = 'en-IN';
 
 /// Default provider when none is specified.
-const String kDefaultTtsProvider = 'gemini';
+const String kDefaultTtsProvider = 'kokoro';
 
 /// HTTP timeout for synthesis requests.
 const Duration kSynthesisTimeout = Duration(seconds: 60);
