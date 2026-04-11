@@ -46,6 +46,7 @@ export class PlansService {
   async generatePlan(
     prompt: string,
     userId: string,
+    language?: string,
   ): Promise<{ plan: Record<string, unknown> }> {
     await this.assertRateLimit(userId);
 
@@ -66,6 +67,12 @@ export class PlansService {
     // ── Phase 1: Extract requirements + divide into phases ─────────────────
     this.logger.log(`Phase 1: Extracting requirements for user ${userId}`);
     const requirements = await this.extractRequirements(geminiApiKey, prompt);
+
+    // Override language if the user explicitly selected one in the UI.
+    if (language) {
+      this.logger.log(`Language override: "${requirements.language}" → "${language}"`);
+      requirements.language = language;
+    }
 
     // Collapse Hinglish → Hindi (Kokoro can't handle mixed-script, Gemini TTS can handle Hindi)
     if (/hinglish/i.test(requirements.language)) {

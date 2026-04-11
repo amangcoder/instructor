@@ -346,4 +346,228 @@ Say: Continue.`;
     expect(steps[0].type).toBe('say');
     expect(result.repaired.some((r) => r.includes('dropped'))).toBe(true);
   });
+
+  // ── Count step ──────────────────────────────────────────────────────────
+
+  it('parses "Count: 10" as count 1→10', () => {
+    const dsl = `Name: Count Test
+Description: Count up.
+Category: workout
+Voice: am_adam
+---
+Count: 10`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toEqual({ type: 'count', from: 1, to: 10, intervalSeconds: 1 });
+  });
+
+  it('parses "Count: 10 to 1" as countdown', () => {
+    const dsl = `Name: Countdown Test
+Description: Count down.
+Category: workout
+Voice: am_adam
+---
+Count: 10 to 1`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 10, to: 1, intervalSeconds: 1 });
+  });
+
+  it('parses "Count: 5 to 15" as partial range', () => {
+    const dsl = `Name: Range Count
+Description: Partial range.
+Category: workout
+Voice: am_adam
+---
+Count: 5 to 15`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 5, to: 15, intervalSeconds: 1 });
+  });
+
+  it('parses "Count: 1" as a single-number count', () => {
+    const dsl = `Name: One Count
+Description: Single.
+Category: custom
+Voice: af_heart
+---
+Count: 1`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 1, to: 1, intervalSeconds: 1 });
+  });
+
+  it('auto-repairs typo "Coutn: 10"', () => {
+    const dsl = `Name: Typo Count
+Description: Typo.
+Category: custom
+Voice: af_heart
+---
+Coutn: 10`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    expect(result.repaired.some((r) => r.toLowerCase().includes('coutn'))).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 1, to: 10, intervalSeconds: 1 });
+  });
+
+  it('auto-repairs alias "Countdown: 10"', () => {
+    const dsl = `Name: Alias Count
+Description: Alias.
+Category: custom
+Voice: af_heart
+---
+Countdown: 10`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 1, to: 10, intervalSeconds: 1 });
+  });
+
+  it('fails for non-numeric count value', () => {
+    const dsl = `Name: Bad Count
+Description: Non-numeric.
+Category: custom
+Voice: af_heart
+---
+Count: abc`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.includes('Invalid count'))).toBe(true);
+  });
+
+  it('fails for count value of 0', () => {
+    const dsl = `Name: Zero Count
+Description: Zero.
+Category: custom
+Voice: af_heart
+---
+Count: 0`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.includes('Invalid count'))).toBe(true);
+  });
+
+  it('fails for span exceeding 100', () => {
+    const dsl = `Name: Big Count
+Description: Too many.
+Category: custom
+Voice: af_heart
+---
+Count: 1 to 200`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.includes('exceed 100'))).toBe(true);
+  });
+
+  it('works alongside other step types', () => {
+    const dsl = `Name: Mixed Steps
+Description: Count mixed in.
+Category: workout
+Voice: am_adam
+---
+Say: Hold this position.
+Count: 10
+Say: Great job!`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps).toHaveLength(3);
+    expect(steps[0].type).toBe('say');
+    expect(steps[1]).toEqual({ type: 'count', from: 1, to: 10, intervalSeconds: 1 });
+    expect(steps[2].type).toBe('say');
+  });
+
+  it('works inside a Repeat block', () => {
+    const dsl = `Name: Repeat Count
+Description: Count in repeat.
+Category: workout
+Voice: am_adam
+---
+Repeat: 3
+  Say: Hold.
+  Count: 5
+EndRepeat`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps).toHaveLength(1);
+    expect(steps[0].type).toBe('repeat');
+    const inner = (steps[0] as any).steps as Array<Record<string, unknown>>;
+    expect(inner).toHaveLength(2);
+    expect(inner[1]).toEqual({ type: 'count', from: 1, to: 5, intervalSeconds: 1 });
+  });
+
+  // ── Count step with interval ────────────────────────────────────────────
+
+  it('parses "Count: 10 every 3s" with custom interval', () => {
+    const dsl = `Name: Interval Count
+Description: Custom interval.
+Category: workout
+Voice: am_adam
+---
+Count: 10 every 3s`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 1, to: 10, intervalSeconds: 3 });
+  });
+
+  it('parses "Count: 10 to 1 every 5s" with countdown and interval', () => {
+    const dsl = `Name: Interval Countdown
+Description: Countdown with interval.
+Category: workout
+Voice: am_adam
+---
+Count: 10 to 1 every 5s`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 10, to: 1, intervalSeconds: 5 });
+  });
+
+  it('parses interval without "s" suffix', () => {
+    const dsl = `Name: No Suffix
+Description: No s.
+Category: custom
+Voice: af_heart
+---
+Count: 5 every 2`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(true);
+    const steps = result.plan!.steps as Array<Record<string, unknown>>;
+    expect(steps[0]).toEqual({ type: 'count', from: 1, to: 5, intervalSeconds: 2 });
+  });
+
+  it('rejects interval exceeding 20s', () => {
+    const dsl = `Name: Big Interval
+Description: Too long.
+Category: custom
+Voice: af_heart
+---
+Count: 10 every 25s`;
+
+    const result = parseDslPlan(dsl);
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.includes('exceed 20'))).toBe(true);
+  });
 });

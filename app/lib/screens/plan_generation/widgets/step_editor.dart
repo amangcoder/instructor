@@ -67,6 +67,7 @@ class _StepEditorState extends State<StepEditor> {
         NotifyStep() => Icons.notifications_outlined,
         PlayStep() => Icons.music_note_outlined,
         WaitStep() => Icons.hourglass_empty_outlined,
+        CountStep() => Icons.tag,
         RepeatStep() => Icons.repeat_outlined,
         StopAudioStep() => Icons.stop_circle_outlined,
       };
@@ -78,6 +79,7 @@ class _StepEditorState extends State<StepEditor> {
       NotifyStep() => colorScheme.tertiary,
       PlayStep() => colorScheme.tertiary,
       WaitStep() => colorScheme.secondary,
+      CountStep() => const Color(0xFF00838F),
       RepeatStep() => colorScheme.secondaryContainer,
       StopAudioStep() => colorScheme.error,
     };
@@ -88,6 +90,7 @@ class _StepEditorState extends State<StepEditor> {
         NotifyStep() => 'Notify',
         PlayStep() => 'Play',
         WaitStep() => 'Wait',
+        CountStep() => 'Count',
         RepeatStep() => 'Repeat',
         StopAudioStep() => 'Stop Audio',
       };
@@ -99,6 +102,9 @@ class _StepEditorState extends State<StepEditor> {
         PlayStep(:final audioAssetKey) => audioAssetKey,
         WaitStep(:final duration) =>
           '${duration.inSeconds}s',
+        CountStep(:final from, :final to, :final intervalSeconds) =>
+          '${from <= to ? '' : '(countdown) '}$from \u2192 $to'
+          '${intervalSeconds > 1 ? ' every ${intervalSeconds}s' : ''}',
         RepeatStep(:final count, :final children) =>
           '× $count (${children.length} steps)',
         StopAudioStep() => 'Stop all audio',

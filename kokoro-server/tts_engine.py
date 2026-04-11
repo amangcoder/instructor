@@ -63,7 +63,7 @@ VOICE_CATALOG: dict[str, str] = {
 }
 
 # Supported language codes (Kokoro uses ISO 639-1 style).
-SUPPORTED_LANGUAGES = frozenset({"en-us", "en-gb", "h"})
+SUPPORTED_LANGUAGES = frozenset({"en-us", "en-gb", "hi"})
 
 
 def _pcm_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:
@@ -188,6 +188,16 @@ class KokoroEngine:
         if language not in SUPPORTED_LANGUAGES:
             raise ValueError(
                 f"Unsupported language '{language}'. Supported: {', '.join(sorted(SUPPORTED_LANGUAGES))}"
+            )
+
+        # Reject Devanagari text with non-Hindi voice/language to prevent
+        # ONNX runtime crashes from incompatible script+model combinations.
+        import re
+        has_devanagari = bool(re.search(r'[\u0900-\u097F]', text))
+        if has_devanagari and language != 'hi':
+            raise ValueError(
+                f"Hindi (Devanagari) text requires language='h' and a Hindi voice, "
+                f"but got language='{language}', voice='{voice}'"
             )
 
         speed = max(0.1, min(4.0, speed))

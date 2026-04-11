@@ -9,6 +9,7 @@ import 'package:instructor/theme/step_colors.dart';
 Future<StepType?> showStepTypePicker(BuildContext context) {
   return showModalBottomSheet<StepType>(
     context: context,
+    isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
@@ -24,6 +25,7 @@ class _StepTypePickerSheet extends StatelessWidget {
     StepType.notify,
     StepType.play,
     StepType.wait,
+    StepType.count,
     StepType.repeat,
   ];
 
@@ -31,38 +33,50 @@ class _StepTypePickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final maxHeight = MediaQuery.of(context).size.height * 0.6;
+
     return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              'Add Step',
-              style: theme.textTheme.titleMedium,
-            ),
-          ),
-          const Divider(height: 1),
-          ..._types.map(
-            (type) => Semantics(
-              button: true,
-              label: '${_labelForType(type)}: ${_descForType(type)}',
-              child: ListTile(
-                leading: StepColors.iconForType(type, size: 24),
-                title: Text(_labelForType(type)),
-                subtitle: Text(
-                  _descForType(type),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                onTap: () => Navigator.of(context).pop(type),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'Add Step',
+                style: theme.textTheme.titleMedium,
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-        ],
+            const Divider(height: 1),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ..._types.map(
+                    (type) => Semantics(
+                      button: true,
+                      label: '${_labelForType(type)}: ${_descForType(type)}',
+                      child: ListTile(
+                        leading: StepColors.iconForType(type, size: 24),
+                        title: Text(_labelForType(type)),
+                        subtitle: Text(
+                          _descForType(type),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        onTap: () => Navigator.of(context).pop(type),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -72,6 +86,7 @@ class _StepTypePickerSheet extends StatelessWidget {
         StepType.notify => 'Notify',
         StepType.play => 'Play Audio',
         StepType.wait => 'Wait',
+        StepType.count => 'Count',
         StepType.repeat => 'Repeat Block',
         StepType.stopAudio => 'Stop Audio',
       };
@@ -81,6 +96,7 @@ class _StepTypePickerSheet extends StatelessWidget {
         StepType.notify => 'Send a push notification',
         StepType.play => 'Start or change ambient audio',
         StepType.wait => 'Pause silently for a duration',
+        StepType.count => 'Count aloud during a hold',
         StepType.repeat => 'Repeat a group of steps N times',
         StepType.stopAudio => 'Stop all ambient audio',
       };

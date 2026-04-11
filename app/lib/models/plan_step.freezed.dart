@@ -26,6 +26,8 @@ PlanStep _$PlanStepFromJson(Map<String, dynamic> json) {
       return WaitStep.fromJson(json);
     case 'repeat':
       return RepeatStep.fromJson(json);
+    case 'count':
+      return CountStep.fromJson(json);
     case 'stopAudio':
       return StopAudioStep.fromJson(json);
 
@@ -50,6 +52,8 @@ mixin _$PlanStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) =>
       throw _privateConstructorUsedError;
@@ -64,6 +68,7 @@ mixin _$PlanStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) =>
       throw _privateConstructorUsedError;
@@ -78,6 +83,7 @@ mixin _$PlanStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) =>
@@ -89,6 +95,7 @@ mixin _$PlanStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) =>
       throw _privateConstructorUsedError;
@@ -99,6 +106,7 @@ mixin _$PlanStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) =>
       throw _privateConstructorUsedError;
@@ -109,6 +117,7 @@ mixin _$PlanStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) =>
@@ -280,6 +289,8 @@ class _$SayStepImpl extends SayStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) {
     return say(id, text, voiceId, estimatedDuration);
@@ -297,6 +308,7 @@ class _$SayStepImpl extends SayStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) {
     return say?.call(id, text, voiceId, estimatedDuration);
@@ -314,6 +326,7 @@ class _$SayStepImpl extends SayStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) {
@@ -331,6 +344,7 @@ class _$SayStepImpl extends SayStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) {
     return say(this);
@@ -344,6 +358,7 @@ class _$SayStepImpl extends SayStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) {
     return say?.call(this);
@@ -357,6 +372,7 @@ class _$SayStepImpl extends SayStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) {
@@ -507,6 +523,8 @@ class _$NotifyStepImpl extends NotifyStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) {
     return notify(id, title, body);
@@ -524,6 +542,7 @@ class _$NotifyStepImpl extends NotifyStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) {
     return notify?.call(id, title, body);
@@ -541,6 +560,7 @@ class _$NotifyStepImpl extends NotifyStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) {
@@ -558,6 +578,7 @@ class _$NotifyStepImpl extends NotifyStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) {
     return notify(this);
@@ -571,6 +592,7 @@ class _$NotifyStepImpl extends NotifyStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) {
     return notify?.call(this);
@@ -584,6 +606,7 @@ class _$NotifyStepImpl extends NotifyStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) {
@@ -772,6 +795,8 @@ class _$PlayStepImpl extends PlayStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) {
     return play(id, audioAssetKey, loop, volume, fadeInMs, fadeOutMs);
@@ -789,6 +814,7 @@ class _$PlayStepImpl extends PlayStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) {
     return play?.call(id, audioAssetKey, loop, volume, fadeInMs, fadeOutMs);
@@ -806,6 +832,7 @@ class _$PlayStepImpl extends PlayStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) {
@@ -823,6 +850,7 @@ class _$PlayStepImpl extends PlayStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) {
     return play(this);
@@ -836,6 +864,7 @@ class _$PlayStepImpl extends PlayStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) {
     return play?.call(this);
@@ -849,6 +878,7 @@ class _$PlayStepImpl extends PlayStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) {
@@ -994,6 +1024,8 @@ class _$WaitStepImpl extends WaitStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) {
     return wait(id, duration);
@@ -1011,6 +1043,7 @@ class _$WaitStepImpl extends WaitStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) {
     return wait?.call(id, duration);
@@ -1028,6 +1061,7 @@ class _$WaitStepImpl extends WaitStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) {
@@ -1045,6 +1079,7 @@ class _$WaitStepImpl extends WaitStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) {
     return wait(this);
@@ -1058,6 +1093,7 @@ class _$WaitStepImpl extends WaitStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) {
     return wait?.call(this);
@@ -1071,6 +1107,7 @@ class _$WaitStepImpl extends WaitStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) {
@@ -1225,9 +1262,11 @@ class _$RepeatStepImpl extends RepeatStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) {
-    return repeat(id, count, children);
+    return repeat(id, this.count, children);
   }
 
   @override
@@ -1242,9 +1281,10 @@ class _$RepeatStepImpl extends RepeatStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) {
-    return repeat?.call(id, count, children);
+    return repeat?.call(id, this.count, children);
   }
 
   @override
@@ -1259,11 +1299,12 @@ class _$RepeatStepImpl extends RepeatStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) {
     if (repeat != null) {
-      return repeat(id, count, children);
+      return repeat(id, this.count, children);
     }
     return orElse();
   }
@@ -1276,6 +1317,7 @@ class _$RepeatStepImpl extends RepeatStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) {
     return repeat(this);
@@ -1289,6 +1331,7 @@ class _$RepeatStepImpl extends RepeatStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) {
     return repeat?.call(this);
@@ -1302,6 +1345,7 @@ class _$RepeatStepImpl extends RepeatStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) {
@@ -1339,6 +1383,252 @@ abstract class RepeatStep extends PlanStep {
   @override
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$RepeatStepImplCopyWith<_$RepeatStepImpl> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class _$$CountStepImplCopyWith<$Res>
+    implements $PlanStepCopyWith<$Res> {
+  factory _$$CountStepImplCopyWith(
+          _$CountStepImpl value, $Res Function(_$CountStepImpl) then) =
+      __$$CountStepImplCopyWithImpl<$Res>;
+  @override
+  @useResult
+  $Res call({String id, int from, int to, int intervalSeconds});
+}
+
+/// @nodoc
+class __$$CountStepImplCopyWithImpl<$Res>
+    extends _$PlanStepCopyWithImpl<$Res, _$CountStepImpl>
+    implements _$$CountStepImplCopyWith<$Res> {
+  __$$CountStepImplCopyWithImpl(
+      _$CountStepImpl _value, $Res Function(_$CountStepImpl) _then)
+      : super(_value, _then);
+
+  /// Create a copy of PlanStep
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? id = null,
+    Object? from = null,
+    Object? to = null,
+    Object? intervalSeconds = null,
+  }) {
+    return _then(_$CountStepImpl(
+      id: null == id
+          ? _value.id
+          : id // ignore: cast_nullable_to_non_nullable
+              as String,
+      from: null == from
+          ? _value.from
+          : from // ignore: cast_nullable_to_non_nullable
+              as int,
+      to: null == to
+          ? _value.to
+          : to // ignore: cast_nullable_to_non_nullable
+              as int,
+      intervalSeconds: null == intervalSeconds
+          ? _value.intervalSeconds
+          : intervalSeconds // ignore: cast_nullable_to_non_nullable
+              as int,
+    ));
+  }
+}
+
+/// @nodoc
+@JsonSerializable()
+class _$CountStepImpl extends CountStep {
+  const _$CountStepImpl(
+      {required this.id,
+      required this.from,
+      required this.to,
+      this.intervalSeconds = 1,
+      final String? $type})
+      : $type = $type ?? 'count',
+        super._();
+
+  factory _$CountStepImpl.fromJson(Map<String, dynamic> json) =>
+      _$$CountStepImplFromJson(json);
+
+  @override
+  final String id;
+  @override
+  final int from;
+  @override
+  final int to;
+  @override
+  @JsonKey()
+  final int intervalSeconds;
+
+  @JsonKey(name: 'runtimeType')
+  final String $type;
+
+  @override
+  String toString() {
+    return 'PlanStep.count(id: $id, from: $from, to: $to, intervalSeconds: $intervalSeconds)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$CountStepImpl &&
+            (identical(other.id, id) || other.id == id) &&
+            (identical(other.from, from) || other.from == from) &&
+            (identical(other.to, to) || other.to == to) &&
+            (identical(other.intervalSeconds, intervalSeconds) ||
+                other.intervalSeconds == intervalSeconds));
+  }
+
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  int get hashCode => Object.hash(runtimeType, id, from, to, intervalSeconds);
+
+  /// Create a copy of PlanStep
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$CountStepImplCopyWith<_$CountStepImpl> get copyWith =>
+      __$$CountStepImplCopyWithImpl<_$CountStepImpl>(this, _$identity);
+
+  @override
+  @optionalTypeArgs
+  TResult when<TResult extends Object?>({
+    required TResult Function(String id, String text, String? voiceId,
+            Duration? estimatedDuration)
+        say,
+    required TResult Function(String id, String title, String body) notify,
+    required TResult Function(String id, String audioAssetKey, bool loop,
+            double volume, int? fadeInMs, int? fadeOutMs)
+        play,
+    required TResult Function(String id, Duration duration) wait,
+    required TResult Function(String id, int count, List<PlanStep> children)
+        repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
+    required TResult Function(String id) stopAudio,
+  }) {
+    return count(id, from, to, intervalSeconds);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? whenOrNull<TResult extends Object?>({
+    TResult? Function(String id, String text, String? voiceId,
+            Duration? estimatedDuration)?
+        say,
+    TResult? Function(String id, String title, String body)? notify,
+    TResult? Function(String id, String audioAssetKey, bool loop, double volume,
+            int? fadeInMs, int? fadeOutMs)?
+        play,
+    TResult? Function(String id, Duration duration)? wait,
+    TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
+    TResult? Function(String id)? stopAudio,
+  }) {
+    return count?.call(id, from, to, intervalSeconds);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeWhen<TResult extends Object?>({
+    TResult Function(String id, String text, String? voiceId,
+            Duration? estimatedDuration)?
+        say,
+    TResult Function(String id, String title, String body)? notify,
+    TResult Function(String id, String audioAssetKey, bool loop, double volume,
+            int? fadeInMs, int? fadeOutMs)?
+        play,
+    TResult Function(String id, Duration duration)? wait,
+    TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
+    TResult Function(String id)? stopAudio,
+    required TResult orElse(),
+  }) {
+    if (count != null) {
+      return count(id, from, to, intervalSeconds);
+    }
+    return orElse();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult map<TResult extends Object?>({
+    required TResult Function(SayStep value) say,
+    required TResult Function(NotifyStep value) notify,
+    required TResult Function(PlayStep value) play,
+    required TResult Function(WaitStep value) wait,
+    required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
+    required TResult Function(StopAudioStep value) stopAudio,
+  }) {
+    return count(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? mapOrNull<TResult extends Object?>({
+    TResult? Function(SayStep value)? say,
+    TResult? Function(NotifyStep value)? notify,
+    TResult? Function(PlayStep value)? play,
+    TResult? Function(WaitStep value)? wait,
+    TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
+    TResult? Function(StopAudioStep value)? stopAudio,
+  }) {
+    return count?.call(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeMap<TResult extends Object?>({
+    TResult Function(SayStep value)? say,
+    TResult Function(NotifyStep value)? notify,
+    TResult Function(PlayStep value)? play,
+    TResult Function(WaitStep value)? wait,
+    TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
+    TResult Function(StopAudioStep value)? stopAudio,
+    required TResult orElse(),
+  }) {
+    if (count != null) {
+      return count(this);
+    }
+    return orElse();
+  }
+
+  @override
+  Map<String, dynamic> toJson() {
+    return _$$CountStepImplToJson(
+      this,
+    );
+  }
+}
+
+abstract class CountStep extends PlanStep {
+  const factory CountStep(
+      {required final String id,
+      required final int from,
+      required final int to,
+      final int intervalSeconds}) = _$CountStepImpl;
+  const CountStep._() : super._();
+
+  factory CountStep.fromJson(Map<String, dynamic> json) =
+      _$CountStepImpl.fromJson;
+
+  @override
+  String get id;
+  int get from;
+  int get to;
+  int get intervalSeconds;
+
+  /// Create a copy of PlanStep
+  /// with the given fields replaced by the non-null parameter values.
+  @override
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$CountStepImplCopyWith<_$CountStepImpl> get copyWith =>
       throw _privateConstructorUsedError;
 }
 
@@ -1431,6 +1721,8 @@ class _$StopAudioStepImpl extends StopAudioStep {
     required TResult Function(String id, Duration duration) wait,
     required TResult Function(String id, int count, List<PlanStep> children)
         repeat,
+    required TResult Function(String id, int from, int to, int intervalSeconds)
+        count,
     required TResult Function(String id) stopAudio,
   }) {
     return stopAudio(id);
@@ -1448,6 +1740,7 @@ class _$StopAudioStepImpl extends StopAudioStep {
         play,
     TResult? Function(String id, Duration duration)? wait,
     TResult? Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult? Function(String id, int from, int to, int intervalSeconds)? count,
     TResult? Function(String id)? stopAudio,
   }) {
     return stopAudio?.call(id);
@@ -1465,6 +1758,7 @@ class _$StopAudioStepImpl extends StopAudioStep {
         play,
     TResult Function(String id, Duration duration)? wait,
     TResult Function(String id, int count, List<PlanStep> children)? repeat,
+    TResult Function(String id, int from, int to, int intervalSeconds)? count,
     TResult Function(String id)? stopAudio,
     required TResult orElse(),
   }) {
@@ -1482,6 +1776,7 @@ class _$StopAudioStepImpl extends StopAudioStep {
     required TResult Function(PlayStep value) play,
     required TResult Function(WaitStep value) wait,
     required TResult Function(RepeatStep value) repeat,
+    required TResult Function(CountStep value) count,
     required TResult Function(StopAudioStep value) stopAudio,
   }) {
     return stopAudio(this);
@@ -1495,6 +1790,7 @@ class _$StopAudioStepImpl extends StopAudioStep {
     TResult? Function(PlayStep value)? play,
     TResult? Function(WaitStep value)? wait,
     TResult? Function(RepeatStep value)? repeat,
+    TResult? Function(CountStep value)? count,
     TResult? Function(StopAudioStep value)? stopAudio,
   }) {
     return stopAudio?.call(this);
@@ -1508,6 +1804,7 @@ class _$StopAudioStepImpl extends StopAudioStep {
     TResult Function(PlayStep value)? play,
     TResult Function(WaitStep value)? wait,
     TResult Function(RepeatStep value)? repeat,
+    TResult Function(CountStep value)? count,
     TResult Function(StopAudioStep value)? stopAudio,
     required TResult orElse(),
   }) {

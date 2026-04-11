@@ -6,14 +6,9 @@ part of 'voice_remap_service.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$voiceRemapServiceHash() => r'b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2';
+String _$voiceRemapServiceHash() => r'41d5be9c5a70beec074646719d2808bb89f4f665';
 
-/// Singleton [VoiceRemapService] provider.
-///
-/// Kept alive for the app's lifetime so catalog access is always available
-/// without re-creating the service on every access.
-///
-/// Copied from [voiceRemapService].
+/// See also [voiceRemapService].
 @ProviderFor(voiceRemapService)
 final voiceRemapServiceProvider = Provider<VoiceRemapService>.internal(
   voiceRemapService,

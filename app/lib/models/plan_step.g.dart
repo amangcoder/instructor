@@ -96,6 +96,24 @@ Map<String, dynamic> _$$RepeatStepImplToJson(_$RepeatStepImpl instance) =>
       'runtimeType': instance.$type,
     };
 
+_$CountStepImpl _$$CountStepImplFromJson(Map<String, dynamic> json) =>
+    _$CountStepImpl(
+      id: json['id'] as String,
+      from: (json['from'] as num).toInt(),
+      to: (json['to'] as num).toInt(),
+      intervalSeconds: (json['intervalSeconds'] as num?)?.toInt() ?? 1,
+      $type: json['runtimeType'] as String?,
+    );
+
+Map<String, dynamic> _$$CountStepImplToJson(_$CountStepImpl instance) =>
+    <String, dynamic>{
+      'id': instance.id,
+      'from': instance.from,
+      'to': instance.to,
+      'intervalSeconds': instance.intervalSeconds,
+      'runtimeType': instance.$type,
+    };
+
 _$StopAudioStepImpl _$$StopAudioStepImplFromJson(Map<String, dynamic> json) =>
     _$StopAudioStepImpl(
       id: json['id'] as String,

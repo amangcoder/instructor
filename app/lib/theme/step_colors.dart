@@ -10,6 +10,7 @@ import 'package:instructor/models/enums.dart';
 /// |------------|--------|------------------------------------------------|
 /// | wait       | Blue   | Calm, passive — nothing is happening yet       |
 /// | say        | Green  | Positive action — voice plays                  |
+/// | count      | Teal   | Rhythmic counting — active timed hold          |
 /// | notify     | Orange | Attention-seeking but non-urgent               |
 /// | play       | Purple | Creative / ambient audio mood                  |
 /// | repeat     | Red    | Loop / warning that something will repeat      |
@@ -23,6 +24,7 @@ abstract final class StepColors {
   static Color colorForType(StepType type) => switch (type) {
         StepType.wait => _wait,
         StepType.say => _say,
+        StepType.count => _count,
         StepType.notify => _notify,
         StepType.play => _play,
         StepType.repeat => _repeat,
@@ -51,6 +53,7 @@ abstract final class StepColors {
 
   static const Color _wait = Color(0xFF1565C0); // Deep blue (calm)
   static const Color _say = Color(0xFF2E7D32); // Deep green (positive voice)
+  static const Color _count = Color(0xFF00838F); // Teal (rhythmic counting)
   static const Color _notify = Color(0xFFE65100); // Deep orange (attention)
   static const Color _play = Color(0xFF6A1B9A); // Deep purple (ambient)
   static const Color _repeat = Color(0xFFC62828); // Deep red (loop/warning)
@@ -59,6 +62,7 @@ abstract final class StepColors {
   static IconData _iconDataForType(StepType type) => switch (type) {
         StepType.wait => Icons.timer_outlined,
         StepType.say => Icons.record_voice_over_outlined,
+        StepType.count => Icons.tag,
         StepType.notify => Icons.notifications_outlined,
         StepType.play => Icons.music_note_outlined,
         StepType.repeat => Icons.repeat,

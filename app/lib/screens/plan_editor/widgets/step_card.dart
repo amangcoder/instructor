@@ -98,6 +98,7 @@ class StepCard extends StatelessWidget {
         StepType.notify => 'Notify',
         StepType.play => 'Play',
         StepType.wait => 'Wait',
+        StepType.count => 'Count',
         StepType.repeat => 'Repeat',
         StepType.stopAudio => 'Stop Audio',
       };
@@ -223,6 +224,7 @@ class StepCard extends StatelessWidget {
         NotifyStep n => NotifyStepEditor(step: n, onUpdate: onUpdate),
         PlayStep p => PlayStepEditor(step: p, onUpdate: onUpdate),
         WaitStep w => WaitStepEditor(step: w, onUpdate: onUpdate),
+        CountStep c => CountStepEditor(step: c, onUpdate: onUpdate),
         // RepeatStep editing is handled by RepeatBlockCard; nothing here.
         RepeatStep _ => const SizedBox.shrink(),
         StopAudioStep _ => const StopAudioEditorHint(),
@@ -235,6 +237,9 @@ class StepCard extends StatelessWidget {
         NotifyStep n => n.title.isEmpty ? '(untitled notification)' : n.title,
         PlayStep p => formatAudioAssetKey(p.audioAssetKey),
         WaitStep w => formatStepDuration(w.duration),
+        CountStep c => '${c.from <= c.to ? 'Count' : 'Countdown'} '
+            '${c.from} \u2192 ${c.to}'
+            '${c.intervalSeconds > 1 ? ' (every ${c.intervalSeconds}s)' : ''}',
         RepeatStep r =>
           '×${r.count} · ${r.children.length} step${r.children.length == 1 ? '' : 's'}',
         StopAudioStep _ => 'Stop all audio',
@@ -634,6 +639,108 @@ class WaitStepEditorState extends State<WaitStepEditor> {
                   textInputAction: TextInputAction.done,
                   onChanged: (_) => _push(),
                 ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// ── Count ────────────────────────────────────────────────────────────────
+
+class CountStepEditor extends StatefulWidget {
+  const CountStepEditor({required this.step, required this.onUpdate});
+
+  final CountStep step;
+  final void Function(PlanStep) onUpdate;
+
+  @override
+  State<CountStepEditor> createState() => _CountStepEditorState();
+}
+
+class _CountStepEditorState extends State<CountStepEditor> {
+  late final TextEditingController _fromCtrl;
+  late final TextEditingController _toCtrl;
+  late final TextEditingController _intervalCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _fromCtrl = TextEditingController(text: widget.step.from.toString());
+    _toCtrl = TextEditingController(text: widget.step.to.toString());
+    _intervalCtrl =
+        TextEditingController(text: widget.step.intervalSeconds.toString());
+  }
+
+  @override
+  void dispose() {
+    _fromCtrl.dispose();
+    _toCtrl.dispose();
+    _intervalCtrl.dispose();
+    super.dispose();
+  }
+
+  void _push() {
+    final from = (int.tryParse(_fromCtrl.text) ?? 1).clamp(1, 999);
+    final to = (int.tryParse(_toCtrl.text) ?? 10).clamp(1, 999);
+    final interval = (int.tryParse(_intervalCtrl.text) ?? 1).clamp(1, 20);
+    widget.onUpdate(
+      widget.step.copyWith(
+        from: from,
+        to: to,
+        intervalSeconds: interval,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _fromCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'From',
+                ),
+                textInputAction: TextInputAction.next,
+                onChanged: (_) => _push(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _toCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'To',
+                ),
+                textInputAction: TextInputAction.next,
+                onChanged: (_) => _push(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _intervalCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Interval',
+                  suffixText: 's',
+                ),
+                textInputAction: TextInputAction.done,
+                onChanged: (_) => _push(),
               ),
             ),
           ],

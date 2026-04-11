@@ -4,6 +4,7 @@ enum StepType {
   notify,
   play,
   wait,
+  count,
   repeat,
   stopAudio,
 }
@@ -34,6 +35,7 @@ enum PlanVoice {
 enum TtsLocale {
   enIN,  // English (India)
   enGB,  // English (UK)
+  hi,    // Hindi
 }
 
 /// App-wide execution status for the [PlanExecutionEngine].

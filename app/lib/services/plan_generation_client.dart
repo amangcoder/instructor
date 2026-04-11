@@ -47,7 +47,7 @@ abstract class PlanGenerationClient {
   /// Generates a structured [Plan] from a natural-language [prompt].
   ///
   /// Throws [PlanGenerationException] on API errors (4xx, 5xx, network failure).
-  Future<Plan> generatePlan(String prompt, {String? category});
+  Future<Plan> generatePlan(String prompt, {String? category, String? language});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,13 +62,16 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
   final ApiClient _apiClient;
 
   @override
-  Future<Plan> generatePlan(String prompt, {String? category}) async {
+  Future<Plan> generatePlan(String prompt, {String? category, String? language}) async {
     final baseUrl = await _apiClient.backendBaseUrl;
     final uri = Uri.parse('$baseUrl/api/plans/generate');
 
     final body = <String, dynamic>{'prompt': prompt};
     if (category != null && category.isNotEmpty) {
       body['category'] = category;
+    }
+    if (language != null && language.isNotEmpty) {
+      body['language'] = language;
     }
 
     // Breakpoint: inspect `uri` and `body` before the request fires.
@@ -186,6 +189,14 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
       'stopAudio' => {
           'runtimeType': 'stopAudio',
           'id': id,
+        },
+      'count' => {
+          'runtimeType': 'count',
+          'id': id,
+          'from': (step['from'] as num).toInt(),
+          'to': (step['to'] as num).toInt(),
+          if (step['intervalSeconds'] != null)
+            'intervalSeconds': (step['intervalSeconds'] as num).toInt(),
         },
       'repeat' => {
           'runtimeType': 'repeat',

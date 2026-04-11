@@ -33,6 +33,23 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
   final _promptController = TextEditingController();
   bool _isGenerating = false;
   String? _errorMessage;
+  String _selectedLanguage = 'Auto-detect';
+
+  static const _languages = [
+    'Auto-detect',
+    'English',
+    'Hindi',
+    'Spanish',
+    'French',
+    'German',
+    'Portuguese',
+    'Japanese',
+    'Korean',
+    'Chinese',
+    'Arabic',
+    'Russian',
+    'Italian',
+  ];
 
   @override
   void dispose() {
@@ -56,7 +73,10 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
 
     try {
       final client = ref.read(planGenerationClientProvider);
-      final plan = await client.generatePlan(prompt);
+      final lang = _selectedLanguage == 'Auto-detect'
+          ? null
+          : _selectedLanguage;
+      final plan = await client.generatePlan(prompt, language: lang);
 
       if (mounted) {
         context.push(
@@ -146,6 +166,38 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
                           alignLabelWithHint: true,
                         ),
                       ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── Language dropdown ────────────────────────────────
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedLanguage,
+                      decoration: InputDecoration(
+                        labelText: 'Language',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                      items: _languages
+                          .map(
+                            (lang) => DropdownMenuItem(
+                              value: lang,
+                              child: Text(lang),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _isGenerating
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() => _selectedLanguage = value);
+                              }
+                            },
                     ),
 
                     const SizedBox(height: 24),

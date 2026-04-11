@@ -7,7 +7,7 @@ part of 'provider_catalog_manager.dart';
 // **************************************************************************
 
 String _$providerCatalogManagerHash() =>
-    r'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+    r'df76c452324d8a54032f5c899b7075f6f9a1095e';
 
 /// Singleton [ProviderCatalogManager] provider.
 ///

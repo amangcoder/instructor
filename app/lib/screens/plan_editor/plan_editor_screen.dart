@@ -95,6 +95,8 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
               'notify:$title:$body',
             PlayStep(:final audioAssetKey) => 'play:$audioAssetKey',
             RepeatStep(:final count) => 'repeat:$count',
+            CountStep(:final from, :final to, :final intervalSeconds) =>
+              'count:$from:$to:$intervalSeconds',
             StopAudioStep() => 'stop',
           };
           return '${s.id}:$content';
@@ -554,7 +556,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
+        appBar: AppBar(
         title: AppBranding.gradientTitle(fontSize: 18),
         centerTitle: false,
         actions: [
@@ -659,6 +661,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
                 : _buildStepList(),
           ),
         ],
+      ),
       ),
     );
   }
@@ -889,6 +892,7 @@ PlanStep _deepCopy(PlanStep step) {
     NotifyStep n => n.copyWith(id: newId),
     PlayStep p => p.copyWith(id: newId),
     WaitStep w => w.copyWith(id: newId),
+    CountStep c => c.copyWith(id: newId),
     RepeatStep r => r.copyWith(
         id: newId,
         children: r.children.map(_deepCopy).toList(),

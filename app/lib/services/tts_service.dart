@@ -320,8 +320,9 @@ class TTSServiceImpl implements TTSService {
     debugPrint('TTSService.renderTTS: ENTER voice=$voiceId, text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}"');
     final provider = await _readTtsProvider();
     debugPrint('TTSService.renderTTS: provider=$provider');
-    final locale = await _currentLocale();
-    debugPrint('TTSService.renderTTS: locale=$locale');
+    final storedLocale = await _currentLocale();
+    final locale = _effectiveLocale(text, storedLocale);
+    debugPrint('TTSService.renderTTS: locale=$locale (stored=$storedLocale)');
     final speechRate = await _readSpeechRate();
     debugPrint('TTSService.renderTTS: speechRate=$speechRate');
     final hash = fullParamCacheKey(
@@ -382,13 +383,14 @@ class TTSServiceImpl implements TTSService {
     final allSaySteps = _collectSaySteps(plan.steps, plan.defaultVoice);
 
     final provider = await _readTtsProvider();
-    final locale = await _currentLocale();
+    final storedLocale = await _currentLocale();
     final speechRate = await _readSpeechRate();
 
     // Deduplicate by cache key to skip redundant API calls within one Plan.
     final seen = <String>{};
     final uniqueSteps = <({String text, String voiceId})>[];
     for (final step in allSaySteps) {
+      final locale = _effectiveLocale(step.text, storedLocale);
       final key = fullParamCacheKey(
         provider: provider,
         voice: step.voiceId,
@@ -407,6 +409,7 @@ class TTSServiceImpl implements TTSService {
     // report an accurate total to the caller before processing begins.
     final uncachedSteps = <({String text, String voiceId})>[];
     for (final step in uniqueSteps) {
+      final locale = _effectiveLocale(step.text, storedLocale);
       final hash = fullParamCacheKey(
         provider: provider,
         voice: step.voiceId,
@@ -431,6 +434,7 @@ class TTSServiceImpl implements TTSService {
       final chunk = uncachedSteps.skip(i).take(kTtsMaxConcurrent).toList();
       await Future.wait(
         chunk.map((step) async {
+          final locale = _effectiveLocale(step.text, storedLocale);
           await _preRenderStep(step, plan.id, provider, locale.name, speechRate.toString());
           // Increment and report after every individual step (success or
           // failure — _preRenderStep never throws).
@@ -706,7 +710,8 @@ class TTSServiceImpl implements TTSService {
         .getSingleOrNull();
     final apiKey = apiKeyRow?.value ?? '';
 
-    final locale = await _currentLocale();
+    final storedLocale = await _currentLocale();
+    final locale = _effectiveLocale(text, storedLocale);
 
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -815,7 +820,20 @@ class TTSServiceImpl implements TTSService {
     // 'en-GB'/'enGB' and 'en-IN'/'enIN' are matched correctly.
     final normalised = raw.replaceAll('-', '').toLowerCase();
     if (normalised == 'engb') return TtsLocale.enGB;
+    if (normalised == 'hi') return TtsLocale.hi;
     return TtsLocale.enIN;
+  }
+
+  /// Devanagari Unicode block: U+0900–U+097F.
+  static final _devanagariRe = RegExp(r'[\u0900-\u097F]');
+
+  /// Returns [TtsLocale.hi] when [text] contains Devanagari script,
+  /// regardless of the user's stored locale setting. This prevents
+  /// Hindi text from being sent to Kokoro with an English voice/language
+  /// which crashes the ONNX runtime.
+  TtsLocale _effectiveLocale(String text, TtsLocale stored) {
+    if (_devanagariRe.hasMatch(text)) return TtsLocale.hi;
+    return stored;
   }
 
   /// Queries [TtsCacheTable] for a row matching [hash] and verifies the file
@@ -882,6 +900,15 @@ class TTSServiceImpl implements TTSService {
         case RepeatStep(:final children):
           // Recurse — RepeatStep can be nested at any depth.
           result.addAll(_collectSaySteps(children, defaultVoice));
+        case CountStep(:final from, :final to):
+          // Pre-render each number in the count range using the plan voice.
+          final direction = from <= to ? 1 : -1;
+          var n = from;
+          while (true) {
+            result.add((text: n.toString(), voiceId: defaultVoice));
+            if (n == to) break;
+            n += direction;
+          }
         case NotifyStep() || PlayStep() || WaitStep() || StopAudioStep():
           // These step types produce no TTS audio.
           break;

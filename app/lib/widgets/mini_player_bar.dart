@@ -261,6 +261,8 @@ class _MiniPlayerContent extends ConsumerWidget {
         return 'Playing audio…';
       case StepType.notify:
         return 'Notification…';
+      case StepType.count:
+        return 'Counting…';
       case StepType.stopAudio:
         return 'Stopping audio…';
       default:

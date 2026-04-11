@@ -745,6 +745,13 @@ class PlanExecutionEngineImpl
         await _executeStopAudioStep();
       case WaitStep(:final duration):
         await _executeWaitStep(duration);
+      case CountStep(:final from, :final to, :final intervalSeconds):
+        await _executeCountStep(
+          from: from,
+          to: to,
+          intervalSeconds: intervalSeconds,
+          voiceId: _currentPlan!.defaultVoice,
+        );
       case RepeatStep():
         // RepeatStep is expanded during _flattenPlan — should never be reached.
         debugPrint(
@@ -1153,6 +1160,162 @@ class PlanExecutionEngineImpl
     }
   }
 
+  // ── Count step ─────────────────────────────────────────────────────────
+
+  /// Cache of TTS-rendered number audio paths for the current session.
+  /// Keyed by "$voiceId:$number" so different voices get separate cache entries.
+  final Map<String, String> _numberAudioPaths = {};
+
+  /// Executes a [CountStep] — counts aloud from [from] to [to] with
+  /// [intervalSeconds] seconds between each number.
+  ///
+  /// Uses backend TTS (same voice as SayStep) with fallback to platform TTS.
+  /// Reuses [_waitStepElapsedMs] / [_waitStepStartTime] for crash recovery
+  /// and pause/resume, following the same pattern as [_executeWaitStep].
+  Future<void> _executeCountStep({
+    required int from,
+    required int to,
+    required int intervalSeconds,
+    required String voiceId,
+  }) async {
+    if (_cancelled) return;
+
+    final intervalMs = intervalSeconds * 1000;
+    debugPrint(
+      'PlanExecutionEngine: [COUNT] starting — from=$from, to=$to, '
+      'interval=${intervalSeconds}s, voice=$voiceId',
+    );
+
+    // Start silence keep-alive so the OS doesn't suspend the app.
+    try {
+      await _audioEngine.startSilenceKeepAlive();
+    } catch (e) {
+      debugPrint('PlanExecutionEngine: startSilenceKeepAlive error: $e');
+    }
+
+    final direction = from <= to ? 1 : -1;
+    final totalNumbers = (to - from).abs() + 1;
+
+    // Resume support: skip numbers already counted (from _waitStepElapsedMs).
+    final resumeCount = (_waitStepElapsedMs / intervalMs).floor();
+    var numbersSpoken = resumeCount.clamp(0, totalNumbers);
+    var currentNumber = from + (direction * numbersSpoken);
+
+    _waitCompleter = Completer<void>();
+    _waitStepStartTime = DateTime.now();
+    _lastMidWaitPersistTime = _waitStepStartTime;
+
+    while (numbersSpoken < totalNumbers && !_cancelled) {
+      // Speak the current number using backend TTS (same as SayStep),
+      // falling back to platform TTS, then speakDirect.
+      try {
+        final filePath =
+            await _getNumberAudioPath(currentNumber, voiceId);
+        if (_cancelled) break;
+        await _audioEngine.playVoice(filePath);
+      } catch (e) {
+        if (_cancelled) break;
+        debugPrint('PlanExecutionEngine: CountStep voice error: $e');
+        // Fallback: speak directly through the device speaker.
+        try {
+          await _ttsService.speakDirect(currentNumber.toString());
+        } catch (_) {}
+      }
+
+      numbersSpoken++;
+      currentNumber += direction;
+
+      if (numbersSpoken >= totalNumbers || _cancelled) break;
+
+      // Wait for the remainder of the interval.
+      final effectiveIntervalMs = _speedMultiplier > 1.0
+          ? (intervalMs / _speedMultiplier).round()
+          : intervalMs;
+      final elapsed =
+          DateTime.now().difference(_waitStepStartTime!).inMilliseconds;
+      final expectedElapsed = numbersSpoken * effectiveIntervalMs;
+      final delayMs =
+          (expectedElapsed - elapsed).clamp(0, effectiveIntervalMs);
+
+      if (delayMs > 0 && !_cancelled) {
+        _waitDeadline =
+            DateTime.now().add(Duration(milliseconds: delayMs));
+        final delayCompleter = Completer<void>();
+        _waitTimer = Timer(Duration(milliseconds: delayMs), () {
+          if (!delayCompleter.isCompleted) delayCompleter.complete();
+        });
+        try {
+          await Future.any([
+            delayCompleter.future,
+            if (_stepCancelCompleter != null) _stepCancelCompleter!.future,
+          ]);
+        } finally {
+          _waitTimer?.cancel();
+          _waitTimer = null;
+        }
+        if (_cancelled) break;
+      }
+
+      // Update elapsed time for crash recovery and emit state.
+      _waitStepElapsedMs = numbersSpoken * intervalMs;
+      _emitState();
+
+      // Periodic persistence (same pattern as WaitStep).
+      if (_lastMidWaitPersistTime != null &&
+          DateTime.now().difference(_lastMidWaitPersistTime!) >=
+              _waitStepPersistInterval) {
+        _lastMidWaitPersistTime = DateTime.now();
+        unawaited(_persistState());
+      }
+    }
+
+    // Cleanup (same pattern as _executeWaitStep).
+    _waitCompleter = null;
+    _waitDeadline = null;
+    _waitTimer?.cancel();
+    _waitTimer = null;
+
+    if (!_cancelled) {
+      _waitStepElapsedMs = 0;
+      _waitStepStartTime = null;
+    }
+    _lastMidWaitPersistTime = null;
+
+    try {
+      await _audioEngine.stopSilenceKeepAlive();
+    } catch (e) {
+      debugPrint('PlanExecutionEngine: stopSilenceKeepAlive error: $e');
+    }
+  }
+
+  /// Returns a cached file path for the TTS-rendered [number].
+  ///
+  /// Tries backend TTS first (same voice as the plan's SayStep), falling
+  /// back to platform TTS on network/API errors.
+  Future<String> _getNumberAudioPath(int number, String voiceId) async {
+    final cacheKey = '$voiceId:$number';
+    final cached = _numberAudioPaths[cacheKey];
+    if (cached != null) return cached;
+
+    try {
+      final path = await _ttsService.renderTTS(
+        text: number.toString(),
+        voiceId: voiceId,
+      );
+      _numberAudioPaths[cacheKey] = path;
+      return path;
+    } catch (e) {
+      debugPrint(
+        'PlanExecutionEngine: backend TTS for number $number failed: $e',
+      );
+      // Fallback to platform TTS.
+      final path =
+          await _ttsService.renderWithPlatformTTS(number.toString());
+      _numberAudioPaths[cacheKey] = path;
+      return path;
+    }
+  }
+
   // ── Completion ────────────────────────────────────────────────────────────
 
   Future<void> _complete() async {
@@ -1215,6 +1378,9 @@ class PlanExecutionEngineImpl
         NotifyStep(:final title, :final body) => '$title: $body',
         PlayStep(:final audioAssetKey) => 'Playing: $audioAssetKey',
         WaitStep(:final duration) => 'Wait: ${duration.inSeconds}s',
+        CountStep(:final from, :final to, :final intervalSeconds) =>
+          '${from <= to ? 'Count' : 'Countdown'}: $from \u2192 $to'
+          '${intervalSeconds > 1 ? ' (every ${intervalSeconds}s)' : ''}',
         StopAudioStep() => 'Stop audio',
         RepeatStep(:final count) => 'Repeat x$count',
       };
@@ -1263,13 +1429,13 @@ class PlanExecutionEngineImpl
 
     final step = _flatSteps[_currentStepIndex].step;
 
-    if (step is WaitStep) {
+    if (step is WaitStep || step is CountStep) {
+      final totalMs = step.estimatedStepDuration.inMilliseconds;
       var elapsed = _waitStepElapsedMs;
       if (_waitStepStartTime != null) {
         elapsed += DateTime.now().difference(_waitStepStartTime!).inMilliseconds;
       }
-      final remainingMs =
-          (step.duration.inMilliseconds - elapsed).clamp(0, step.duration.inMilliseconds);
+      final remainingMs = (totalMs - elapsed).clamp(0, totalMs);
       return Duration(milliseconds: remainingMs);
     }
 
@@ -1278,14 +1444,10 @@ class PlanExecutionEngineImpl
 
   /// Returns the full duration of [step] for use as [ExecutionState.currentStepDuration].
   ///
-  /// For [WaitStep] this is the total wait duration (not remaining time) so
-  /// that [StepCountdownTimer] can compute a stable arc from
-  /// `timeRemaining / currentStepDuration`.
-  /// For all other leaf step types the value is [PlanStep.estimatedStepDuration].
-  Duration _computeStepDuration(PlanStep step) {
-    if (step is WaitStep) return step.duration;
-    return step.estimatedStepDuration;
-  }
+  /// For timed steps ([WaitStep], [CountStep]) this is the total duration (not
+  /// remaining time) so that [StepCountdownTimer] can compute a stable arc
+  /// from `timeRemaining / currentStepDuration`.
+  Duration _computeStepDuration(PlanStep step) => step.estimatedStepDuration;
 
   /// Writes the current execution state to the [ExecutionStateTable].
   ///

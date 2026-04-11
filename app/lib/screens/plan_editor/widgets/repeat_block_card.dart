@@ -464,6 +464,7 @@ class _NestedStepCard extends StatelessWidget {
         NotifyStep n => NotifyStepEditor(step: n, onUpdate: onUpdate),
         PlayStep p => PlayStepEditor(step: p, onUpdate: onUpdate),
         WaitStep w => WaitStepEditor(step: w, onUpdate: onUpdate),
+        CountStep c => CountStepEditor(step: c, onUpdate: onUpdate),
         // Nested RepeatStep: show a simple read-only hint — deep nesting UI
         // is not supported in the current editor.
         RepeatStep _ => const _NestedRepeatHint(),
@@ -475,6 +476,9 @@ class _NestedStepCard extends StatelessWidget {
         NotifyStep n => n.title.isEmpty ? '(untitled)' : n.title,
         PlayStep p => formatAudioAssetKey(p.audioAssetKey),
         WaitStep w => formatStepDuration(w.duration),
+        CountStep c => '${c.from <= c.to ? 'Count' : 'Countdown'} '
+            '${c.from} \u2192 ${c.to}'
+            '${c.intervalSeconds > 1 ? ' (every ${c.intervalSeconds}s)' : ''}',
         RepeatStep r => '×${r.count} · ${r.children.length} steps',
         StopAudioStep _ => 'Stop all audio',
       };
@@ -517,6 +521,8 @@ PlanStep defaultStepForType(StepType type, String id) => switch (type) {
         PlanStep.wait(id: id, duration: const Duration(seconds: 30)),
       StepType.repeat =>
         PlanStep.repeat(id: id, count: 3, children: const []),
+      StepType.count =>
+        PlanStep.count(id: id, from: 1, to: 10),
       StepType.stopAudio => PlanStep.stopAudio(id: id),
     };
 
@@ -529,6 +535,7 @@ PlanStep _copyWithNewId(PlanStep step) {
     NotifyStep n => n.copyWith(id: newId),
     PlayStep p => p.copyWith(id: newId),
     WaitStep w => w.copyWith(id: newId),
+    CountStep c => c.copyWith(id: newId),
     RepeatStep r => r.copyWith(
         id: newId,
         children: r.children.map(_copyWithNewId).toList(),

@@ -35,17 +35,11 @@ class OtpInputFieldState extends State<OtpInputField> {
   late final List<TextEditingController> _controllers;
   late final List<FocusNode> _focusNodes;
 
-  /// Dedicated FocusNodes for the KeyboardListener wrappers.
-  /// Kept separate from [_focusNodes] (used by TextFields) so they can be
-  /// properly disposed and are not re-created on every build() call.
-  late final List<FocusNode> _keyboardListenerFocusNodes;
-
   @override
   void initState() {
     super.initState();
     _controllers = List.generate(_length, (_) => TextEditingController());
     _focusNodes = List.generate(_length, (_) => FocusNode());
-    _keyboardListenerFocusNodes = List.generate(_length, (_) => FocusNode());
   }
 
   @override
@@ -54,9 +48,6 @@ class OtpInputFieldState extends State<OtpInputField> {
       c.dispose();
     }
     for (final f in _focusNodes) {
-      f.dispose();
-    }
-    for (final f in _keyboardListenerFocusNodes) {
       f.dispose();
     }
     super.dispose();
@@ -74,23 +65,15 @@ class OtpInputFieldState extends State<OtpInputField> {
 
     if (value.isNotEmpty && index < _length - 1) {
       _focusNodes[index + 1].requestFocus();
+    } else if (value.isEmpty && index > 0) {
+      // Backspace deleted the digit — move focus back.
+      _focusNodes[index - 1].requestFocus();
     }
 
     widget.onChanged?.call(_currentValue);
 
     if (_currentValue.length == _length) {
       widget.onCompleted(_currentValue);
-    }
-  }
-
-  void _onKeyEvent(int index, KeyEvent event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.backspace &&
-        _controllers[index].text.isEmpty &&
-        index > 0) {
-      // Move focus back on backspace in an empty field.
-      _focusNodes[index - 1].requestFocus();
-      _controllers[index - 1].clear();
     }
   }
 
@@ -119,8 +102,7 @@ class OtpInputFieldState extends State<OtpInputField> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Semantics(
       label: 'Enter 6-digit OTP',
@@ -130,44 +112,47 @@ class OtpInputFieldState extends State<OtpInputField> {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: SizedBox(
-              width: 44,
-              child: KeyboardListener(
-                focusNode: _keyboardListenerFocusNodes[index],
-                onKeyEvent: (e) => _onKeyEvent(index, e),
-                child: Semantics(
-                  label: 'Digit ${index + 1} of 6',
-                  excludeSemantics: false,
-                  child: TextField(
-                  controller: _controllers[index],
-                  focusNode: _focusNodes[index],
-                  enabled: widget.enabled,
-                  keyboardType: TextInputType.number,
-                  textAlign: TextAlign.center,
-                  maxLength: 1,
-                  autofocus: index == 0,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(
-                    counterText: '',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(
-                        color: colorScheme.primary,
-                        width: 2,
-                      ),
-                    ),
-                    filled: true,
-                    fillColor: colorScheme.surfaceContainerHighest,
+              width: 48,
+              height: 56,
+              child: TextField(
+                controller: _controllers[index],
+                focusNode: _focusNodes[index],
+                enabled: widget.enabled,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                maxLength: 1,
+                autofocus: index == 0,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: InputDecoration(
+                  counterText: '',
+                  contentPadding: EdgeInsets.zero,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: colorScheme.outline),
                   ),
-                  style: theme.textTheme.headlineSmall,
-                  onChanged: (v) => _onChanged(index, v),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: colorScheme.outline),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: colorScheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: colorScheme.surfaceContainerHighest,
                 ),
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
+                ),
+                onChanged: (v) => _onChanged(index, v),
               ),
             ),
-          ),
-        );
+          );
         }),
       ),
     );

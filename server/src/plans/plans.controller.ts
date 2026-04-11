@@ -25,6 +25,6 @@ export class PlansController {
     this.logger.log(
       `POST /plans/generate — userId=${user.sub}, prompt="${dto.prompt.slice(0, 80)}…"`,
     );
-    return this.plansService.generatePlan(dto.prompt, user.sub);
+    return this.plansService.generatePlan(dto.prompt, user.sub, dto.language);
   }
 }

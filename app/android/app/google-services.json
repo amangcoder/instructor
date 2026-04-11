@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "567367735033",
+    "project_id": "instructor-layersiq",
+    "storage_bucket": "instructor-layersiq.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:567367735033:android:62c42b479fe2b6636bb428",
+        "android_client_info": {
+          "package_name": "com.layersiq.instructor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBqWLimySx5JsrloJl0Df5NR85PpWtkvYU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

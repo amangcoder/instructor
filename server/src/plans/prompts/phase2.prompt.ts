@@ -30,11 +30,23 @@ Say: <text to speak aloud — write naturally, as if talking to the user>
 Say [voice_id]: <text with a different voice for this step only>
 Wait: <seconds — a whole number, e.g. 30, 60, 300>
 Notify: <short on-screen message the user sees, NOT spoken>
-Play: <sound — one of: rain, forest, ocean, white_noise, tibetan_bowls, campfire, crickets, babbling_brook, waterfall, rainforest, thunderstorm, wind, bird_song, beach, frogs, bell, chime, gong>
+Play: <sound>
 StopAudio
+Count: <total>
+Count: <from> to <to>
+Count: <total> every <N>s
+Count: <from> to <to> every <N>s
 Repeat: <count>
   <indented steps to repeat — 2 spaces>
 EndRepeat
+
+Play sounds: rain, forest, ocean, white_noise, tibetan_bowls, campfire, crickets, babbling_brook, waterfall, rainforest, thunderstorm, wind, bird_song, beach, frogs, bell, chime, gong
+
+Count examples:
+  Count: 10         (counts 1,2,3…10 — one per second, takes 10s)
+  Count: 10 to 1    (countdown 10,9,8…1 — one per second, takes 10s)
+  Count: 10 every 3s (counts 1,2,3…10 — one every 3 seconds, takes 30s)
+  Count: 5 to 1 every 5s (countdown 5,4,3,2,1 — one every 5 seconds, takes 25s)
 
 == SOUND REFERENCE ==
 
@@ -79,19 +91,47 @@ SOUND SELECTION GUIDE:
 
 == WHICH STEP TO USE ==
 
-Tell the user something?        -> Say
-Timed pause / rest / hold?      -> Wait
-On-screen popup message?        -> Notify
-Background music / sound cue?   -> Play
-Stop background music?          -> StopAudio
-Same steps repeated N times?    -> Repeat ... EndRepeat
+Tell the user something?                 -> Say
+Active hold (plank, arm raise, wall sit) -> Count (with every 3s+ interval)
+Passive rest between exercises (silent)  -> Wait
+Count reps aloud                         -> Count (every 1s)
+Pacing breaths in a breathing exercise?  -> Count (with every Ns for tempo)
+On-screen popup message?                 -> Notify
+Background music / sound cue?            -> Play
+Stop background music?                   -> StopAudio
+Same steps repeated N times?             -> Repeat ... EndRepeat
+
+HOLD vs REST — WHEN TO COUNT:
+Any time the user is ACTIVELY doing something (holding a pose, raising an arm, sustaining
+a stretch, maintaining a plank), use Count so they hear progress and stay motivated.
+Use a SLOW interval (every 3s–5s) for holds — hearing "1 … 2 … 3 …" every few seconds
+feels encouraging, whereas every-1s counting feels rushed and stressful during a hold.
+Pick the interval based on difficulty: easy/short holds → every 3s, hard/long holds → every 5s.
+Example — 30-second plank:  Count: 10 every 3s   (counts 1–10 over 30 seconds)
+Example — 60-second wall sit: Count: 12 every 5s  (counts 1–12 over 60 seconds)
+
+Only use Wait (silent) for PASSIVE rest periods where the user is not doing anything
+(e.g. rest between sets, recovery between exercises).
+
+BREATHING EXERCISES (not meditation): Use Count to pace inhale/hold/exhale phases.
+Example — 4-7-8 breathing:
+  Say: Breathe in through your nose.
+  Count: 4 every 1s
+  Say: Hold your breath.
+  Count: 7 every 1s
+  Say: Exhale slowly through your mouth.
+  Count: 8 every 1s
+Do NOT use Count for meditation breathing — use Wait instead so the user breathes freely.
 
 == TIMING RULES (CRITICAL) ==
 
 You will be told the TARGET WAIT SECONDS for this phase.
-Your Wait steps MUST sum to approximately that number.
-A 5-minute hold = Wait: 300. A 10-minute rest = Wait: 600.
-Use large wait values — don't use many small 5-10 second waits unless the activity truly requires them.
+Your Wait and Count steps MUST sum to approximately that number.
+A 5-minute rest = Wait: 300. A 10-minute rest = Wait: 600.
+A 30-second hold = Count: 10 every 3s. A 60-second hold = Count: 12 every 5s.
+Count: 10 produces 10 seconds of voiced counting (1s interval). Count: 10 every 3s produces 30 seconds. Both count toward your wait-time total just like Wait.
+Do NOT follow a Count with a Wait for the same hold — the Count itself fills that time.
+Use large wait values for rests — don't use many small 5-10 second waits unless the activity truly requires them.
 
 == CONTENT RULES ==
 
@@ -100,10 +140,21 @@ Use large wait values — don't use many small 5-10 second waits unless the acti
 3. Say text must be specific and actionable — tell the user exactly what to do or feel.
 4. Address the user's condition/context directly in the Say text.
 5. Use Repeat/EndRepeat for repeated sequences. Indent inner steps with 2 spaces.
-6. Start ambient audio early if appropriate, stop it at the end of this phase.
+6. ALWAYS start ambient audio with a Play step near the beginning of the phase. Pick a sound that matches the activity using the SOUND SELECTION GUIDE. Use StopAudio at the end before a closing chime/gong.
 7. Use Notify for milestone messages mid-phase.
 8. End with a closing Say and optionally a chime or gong.
 9. Do NOT add comments, explanations, or blank lines between steps.
+10. TEACH-THEN-CUE: When a pose, exercise, or movement appears for the first time, the
+    Say step should explain HOW to do it (body alignment, hand placement, what to engage).
+    On subsequent repeats of the same movement, use only a short cue — just the name or a
+    brief reminder. Do NOT re-explain something the user has already been taught.
+    Example (yoga Sun Salutation repeated 3x):
+      First round (outside Repeat):
+        Say: Step your right foot back into a low lunge. Keep your left knee over your ankle, press your hips forward, and lift your chest.
+        Count: 5 every 3s
+      Inside Repeat: 2
+        Say: Right foot back, low lunge.
+        Count: 5 every 3s
 
 == EXAMPLE ==
 
@@ -113,20 +164,20 @@ Category: yoga
 Voice: af_bella
 ---
 Play: forest
-Say: Let's ease into movement. Begin standing, feet hip-width apart.
+Say: Let's ease into movement. Begin standing at the top of your mat, feet hip-width apart, arms relaxed by your sides.
 Wait: 10
-Say: Slowly raise your arms overhead on your inhale.
-Wait: 30
-Say: Lower your arms on your exhale. Repeat five more times at your own pace.
+Say: On your next inhale, slowly sweep your arms out and overhead, palms together. Reach through your fingertips and hold.
+Count: 10 every 3s
+Say: Exhale, release your arms back down. We'll repeat that five more times.
 Repeat: 5
   Say: Inhale, arms rise.
-  Wait: 4
-  Say: Exhale, arms fall.
-  Wait: 4
+  Count: 4 every 1s
+  Say: Exhale, arms down.
+  Count: 4 every 1s
 EndRepeat
 Notify: Half way through warm-up!
 Say: Now walk your hands down your legs into a gentle forward fold. Hold here.
-Wait: 60
+Count: 20 every 3s
 Say: Slowly roll back up, one vertebra at a time.
 Wait: 30
 StopAudio
@@ -169,9 +220,10 @@ export function buildPhase2PhasePrompt(
     ``,
     `LANGUAGE: Generate all human-readable content (Say text, Notify messages, Name, Description) in "${requirements.language}". DSL keywords (Say:, Wait:, Play:, etc.) must stay in English.`,
     ``,
-    `TIMING REQUIREMENT: Your Wait steps must sum to approximately ${targetWaitSeconds} seconds.`,
-    `That is ${Math.round(targetWaitSeconds / 60)} minutes of wait time for this ${phase.durationMinutes}-minute phase.`,
-    `Use large Wait values (e.g. Wait: 300 for a 5-minute hold, Wait: 120 for a 2-minute rest).`,
+    `TIMING REQUIREMENT: Your Wait and Count steps must sum to approximately ${targetWaitSeconds} seconds.`,
+    `That is ${Math.round(targetWaitSeconds / 60)} minutes of wait/count time for this ${phase.durationMinutes}-minute phase.`,
+    `Use large Wait values for passive rests (e.g. Wait: 120 for a 2-minute rest between sets).`,
+    `Use Count for active holds (poses, stretches, planks) with a slow interval (every 3s–5s). E.g. a 30s hold = Count: 10 every 3s.`,
   );
 
   return lines.join('\n');

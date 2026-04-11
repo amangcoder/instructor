@@ -2,8 +2,8 @@
  * Deterministic DSL-to-JSON parser for plan generation.
  *
  * Converts a simple line-by-line DSL produced by Gemini into the structured
- * plan JSON the app expects. Handles all 6 step types:
- *   say, wait, notify, play, stopAudio, repeat
+ * plan JSON the app expects. Handles all 7 step types:
+ *   say, wait, notify, play, stopAudio, repeat, count
  *
  * Includes auto-repair for common LLM output issues (typos, missing colons,
  * wrong case, close-enough enum values) so we avoid wasting a Gemini retry
@@ -60,6 +60,7 @@ const TYPE_ALIASES: Record<string, string> = {
   stopaudio: 'stopAudio', stop_audio: 'stopAudio', stopsound: 'stopAudio',
   repeat: 'repeat', repat: 'repeat', loop: 'repeat',
   endrepeat: 'endRepeat', end_repeat: 'endRepeat', endloop: 'endRepeat',
+  count: 'count', cont: 'count', coutn: 'count', countdown: 'count', countup: 'count',
 };
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -83,6 +84,9 @@ export function parseDslPlan(raw: string): DslParseResult {
   if (text.startsWith('```')) {
     text = text.replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
   }
+
+  // Strip == SECTION == markers that Gemini echoes from the prompt
+  text = text.replace(/^==\s.*==\s*$/gm, '').trim();
 
   // Split header from body at the --- separator
   const sepIdx = text.indexOf('\n---');
@@ -355,6 +359,54 @@ function buildStep(
 
     case 'stopAudio':
       return { type: 'stopAudio' };
+
+    case 'count': {
+      // Supports:
+      //   "Count: 10"               → 1→10, 1s interval
+      //   "Count: 10 to 1"          → 10→1, 1s interval
+      //   "Count: 5 to 15"          → 5→15, 1s interval
+      //   "Count: 10 every 3s"      → 1→10, 3s interval
+      //   "Count: 10 to 1 every 5s" → 10→1, 5s interval
+
+      // Strip optional "every Ns" suffix first.
+      let interval = 1;
+      let remainder = value;
+      const everyMatch = value.match(/^(.+?)\s+every\s+(\d+)\s*s?$/i);
+      if (everyMatch) {
+        remainder = everyMatch[1].trim();
+        interval = parseInt(everyMatch[2], 10);
+        if (isNaN(interval) || interval < 1) interval = 1;
+        if (interval > 20) {
+          errors.push(`Line ${lineIdx + 1}: Count interval must not exceed 20s (got ${interval})`);
+          return null;
+        }
+      }
+
+      const toMatch = remainder.match(/^(\d+)\s+to\s+(\d+)$/i);
+      let from: number, to: number;
+      if (toMatch) {
+        from = parseInt(toMatch[1], 10);
+        to = parseInt(toMatch[2], 10);
+      } else {
+        const total = parseInt(remainder, 10);
+        if (isNaN(total) || total < 1) {
+          errors.push(`Line ${lineIdx + 1}: Invalid count value "${value}"`);
+          return null;
+        }
+        from = 1;
+        to = total;
+      }
+      if (from < 1 || to < 1) {
+        errors.push(`Line ${lineIdx + 1}: Count values must be positive`);
+        return null;
+      }
+      const span = Math.abs(from - to) + 1;
+      if (span > 100) {
+        errors.push(`Line ${lineIdx + 1}: Count span must not exceed 100 (got ${span})`);
+        return null;
+      }
+      return { type: 'count', from, to, intervalSeconds: interval };
+    }
 
     case 'repeat': {
       const count = parseInt(value, 10);

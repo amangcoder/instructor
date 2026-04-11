@@ -38,5 +38,50 @@ final executionStateProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef ExecutionStateRef = AutoDisposeStreamProviderRef<ExecutionState>;
+String _$hasActiveSessionHash() => r'5e1f78773c64c7c79b043a27f91d22d0a80c6ca7';
+
+/// True when a plan execution session is active (running or paused).
+///
+/// Used by [MiniPlayerBar] and [BottomNavShell] to show/hide the mini-player.
+///
+/// Copied from [hasActiveSession].
+@ProviderFor(hasActiveSession)
+final hasActiveSessionProvider = AutoDisposeProvider<bool>.internal(
+  hasActiveSession,
+  name: r'hasActiveSessionProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$hasActiveSessionHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef HasActiveSessionRef = AutoDisposeProviderRef<bool>;
+String _$stepProgressFractionHash() =>
+    r'a8d16b469d8ad5d16ba0793fd6b733e267ac75cf';
+
+/// Fraction (0.0–1.0) of the current step that has elapsed.
+///
+/// Computed from [ExecutionState.currentStepDuration] and
+/// [ExecutionState.timeRemaining].  Returns 0.0 when no session is active or
+/// the step duration is zero.
+///
+/// Copied from [stepProgressFraction].
+@ProviderFor(stepProgressFraction)
+final stepProgressFractionProvider = AutoDisposeProvider<double>.internal(
+  stepProgressFraction,
+  name: r'stepProgressFractionProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$stepProgressFractionHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef StepProgressFractionRef = AutoDisposeProviderRef<double>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

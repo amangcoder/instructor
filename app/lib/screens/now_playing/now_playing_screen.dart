@@ -575,6 +575,7 @@ String _stepTypeLabel(StepType type) => switch (type) {
       StepType.notify => 'Notify',
       StepType.play => 'Play',
       StepType.wait => 'Wait',
+      StepType.count => 'Count',
       StepType.repeat => 'Repeat',
       StepType.stopAudio => 'Stop Audio',
     };

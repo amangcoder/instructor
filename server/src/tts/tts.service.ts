@@ -80,7 +80,7 @@ const KOKORO_LOCALE_MAP: Record<string, string> = {
   enIN: 'en-us',
   enAU: 'en-gb',
   enCA: 'en-us',
-  hi: 'h',
+  hi: 'hi',
 };
 
 /**
@@ -381,15 +381,21 @@ export class TtsService {
         );
         audio = await this.synthesizeGemini(text, geminiVoice, locale);
       } else {
+        // Detect Devanagari script to force Hindi voice/language even when
+        // the client sends an incorrect locale — prevents Kokoro from crashing
+        // when it receives Hindi text with an English voice.
+        const isDevanagari = /[\u0900-\u097F]/.test(text);
+        const effectiveLocale = isDevanagari ? 'hi' : locale;
+
         // Remap English voice to Hindi voice when Hindi locale is requested.
-        const kokoroVoice = (locale === 'hi' && HINDI_VOICE_FALLBACK[rawVoice])
+        const kokoroVoice = (effectiveLocale === 'hi' && HINDI_VOICE_FALLBACK[rawVoice])
           ? HINDI_VOICE_FALLBACK[rawVoice]
           : rawVoice;
         if (kokoroVoice !== rawVoice) {
           this.logger.log(`Hindi voice remap: ${rawVoice} → ${kokoroVoice}`);
         }
         try {
-          audio = await this.synthesizeKokoro(text, kokoroVoice, locale ?? 'en-us');
+          audio = await this.synthesizeKokoro(text, kokoroVoice, effectiveLocale ?? 'en-us');
         } catch (err: unknown) {
           const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'charon';
           this.logger.warn(

@@ -56,6 +56,16 @@ sealed class PlanStep with _$PlanStep {
     required List<PlanStep> children,
   }) = RepeatStep;
 
+  /// A step that counts aloud from [from] to [to].
+  ///
+  /// [intervalSeconds] controls the pause between each number (1–20, default 1).
+  const factory PlanStep.count({
+    required String id,
+    required int from,
+    required int to,
+    @Default(1) int intervalSeconds,
+  }) = CountStep;
+
   /// A step that stops all ambient audio.
   const factory PlanStep.stopAudio({
     required String id,
@@ -71,6 +81,7 @@ sealed class PlanStep with _$PlanStep {
         NotifyStep() => StepType.notify,
         PlayStep() => StepType.play,
         WaitStep() => StepType.wait,
+        CountStep() => StepType.count,
         RepeatStep() => StepType.repeat,
         StopAudioStep() => StepType.stopAudio,
       };
@@ -82,6 +93,8 @@ sealed class PlanStep with _$PlanStep {
   Duration get estimatedStepDuration => switch (this) {
         SayStep(:final estimatedDuration) => estimatedDuration ?? Duration.zero,
         WaitStep(:final duration) => duration,
+        CountStep(:final from, :final to, :final intervalSeconds) =>
+          Duration(seconds: ((from - to).abs() + 1) * intervalSeconds),
         RepeatStep(:final count, :final children) =>
           children.fold(Duration.zero, (acc, s) => acc + s.estimatedStepDuration) *
               count,

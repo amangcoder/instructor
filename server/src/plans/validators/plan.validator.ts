@@ -2,7 +2,7 @@
  * Validates a generated Plan object from the LLM against the Flutter Plan model schema.
  */
 
-const VALID_STEP_TYPES = ['say', 'wait', 'play', 'notify', 'repeat', 'stopAudio'] as const;
+const VALID_STEP_TYPES = ['say', 'wait', 'play', 'notify', 'repeat', 'stopAudio', 'count'] as const;
 const VALID_CATEGORIES = ['fitness', 'meditation', 'study', 'routine', 'custom'] as const;
 // NOTE: Voice IDs are NOT validated here — any non-empty string is accepted.
 // Voices are validated downstream by the TTS provider at synthesis time.
@@ -97,6 +97,25 @@ export function validatePlan(raw: unknown): PlanValidationResult {
         break;
       case 'stopAudio':
         // No additional fields required
+        break;
+      case 'count':
+        if (typeof s.from !== 'number' || s.from < 1) {
+          errors.push(`steps[${i}] (count): from must be a positive number`);
+        }
+        if (typeof s.to !== 'number' || s.to < 1) {
+          errors.push(`steps[${i}] (count): to must be a positive number`);
+        }
+        if (typeof s.from === 'number' && typeof s.to === 'number') {
+          const span = Math.abs(s.from - s.to) + 1;
+          if (span > 100) {
+            errors.push(`steps[${i}] (count): span must not exceed 100 (got ${span})`);
+          }
+        }
+        if (s.intervalSeconds !== undefined) {
+          if (typeof s.intervalSeconds !== 'number' || s.intervalSeconds < 1 || s.intervalSeconds > 20) {
+            errors.push(`steps[${i}] (count): intervalSeconds must be 1–20`);
+          }
+        }
         break;
     }
   });
