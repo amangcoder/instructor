@@ -11,6 +11,7 @@ import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:instructor/theme/app_branding.dart';
+import 'package:instructor/widgets/active_session_dialog.dart';
 
 import 'widgets/category_filter.dart';
 import 'widgets/countdown_overlay.dart';
@@ -154,53 +155,149 @@ class _PlanList extends ConsumerWidget {
       return const _EmptyState();
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-      itemCount: plans.length,
-      itemBuilder: (context, index) {
-        final plan = plans[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: PlanCard(
-            plan: plan,
-            onTap: () => context.push('/editor/${plan.id}'),
-            onPlay: () => _onPlanTap(context, ref, plan),
-            onEdit: isAuthenticated
-                ? () => context.push('/editor/${plan.id}')
-                : null,
-            onDuplicate: isAuthenticated
-                ? () => _duplicatePlan(context, ref, plan)
-                : null,
-            onDelete: isAuthenticated
-                ? () => _confirmDelete(context, ref, plan)
-                : null,
+    final userPlans = plans.where((p) => p.isUserCreated).toList();
+    final starterPlans = plans.where((p) => !p.isUserCreated).toList();
+
+    // If all plans are the same type, fall through to a flat list with one
+    // section header. If both types are present, show two labelled sections.
+    Widget buildPlanCard(Plan plan) {
+      return Padding(
+        key: ValueKey(plan.id),
+        padding: const EdgeInsets.only(bottom: 8),
+        child: PlanCard(
+          plan: plan,
+          onTap: () => context.push('/editor/${plan.id}'),
+          onPlay: () => _onPlanTap(context, ref, plan),
+          onEdit: isAuthenticated
+              ? () => context.push('/editor/${plan.id}')
+              : null,
+          onDuplicate: isAuthenticated
+              ? () => _duplicatePlan(context, ref, plan)
+              : null,
+          onDelete: isAuthenticated
+              ? () => _confirmDelete(context, ref, plan)
+              : null,
+        ),
+      );
+    }
+
+    Widget buildSectionHeader(String title) {
+      final theme = Theme.of(context);
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+        child: Text(
+          title,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
           ),
-        );
-      },
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+      children: [
+        if (userPlans.isNotEmpty) ...[
+          buildSectionHeader('My Plans'),
+          ...userPlans.map(buildPlanCard),
+        ],
+        if (starterPlans.isNotEmpty) ...[
+          if (userPlans.isNotEmpty) const SizedBox(height: 8),
+          buildSectionHeader('Starter Plans'),
+          ...starterPlans.map(buildPlanCard),
+        ],
+      ],
     );
   }
 
-  // ── Tap → countdown → start ─────────────────────────────────────────────
+  // ── Tap → (guard) → (optional recover dialog) → countdown → start ────────
 
   Future<void> _onPlanTap(
     BuildContext context,
     WidgetRef ref,
     Plan plan,
   ) async {
-    // Show 3-2-1 countdown overlay; returns true only when it completes.
-    final shouldStart = await showCountdownOverlay(context);
-    if (shouldStart != true) return;
-    if (!context.mounted) return;
+    // Guard: if another plan is already running/paused, show confirmation
+    // dialog before proceeding. startPlanWithGuard calls engine.stop() when
+    // the user confirms, then runs the onStart callback.
+    await startPlanWithGuard(
+      context,
+      ref,
+      newPlan: plan,
+      onStart: () async {
+        final engine = ref.read(planExecutionEngineProvider);
 
-    // Mark plan as used and start execution.
-    final repo = ref.read(planRepositoryProvider);
-    final engine = ref.read(planExecutionEngineProvider);
+        // Check if this specific plan has a recoverable session in the DB.
+        // getRecoverableStepIndexForPlan is read-only and does NOT alter engine
+        // state.
+        final recoverableStepIndex =
+            await engine.getRecoverableStepIndexForPlan(plan.id);
 
-    await repo.updateLastUsed(plan.id);
-    await engine.startPlan(plan);
+        bool resumeSession = false;
 
-    if (!context.mounted) return;
-    context.go(AppRoutes.nowPlaying);
+        if (recoverableStepIndex != null) {
+          if (!context.mounted) return;
+
+          // Show "Continue where you left off?" dialog.
+          final choice = await showDialog<bool>(
+            context: context,
+            barrierDismissible: true,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Continue where you left off?'),
+              content: Text(
+                'You paused at step ${recoverableStepIndex + 1}. '
+                'Would you like to continue from there, or start over?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Start Over'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Continue'),
+                ),
+              ],
+            ),
+          );
+
+          // Dialog dismissed (back button / barrier tap) → abort.
+          if (choice == null) return;
+          resumeSession = choice;
+        }
+
+        if (!context.mounted) return;
+
+        // Show 3-2-1 countdown overlay; returns true only when it completes.
+        final shouldStart = await showCountdownOverlay(context);
+        if (shouldStart != true) return;
+        if (!context.mounted) return;
+
+        // Mark plan as used.
+        final repo = ref.read(planRepositoryProvider);
+        await repo.updateLastUsed(plan.id);
+
+        if (resumeSession) {
+          // resumeFromPersistedState loads the persisted session for this plan
+          // into the engine and calls resume() to restore ambient audio and
+          // restart the execution loop from the saved step index.
+          final resumed = await engine.resumeFromPersistedState(plan.id);
+          if (!resumed) {
+            // Session was cleared between the dialog and the countdown (race
+            // condition) — fall back to a fresh start.
+            await engine.startPlan(plan);
+          }
+        } else {
+          // Fresh start — startPlan resets all execution state.
+          await engine.startPlan(plan);
+        }
+
+        if (!context.mounted) return;
+        context.go(AppRoutes.nowPlaying);
+      },
+    );
   }
 
   // ── Duplicate ────────────────────────────────────────────────────────────
@@ -308,28 +405,24 @@ class _SearchBarState extends ConsumerState<_SearchBar> {
       _controller.value = _controller.value.copyWith(text: query);
     }
 
-    return Semantics(
-      label: 'Search plans',
-      textField: true,
-      child: TextField(
-        controller: _controller,
-        onChanged: (value) =>
-            ref.read(searchQueryProvider.notifier).state = value,
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          hintText: 'Search your routines...',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon: query.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  tooltip: 'Clear search',
-                  onPressed: () {
-                    _controller.clear();
-                    ref.read(searchQueryProvider.notifier).state = '';
-                  },
-                )
-              : null,
-        ),
+    return TextField(
+      controller: _controller,
+      onChanged: (value) =>
+          ref.read(searchQueryProvider.notifier).state = value,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        hintText: 'Search your routines...',
+        prefixIcon: const Icon(Icons.search),
+        suffixIcon: query.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear),
+                tooltip: 'Clear search',
+                onPressed: () {
+                  _controller.clear();
+                  ref.read(searchQueryProvider.notifier).state = '';
+                },
+              )
+            : null,
       ),
     );
   }
@@ -438,27 +531,32 @@ class _GradientFab extends StatelessWidget {
     return Semantics(
       button: true,
       label: 'New Plan',
-      child: GestureDetector(
-        onTap: onPressed,
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [colorScheme.primary, colorScheme.primaryContainer],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: colorScheme.primary.withValues(alpha: 0.4),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          splashColor: colorScheme.primary.withValues(alpha: 0.2),
+          child: Ink(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [colorScheme.primary, colorScheme.primaryContainer],
               ),
-            ],
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.primary.withValues(alpha: 0.4),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.add, color: Colors.white, size: 28),
           ),
-          child: const Icon(Icons.add, color: Colors.white, size: 28),
         ),
       ),
     );

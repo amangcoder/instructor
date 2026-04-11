@@ -153,9 +153,32 @@ export class TtsService {
   // ── Cache key (provider-inclusive) ───────────────────────────────────────
 
   /**
-   * Compute cache key including provider and speechRate.
-   * Keys use alphabetically sorted JSON to match the Flutter client's hash_utils.dart.
-   * Format: SHA256(JSON.stringify({ locale, provider, speechRate, text, voice }))
+   * Compute the full-parameter TTS cache key including provider and speechRate.
+   *
+   * ## Format
+   * `SHA-256(JSON.stringify({ locale, provider, speechRate, text, voice }))`
+   *
+   * Keys are serialised with **alphabetically ordered fields** (matching the order
+   * `JSON.stringify` uses when an object is constructed with keys in that order).
+   * This produces the same 64-character hex digest as the Flutter client's
+   * `hash_utils.dart` `fullParamCacheKey()` / `mediaCacheKey()` functions.
+   *
+   * ## Fields included (alphabetical order — MUST stay in sync with Flutter client)
+   * 1. `locale`     — locale identifier (e.g. `'en-US'`, `'enIN'`); empty string if omitted
+   * 2. `provider`   — TTS provider (e.g. `'kokoro'`, `'gemini'`)
+   * 3. `speechRate` — playback speed as a **string** (e.g. `'1.0'`, `'1.5'`)
+   * 4. `text`       — text to be synthesised
+   * 5. `voice`      — voice identifier (e.g. `'af_heart'`, `'aoede'`)
+   *
+   * ## Example JSON payload (before hashing)
+   * ```json
+   * {"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}
+   * ```
+   *
+   * ## ⚠️ SYNC WARNING
+   * Any change to the field set or key order MUST be mirrored in
+   * `app/lib/utils/hash_utils.dart` `fullParamCacheKey()` to avoid cross-platform
+   * cache mismatches. See TASK-018 for the cross-platform unit tests.
    */
   cacheKey(
     text: string,
@@ -164,7 +187,9 @@ export class TtsService {
     provider = 'gemini',
     speechRate = '1.0',
   ): string {
-    // Alphabetical key order ensures Flutter client produces identical keys.
+    // Object keys MUST be in alphabetical order so that JSON.stringify produces
+    // the same string as Dart's jsonEncode with an explicitly sorted map.
+    // Do NOT reorder or add fields without updating hash_utils.dart simultaneously.
     const payload = JSON.stringify({
       locale: locale ?? '',
       provider,
@@ -364,10 +389,17 @@ export class TtsService {
     // Non-English locales bypass Kokoro (English-only) and go directly to Gemini.
     const skipValidation = provider === 'kokoro' && !!locale && NON_ENGLISH_LOCALES.has(locale);
 
+    // For Gemini provider: if a non-Gemini voice is sent (e.g. a Kokoro voice from
+    // the client), remap it to the nearest Gemini equivalent via GEMINI_VOICE_MAP.
+    let effectiveVoice = rawVoice;
+    if (provider === 'gemini' && !GEMINI_VOICES.has(rawVoice) && GEMINI_VOICE_MAP[rawVoice]) {
+      effectiveVoice = GEMINI_VOICE_MAP[rawVoice];
+      this.logger.log(`Voice remap for Gemini: ${rawVoice} → ${effectiveVoice}`);
+    }
+
     // Validate voice is native to the requested provider.
-    // Voice remapping is handled by the frontend when the user switches providers.
     if (!skipValidation) {
-      this.validateVoice(rawVoice, provider);
+      this.validateVoice(effectiveVoice, provider);
     }
 
     // Route to appropriate provider, falling back to Gemini on failure.
@@ -415,7 +447,7 @@ export class TtsService {
         audio = await this.synthesizeGemini(text, geminiVoice, locale);
       }
     } else {
-      audio = await this.synthesizeGemini(text, rawVoice, locale);
+      audio = await this.synthesizeGemini(text, effectiveVoice, locale);
     }
 
     // Persist to L1 + L2.

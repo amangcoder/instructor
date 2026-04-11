@@ -86,10 +86,6 @@ export class UpstashRateLimitService {
    *
    * If the pipeline HTTP request fails, neither command executes (no orphaned keys).
    *
-   * TTL safety net: if the key exists without a TTL (e.g. from a crashed request that
-   * completed INCR but not PEXPIRE), we detect it via TTL = -1 and immediately set the
-   * expiry before the main pipeline runs.
-   *
    * @param namespace   Logical group, e.g. "otp", "plan"
    * @param identifier  Per-entity key, e.g. email address or userId
    * @param limit       Max requests allowed in the window

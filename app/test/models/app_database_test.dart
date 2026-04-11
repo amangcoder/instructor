@@ -1,9 +1,14 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:instructor/assets/static_voice_catalog.dart';
 import 'package:instructor/database/app_database.dart';
+import 'package:instructor/database/tables/provider_catalog_table.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/models/tts_provider_config.dart';
 
 void main() {
   late AppDatabase db;
@@ -23,10 +28,11 @@ void main() {
       await db.select(db.ttsCacheTable).get();
       await db.select(db.executionStateTable).get();
       await db.select(db.appSettingsTable).get();
+      await db.select(db.providerCatalogTable).get();
     });
 
-    test('schema version is 2', () {
-      expect(db.schemaVersion, equals(2));
+    test('schema version is 4', () {
+      expect(db.schemaVersion, equals(4));
     });
   });
 
@@ -359,6 +365,213 @@ void main() {
             ),
         throwsException,
       );
+    });
+  });
+
+  // ── ProviderCatalogTable (TASK-020) ────────────────────────────────────────
+
+  /// Minimal valid catalog JSON matching the /api/tts/providers response shape.
+  String _minimalCatalogJson() => jsonEncode({
+        'providers': [
+          {
+            'id': 'gemini',
+            'label': 'Gemini TTS',
+            'voices': [
+              {'id': 'aoede', 'label': 'Aoede'},
+              {'id': 'zephyr', 'label': 'Zephyr'},
+            ],
+            'locales': [
+              {'id': 'enUS', 'label': 'English (US)'},
+            ],
+            'voiceMap': <String, String>{},
+          },
+          {
+            'id': 'kokoro',
+            'label': 'Kokoro TTS',
+            'voices': [
+              {'id': 'af_heart', 'label': 'Heart (Female, US)'},
+              {'id': 'am_adam', 'label': 'Adam (Male, US)'},
+            ],
+            'locales': [
+              {'id': 'en-us', 'label': 'English (US)'},
+            ],
+            'voiceMap': <String, String>{'aoede': 'af_heart'},
+          },
+        ],
+      });
+
+  group('ProviderCatalogTable (TASK-020)', () {
+    test('table is accessible on a fresh database', () async {
+      final rows = await db.select(db.providerCatalogTable).get();
+      expect(rows, isEmpty, reason: 'catalog table should start empty');
+    });
+
+    test('inserts and retrieves a catalog row with id=1', () async {
+      final now = DateTime.now().toUtc();
+      final json = _minimalCatalogJson();
+
+      await db.into(db.providerCatalogTable).insert(
+            ProviderCatalogTableCompanion.insert(
+              id: const Value(1),
+              catalogJson: json,
+              fetchedAt: now,
+            ),
+          );
+
+      final rows = await db.select(db.providerCatalogTable).get();
+      expect(rows, hasLength(1));
+      expect(rows.first.id, equals(1));
+      expect(rows.first.catalogJson, equals(json));
+      expect(rows.first.fetchedAt.millisecondsSinceEpoch,
+          closeTo(now.millisecondsSinceEpoch, 1000));
+    });
+
+    test('INSERT OR REPLACE replaces the row when inserting id=1 again',
+        () async {
+      final now = DateTime.now().toUtc();
+      final json1 = _minimalCatalogJson();
+      final json2 = jsonEncode({'providers': []});
+
+      await db.into(db.providerCatalogTable).insertOnConflictUpdate(
+            ProviderCatalogTableCompanion.insert(
+              id: const Value(1),
+              catalogJson: json1,
+              fetchedAt: now,
+            ),
+          );
+      await db.into(db.providerCatalogTable).insertOnConflictUpdate(
+            ProviderCatalogTableCompanion.insert(
+              id: const Value(1),
+              catalogJson: json2,
+              fetchedAt: now,
+            ),
+          );
+
+      final rows = await db.select(db.providerCatalogTable).get();
+      expect(rows, hasLength(1),
+          reason: 'INSERT OR REPLACE should keep only one row');
+      expect(rows.first.catalogJson, equals(json2),
+          reason: 'second insert should replace the first');
+    });
+
+    test(
+        'JSON round-trip: save catalog → load from DB → verify structure matches',
+        () async {
+      final now = DateTime.now().toUtc();
+      final originalJson = _minimalCatalogJson();
+
+      // Persist to DB.
+      await db.into(db.providerCatalogTable).insertOnConflictUpdate(
+            ProviderCatalogTableCompanion.insert(
+              id: const Value(1),
+              catalogJson: originalJson,
+              fetchedAt: now,
+            ),
+          );
+
+      // Load from DB.
+      final row = await (db.select(db.providerCatalogTable)
+            ..where((t) => t.id.equals(1)))
+          .getSingleOrNull();
+      expect(row, isNotNull);
+
+      // Deserialise and verify structure.
+      final decoded =
+          TtsProvidersResponse.fromJson(jsonDecode(row!.catalogJson) as Map<String, dynamic>);
+      expect(decoded.providers, hasLength(2));
+      expect(decoded.providers.map((p) => p.id),
+          containsAll(['gemini', 'kokoro']));
+
+      final gemini = decoded.providers.firstWhere((p) => p.id == 'gemini');
+      expect(gemini.voices.map((v) => v.id), containsAll(['aoede', 'zephyr']));
+      expect(gemini.locales.map((l) => l.id), contains('enUS'));
+
+      final kokoro = decoded.providers.firstWhere((p) => p.id == 'kokoro');
+      expect(
+          kokoro.voices.map((v) => v.id), containsAll(['af_heart', 'am_adam']));
+      expect(kokoro.voiceMap['aoede'], equals('af_heart'));
+    });
+
+    test(
+        'static fallback catalog is non-empty and contains gemini and kokoro',
+        () {
+      // Verify the bundled kStaticVoiceCatalog used when the DB is empty and
+      // the network is unavailable.
+      expect(kStaticVoiceCatalog, isNotEmpty);
+      final ids = kStaticVoiceCatalog.map((p) => p.id).toList();
+      expect(ids, containsAll(['gemini', 'kokoro']));
+    });
+
+    test(
+        'static fallback catalog can be serialised and round-tripped through JSON',
+        () {
+      // Serialise the static catalog the same way ProviderCatalogManager does.
+      final encoded = jsonEncode({
+        'providers': kStaticVoiceCatalog
+            .map((p) => {
+                  'id': p.id,
+                  'label': p.label,
+                  'voices': p.voices
+                      .map((v) => {
+                            'id': v.id,
+                            'label': v.label,
+                            if (v.gender != null) 'gender': v.gender,
+                          })
+                      .toList(),
+                  'locales': p.locales
+                      .map((l) => {'id': l.id, 'label': l.label})
+                      .toList(),
+                  'voiceMap': p.voiceMap,
+                })
+            .toList(),
+      });
+
+      final decoded =
+          TtsProvidersResponse.fromJson(jsonDecode(encoded) as Map<String, dynamic>);
+
+      expect(decoded.providers.length, equals(kStaticVoiceCatalog.length));
+      for (var i = 0; i < kStaticVoiceCatalog.length; i++) {
+        expect(decoded.providers[i].id, equals(kStaticVoiceCatalog[i].id));
+        expect(decoded.providers[i].voices.length,
+            equals(kStaticVoiceCatalog[i].voices.length));
+      }
+    });
+
+    test('fetchedAt is stored and retrieved as UTC', () async {
+      final utcNow = DateTime.now().toUtc();
+
+      await db.into(db.providerCatalogTable).insertOnConflictUpdate(
+            ProviderCatalogTableCompanion.insert(
+              id: const Value(1),
+              catalogJson: '{"providers":[]}',
+              fetchedAt: utcNow,
+            ),
+          );
+
+      final row = await (db.select(db.providerCatalogTable)
+            ..where((t) => t.id.equals(1)))
+          .getSingleOrNull();
+
+      expect(row, isNotNull);
+      // Drift stores DateTime as UTC epoch ms — verify round-trip precision.
+      expect(row!.fetchedAt.millisecondsSinceEpoch,
+          closeTo(utcNow.millisecondsSinceEpoch, 1000));
+    });
+
+    test('default id value is 1 when omitted from insert', () async {
+      final now = DateTime.now().toUtc();
+
+      // Insert without specifying id — should default to 1.
+      await db.into(db.providerCatalogTable).insert(
+            ProviderCatalogTableCompanion.insert(
+              catalogJson: '{"providers":[]}',
+              fetchedAt: now,
+            ),
+          );
+
+      final rows = await db.select(db.providerCatalogTable).get();
+      expect(rows, hasLength(1));
+      expect(rows.first.id, equals(1));
     });
   });
 }

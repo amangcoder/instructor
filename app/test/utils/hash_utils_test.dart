@@ -252,6 +252,115 @@ void main() {
       expect(key1, isNot(equals(key2)));
     });
 
+    // ── TASK-018 cross-platform verification ─────────────────────────────────
+
+    test('TASK-018: fullParamCacheKey matches server cacheKey for Kokoro af_heart', () {
+      // Acceptance criteria test vector:
+      //   voice='af_heart', locale='en-US', provider='kokoro', speechRate='1.0', text='Hello'
+      //
+      // Expected JSON payload (alphabetically sorted keys, no whitespace):
+      //   {"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}
+      //
+      // Both fullParamCacheKey (Flutter) and cacheKey (NestJS server) MUST produce
+      // the same 64-character SHA-256 hex string from this payload.
+      //
+      // Fields included in the key (alphabetical order):
+      //   1. locale      — locale identifier (e.g. 'en-US', 'enIN')
+      //   2. provider    — TTS provider (e.g. 'kokoro', 'gemini')
+      //   3. speechRate  — playback speed as a string (e.g. '1.0', '1.5')
+      //   4. text        — text to be synthesised
+      //   5. voice       — voice identifier (e.g. 'af_heart', 'aoede')
+      const text = 'Hello';
+      const voice = 'af_heart';
+      const locale = 'en-US';
+      const provider = 'kokoro';
+      const speechRate = '1.0';
+
+      final clientKey = fullParamCacheKey(
+        text: text,
+        voice: voice,
+        locale: locale,
+        provider: provider,
+        speechRate: speechRate,
+      );
+
+      final serverKey = _serverSideCacheKey(
+        text: text,
+        voice: voice,
+        locale: locale,
+        provider: provider,
+        speechRate: speechRate,
+      );
+
+      expect(
+        clientKey,
+        equals(serverKey),
+        reason: 'fullParamCacheKey must produce identical output to the '
+            'server-side cacheKey() for Kokoro voice=af_heart, locale=en-US',
+      );
+      expect(clientKey.length, 64,
+          reason: 'SHA-256 hex digest must be exactly 64 characters');
+      expect(
+        RegExp(r'^[0-9a-f]{64}$').hasMatch(clientKey),
+        isTrue,
+        reason: 'Must be lowercase hex only',
+      );
+    });
+
+    test('TASK-018: fullParamCacheKey and mediaCacheKey are identical aliases', () {
+      // mediaCacheKey is documented as an alias for fullParamCacheKey — they must
+      // produce byte-for-byte identical output.
+      const text = 'Rest for 30 seconds';
+      const voice = 'af_heart';
+      const locale = 'en-US';
+      const provider = 'kokoro';
+      const speechRate = '1.0';
+
+      expect(
+        fullParamCacheKey(
+          text: text,
+          voice: voice,
+          locale: locale,
+          provider: provider,
+          speechRate: speechRate,
+        ),
+        equals(mediaCacheKey(
+          text: text,
+          voice: voice,
+          locale: locale,
+          provider: provider,
+          speechRate: speechRate,
+        )),
+        reason: 'mediaCacheKey is a documented alias for fullParamCacheKey',
+      );
+    });
+
+    test('TASK-018: JSON serialisation uses exactly 5 alphabetically sorted fields', () {
+      // Verifies that the JSON payload fed to SHA-256 contains exactly the fields
+      // listed in the TASK-018 documentation: locale, provider, speechRate, text, voice.
+      // Any field addition, removal, or rename must be synchronised between
+      // hash_utils.dart (Flutter) and tts.service.ts (NestJS server).
+      //
+      // Expected JSON structure:
+      //   {"locale":"...","provider":"...","speechRate":"...","text":"...","voice":"..."}
+      //                  ^alphabetical order, no extra whitespace^
+      final payload = jsonEncode({
+        'locale': 'en-US',
+        'provider': 'kokoro',
+        'speechRate': '1.0',
+        'text': 'Hello',
+        'voice': 'af_heart',
+      });
+
+      expect(
+        payload,
+        '{"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}',
+        reason:
+            'The JSON payload fed to SHA-256 must have exactly 5 fields in alphabetical order '
+            'with no extra whitespace — matching Node.js JSON.stringify behaviour',
+      );
+    });
+
     test('is deterministic — same inputs always produce same key', () {
       const args = (
         text: 'Deterministic test',
@@ -282,10 +391,14 @@ void main() {
     });
 
     test('cross-platform stability — key does not depend on Dart runtime version', () {
-      // Pre-computed expected key for known inputs
-      // Server-side: JSON.stringify({locale:"enUS",provider:"gemini",speechRate:"1.0",text:"Hello",voice:"aoede"})
-      // → SHA-256 of that exact string
-      const expectedKey = _serverSideCacheKey(
+      // Pre-computed expected key for known inputs using the server-side algorithm.
+      // Server-side JSON payload:
+      //   {"locale":"enUS","provider":"gemini","speechRate":"1.0","text":"Hello","voice":"aoede"}
+      // → SHA-256 of that exact UTF-8 string.
+      //
+      // NOTE: `final` (not `const`) because _serverSideCacheKey performs runtime
+      // crypto operations and is not a compile-time constant.
+      final expectedKey = _serverSideCacheKey(
         text: 'Hello',
         voice: 'aoede',
         locale: 'enUS',

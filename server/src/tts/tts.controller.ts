@@ -42,11 +42,25 @@ export class TtsController {
    * GET /api/tts/providers?provider=gemini
    * Returns available TTS providers with their voices and locales.
    * Optional ?provider= filter to return a single provider's config.
+   *
+   * Response includes Cache-Control: public, max-age=3600 so HTTP clients
+   * and CDN layers can cache the catalog for up to 60 minutes (matching the
+   * Redis TTL in ProviderRegistryService._setCachedCatalog).
    */
   @Get('providers')
-  async getProviders(@Query('provider') provider?: string) {
+  async getProviders(
+    @Query('provider') provider?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
     this.logger.log(`GET /tts/providers — filter=${provider ?? 'all'}`);
-    const configs = await this.providerRegistry.getProviders(provider);
+    // Strip any unexpected characters from the provider filter (max 50 chars).
+    const safeProvider =
+      provider && /^[a-zA-Z0-9_-]{1,50}$/.test(provider) ? provider : undefined;
+    if (provider && !safeProvider) {
+      this.logger.warn(`GET /tts/providers — invalid provider filter ignored: "${provider}"`);
+    }
+    res?.set('Cache-Control', 'public, max-age=3600');
+    const configs = await this.providerRegistry.getProviders(safeProvider);
     return { providers: configs };
   }
 

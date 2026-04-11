@@ -42,11 +42,14 @@ class VoiceRemapResult {
   final bool localeChanged;
 
   /// Human-readable snackbar message.
+  ///
+  /// Always includes the new locale in parentheses so the user can confirm
+  /// both the voice and accent after a provider switch (addresses AC1/AC2).
   String get snackbarMessage {
     if (localeChanged) {
-      return 'Voice updated to $newDefaultVoiceLabel ($newLocale). Tap to change.';
+      return 'Voice updated to $newDefaultVoiceLabel ($newLocale) — locale also changed. Tap to change.';
     }
-    return 'Voice updated to $newDefaultVoiceLabel. Tap to change.';
+    return 'Voice updated to $newDefaultVoiceLabel ($newLocale). Tap to change.';
   }
 }
 

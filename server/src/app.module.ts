@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { SentryModule } from '@sentry/nestjs/setup';
 import { DatabaseModule } from './database/database.module';
 import { SESEmailModule } from './email/ses-email.module';
 import { UpstashRateLimiterModule } from './ratelimit/upstash-ratelimit.module';
@@ -12,6 +13,8 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
+
     // Global service modules (Neon PostgreSQL, SES, Upstash rate limiter).
     // These are @Global() — all feature modules can inject their services
     // without importing these modules individually.

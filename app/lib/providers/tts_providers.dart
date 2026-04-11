@@ -4,6 +4,9 @@
 /// [selectedTtsProviderProvider] tracks the currently selected provider.
 /// [availableVoicesProvider] returns voices for the selected provider.
 /// [availableLocalesProvider] returns locales for the selected provider.
+/// [voicesForProviderProvider] returns voices for an explicit provider ID
+///   from the local SQLite/static catalog cache (used by the voice picker sheet
+///   and per-step voice overrides in the plan editor).
 library tts_providers;
 
 import 'dart:convert';
@@ -14,6 +17,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/services/app_settings.dart';
+import 'package:instructor/services/provider_catalog_manager.dart';
 import 'package:instructor/services/tts_service.dart';
 
 part 'tts_providers.g.dart';
@@ -124,3 +128,30 @@ Stream<String> rawVoiceSetting(Ref ref) {
     return raw?.isNotEmpty == true ? raw! : 'af_heart';
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-provider voice list (local cache — for voice picker sheet)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Returns voices for an explicit [providerId] from the local SQLite/static
+/// catalog cache via [ProviderCatalogManager].
+///
+/// Unlike [availableVoicesProvider] (which fetches from the HTTP API and
+/// always reflects the *currently selected* provider), this provider:
+///
+///  - Reads from the SQLite cache or static fallback — never makes a network
+///    request.
+///  - Accepts an arbitrary [providerId] so callers can filter for any provider
+///    regardless of the global provider setting.
+///  - Is used by [showVoicePickerSheet] and the per-step voice override in the
+///    plan editor's [SayStepEditor].
+///
+/// Switching the TTS provider in settings causes this provider to rebuild
+/// for the new provider ID when called with the newly selected ID.
+final voicesForProviderProvider =
+    FutureProvider.autoDispose.family<List<TtsVoiceOption>, String>(
+  (ref, providerId) {
+    final manager = ref.watch(providerCatalogManagerProvider);
+    return manager.getVoicesForProvider(providerId);
+  },
+);

@@ -25,6 +25,7 @@ _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
       lastUsedAt: json['lastUsedAt'] == null
           ? null
           : DateTime.parse(json['lastUsedAt'] as String),
+      isUserCreated: json['isUserCreated'] as bool? ?? true,
     );
 
 Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
@@ -39,6 +40,7 @@ Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
       'createdAt': instance.createdAt.toIso8601String(),
       'updatedAt': instance.updatedAt.toIso8601String(),
       'lastUsedAt': instance.lastUsedAt?.toIso8601String(),
+      'isUserCreated': instance.isUserCreated,
     };
 
 const _$PlanCategoryEnumMap = {

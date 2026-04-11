@@ -33,20 +33,37 @@ String ttsCacheKey({
 /// Computes the full-parameter TTS cache key matching the server-side format.
 ///
 /// ## Key format
-/// Parameters are JSON-serialised with alphabetically sorted keys, then the
-/// resulting string is SHA-256 hashed. This matches the backend implementation
-/// exactly so that client and server cache keys are always identical.
+/// Parameters are JSON-serialised with **alphabetically sorted keys** (no extra
+/// whitespace), then the resulting UTF-8 string is SHA-256 hashed and returned
+/// as a 64-character lowercase hex digest.
 ///
+/// This matches the NestJS backend implementation in `tts.service.ts` `cacheKey()`
+/// exactly — client and server cache keys are always byte-for-byte identical when
+/// given the same inputs.
+///
+/// ## Fields included (in alphabetical order — MUST stay in sync with server)
+/// 1. `locale`     — locale identifier (e.g. `'en-US'`, `'enIN'`)
+/// 2. `provider`   — TTS provider (e.g. `'kokoro'`, `'gemini'`)
+/// 3. `speechRate` — playback speed as a **string** (e.g. `'1.0'`, `'1.5'`)
+/// 4. `text`       — text to be synthesised
+/// 5. `voice`      — voice identifier (e.g. `'af_heart'`, `'aoede'`)
+///
+/// ## Example JSON payload (before hashing)
 /// ```json
-/// {"locale":"en-IN","provider":"gemini","speechRate":"1.0","text":"...","voice":"aoede"}
+/// {"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}
 /// ```
+///
+/// ## ⚠️ SYNC WARNING
+/// Any change to the field set or key order MUST be mirrored in
+/// `server/src/tts/tts.service.ts` `cacheKey()` to avoid cross-platform cache
+/// mismatches. See TASK-018 for the cross-platform unit tests.
 ///
 /// ## Parameters
 /// - [text]       — the text to be synthesised
-/// - [voice]      — voice identifier (e.g. 'aoede')
-/// - [locale]     — locale identifier (e.g. 'en-IN')
-/// - [provider]   — TTS provider ('gemini' or 'kokoro')
-/// - [speechRate] — playback speed as a string (e.g. '1.0')
+/// - [voice]      — voice identifier (e.g. `'af_heart'`, `'aoede'`)
+/// - [locale]     — locale identifier (e.g. `'en-US'`, `'enIN'`)
+/// - [provider]   — TTS provider (`'kokoro'` or `'gemini'`)
+/// - [speechRate] — playback speed as a string (e.g. `'1.0'`)
 String fullParamCacheKey({
   required String text,
   required String voice,

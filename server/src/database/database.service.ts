@@ -29,12 +29,13 @@
  *   NODE_ENV      — set to "production" to suppress Drizzle query logs
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { and, desc, eq, gt, sql } from 'drizzle-orm';
+import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { otpRecords, refreshTokens, syncMetadata, users } from './schema';
+import { otpRecords, plans, refreshTokens, syncMetadata, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 
 // ── Typed result shapes returned to callers ────────────────────────────────
@@ -78,6 +79,27 @@ export interface SyncMetadataRecord {
   sizeBytes: number | null;
 }
 
+export interface PlanRecord {
+  planId: string;
+  userId: string;
+  name: string;
+  planJson: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PlanSummaryRecord {
+  planId: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SavePlanResult {
+  planId: string;
+  updatedAt: Date;
+}
+
 // ── PostgreSQL error codes ─────────────────────────────────────────────────
 
 /** Unique constraint violation — e.g. duplicate email on INSERT INTO users */
@@ -96,14 +118,6 @@ export class DatabaseService {
    */
   readonly noop: boolean;
 
-  /**
-   * Set to true during a withRetry() call after the first retry attempt fires,
-   * so a second failure within the same call propagates immediately.
-   * Reset to false at the start of each withRetry() call so that a subsequent
-   * Neon suspension (after the container has been warm for >5 min) is also
-   * recovered, not just the very first cold start per container lifetime.
-   */
-  private coldStartRetried = false;
 
   constructor() {
     const databaseUrl = process.env.DATABASE_URL;
@@ -148,18 +162,9 @@ export class DatabaseService {
    * immediately — we don't want unbounded retries in a hot path.
    */
   private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
-    // Reset per-call so that a Neon suspension after the container has been
-    // warm for >5 min is recovered, not just the first cold start per
-    // container lifetime.
-    this.coldStartRetried = false;
     try {
       return await fn();
     } catch (err) {
-      if (this.coldStartRetried) {
-        // Already retried once within this call — propagate the error.
-        throw err;
-      }
-      this.coldStartRetried = true;
       this.logger.warn(
         'Neon query failed — retrying once after 1 s (cold start recovery)',
       );
@@ -495,5 +500,94 @@ export class DatabaseService {
           },
         }),
     );
+  }
+
+  // ── Plans ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Save (create or update) a plan for the authenticated user.
+   *
+   * - If planId is omitted: INSERT a new plan row and return the generated UUID.
+   * - If planId is provided: UPDATE the matching row WHERE id = planId AND user_id = userId.
+   *   Throws NotFoundException if no matching row exists (plan not owned by user or
+   *   doesn't exist), preventing IDOR — the caller can never modify another user's plan.
+   *
+   * SECURITY: userId is ALWAYS sourced from the JWT (req.user.sub) by the controller;
+   * the request body's userId field is explicitly ignored.
+   */
+  async savePlan(
+    userId: string,
+    name: string,
+    planJson: string,
+    planId?: string,
+  ): Promise<SavePlanResult> {
+    // Noop mode: return a deterministic fake result so the app boots without a DB.
+    if (this.noop) {
+      return { planId: planId ?? uuidv4(), updatedAt: new Date() };
+    }
+
+    const now = new Date();
+
+    if (planId) {
+      // UPDATE existing plan — only if it belongs to this user (IDOR prevention).
+      const rows = await this.withRetry(() =>
+        this.db!
+          .update(plans)
+          .set({ name, planJson, updatedAt: now })
+          .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
+          .returning({ id: plans.id, updatedAt: plans.updatedAt }),
+      );
+
+      if (rows.length === 0) {
+        throw new NotFoundException(
+          `Plan ${planId} not found or does not belong to the authenticated user`,
+        );
+      }
+
+      const row = rows[0];
+      this.logger.log(`Plan updated: planId=${row.id}, userId=${userId}`);
+      return { planId: row.id, updatedAt: row.updatedAt };
+    }
+
+    // INSERT new plan — DB assigns a random UUID via defaultRandom().
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(plans)
+        .values({ userId, name, planJson, createdAt: now, updatedAt: now })
+        .returning({ id: plans.id, updatedAt: plans.updatedAt }),
+    );
+
+    const row = rows[0];
+    this.logger.log(`Plan created: planId=${row.id}, userId=${userId}`);
+    return { planId: row.id, updatedAt: row.updatedAt };
+  }
+
+  /**
+   * List all plan summaries for the authenticated user.
+   * Returns plan metadata only (no plan_json) ordered by most-recently-updated first.
+   * userId is always sourced from the JWT — callers MUST NOT pass userId from the request body.
+   */
+  async listPlans(userId: string): Promise<PlanSummaryRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select({
+          id: plans.id,
+          name: plans.name,
+          createdAt: plans.createdAt,
+          updatedAt: plans.updatedAt,
+        })
+        .from(plans)
+        .where(eq(plans.userId, userId))
+        .orderBy(desc(plans.updatedAt)),
+    );
+
+    return rows.map((row) => ({
+      planId: row.id,
+      name: row.name,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
   }
 }

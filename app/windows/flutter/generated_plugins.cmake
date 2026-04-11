@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_secure_storage_windows
   flutter_tts
   screen_brightness_windows
+  sentry_flutter
   sqlite3_flutter_libs
 )
 

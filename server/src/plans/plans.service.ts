@@ -1,13 +1,10 @@
 import {
   Injectable,
   Logger,
-  HttpException,
-  HttpStatus,
   UnprocessableEntityException,
   ServiceUnavailableException,
   BadGatewayException,
 } from '@nestjs/common';
-import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 import { parseDslPlan } from './parsers/dsl.parser';
 import {
   PHASE1_SYSTEM_PROMPT,
@@ -16,14 +13,13 @@ import {
   type PlanPhase,
 } from './prompts/phase1.prompt';
 import { PHASE2_SYSTEM_PROMPT, buildPhase2PhasePrompt } from './prompts/phase2.prompt';
+import { DatabaseService, type PlanSummaryRecord, type SavePlanResult } from '../database/database.service';
+import { SavePlanDto } from './dto/save-plan.dto';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const GEMINI_GENERATE_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
-
-const PLAN_GENERATION_LIMIT = 10;
-const PLAN_GENERATION_WINDOW_SEC = 24 * 60 * 60; // 1 day
 
 const MAX_DURATION_MINUTES = 240; // 4-hour hard cap
 
@@ -41,15 +37,13 @@ function ollamaModel(): string { return process.env.OLLAMA_MODEL ?? 'gemma4:e4b'
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
 
-  constructor(private readonly rateLimit: UpstashRateLimitService) {}
+  constructor(private readonly db: DatabaseService) {}
 
   async generatePlan(
     prompt: string,
     userId: string,
     language?: string,
   ): Promise<{ plan: Record<string, unknown> }> {
-    await this.assertRateLimit(userId);
-
     // Resolve backend — Gemini requires an API key; Ollama runs locally.
     let geminiApiKey: string | undefined;
     if (llmProvider() === 'gemini') {
@@ -109,8 +103,31 @@ export class PlansService {
       `Plan generated: ${plan.steps.length} steps across ${requirements.phases.length} phases`,
     );
 
-    await this.rateLimit.increment('plan', userId, PLAN_GENERATION_WINDOW_SEC);
     return { plan };
+  }
+
+  // ── Plan persistence ───────────────────────────────────────────────────────
+
+  /**
+   * Persist a plan to the database.
+   * userId is ALWAYS derived from the JWT by the controller — never from the
+   * request body — to prevent IDOR attacks.
+   */
+  async savePlan(userId: string, dto: SavePlanDto): Promise<SavePlanResult> {
+    this.logger.log(
+      `savePlan — userId=${userId}, planId=${dto.planId ?? 'NEW'}, name="${dto.name}"`,
+    );
+    return this.db.savePlan(userId, dto.name, dto.planJson, dto.planId);
+  }
+
+  /**
+   * Return all plan summaries for the authenticated user (no plan_json body,
+   * just metadata for listing). userId from JWT only.
+   */
+  async listPlans(userId: string): Promise<{ plans: PlanSummaryRecord[] }> {
+    this.logger.log(`listPlans — userId=${userId}`);
+    const planList = await this.db.listPlans(userId);
+    return { plans: planList };
   }
 
   // ── Phase generation (with 1 retry per phase) ──────────────────────────────
@@ -310,16 +327,6 @@ export class PlansService {
     return text;
   }
 
-  private async assertRateLimit(userId: string): Promise<void> {
-    const result = await this.rateLimit.peek('plan', userId, PLAN_GENERATION_LIMIT);
-
-    if (!result.allowed) {
-      throw new HttpException(
-        `Plan generation limit reached. You have used all ${PLAN_GENERATION_LIMIT} plan generations for today.`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-  }
 }
 
 // ── Pure helpers (no logger needed) ──────────────────────────────────────────

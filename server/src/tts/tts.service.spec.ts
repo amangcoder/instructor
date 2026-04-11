@@ -632,6 +632,107 @@ describe('TtsService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // TASK-018: Cross-platform cache key verification
+  // Verifies that tts.service.ts cacheKey() produces the same SHA-256 hex as
+  // hash_utils.dart fullParamCacheKey() for identical inputs.
+  //
+  // Both implementations must produce:
+  //   SHA-256(JSON.stringify({ locale, provider, speechRate, text, voice }))
+  // where keys are in alphabetical order and values are strings.
+  //
+  // Fields included in the cache key (alphabetical order):
+  //   1. locale      — locale identifier (e.g. 'en-US', 'enIN')
+  //   2. provider    — TTS provider (e.g. 'kokoro', 'gemini')
+  //   3. speechRate  — playback speed as a string (e.g. '1.0', '1.5')
+  //   4. text        — text to be synthesised
+  //   5. voice       — voice identifier (e.g. 'af_heart', 'aoede')
+  // -------------------------------------------------------------------------
+
+  describe('TASK-018: cross-platform cache key format verification', () => {
+    it('acceptance criteria: voice=af_heart, locale=en-US, provider=kokoro, speechRate=1.0, text=Hello produces 64-char SHA-256 hex', () => {
+      // This is the canonical cross-platform test vector.
+      // Flutter's fullParamCacheKey() and server's cacheKey() MUST return the
+      // same 64-character hex string for these inputs.
+      const { createHash } = require('crypto') as typeof import('crypto');
+
+      const text = 'Hello';
+      const voice = 'af_heart';
+      const locale = 'en-US';
+      const provider = 'kokoro';
+      const speechRate = '1.0';
+
+      // Expected: SHA-256 of JSON payload with alphabetically ordered keys.
+      // JSON payload: {"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}
+      const expectedPayload = JSON.stringify({ locale, provider, speechRate, text, voice });
+      const expectedKey = createHash('sha256').update(expectedPayload).digest('hex');
+
+      // Server-side cacheKey must produce the same value.
+      const serverKey = service.cacheKey(text, voice, locale, provider, speechRate);
+
+      expect(serverKey).toBe(expectedKey);
+      expect(serverKey).toHaveLength(64);
+      expect(serverKey).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('JSON payload uses exactly 5 fields in alphabetical order (no whitespace)', () => {
+      // Verifies the canonical JSON serialisation format.
+      // This string is what gets SHA-256 hashed on BOTH Flutter and server side.
+      // Any field change must be reflected in both hash_utils.dart and tts.service.ts.
+      const payload = JSON.stringify({
+        locale: 'en-US',
+        provider: 'kokoro',
+        speechRate: '1.0',
+        text: 'Hello',
+        voice: 'af_heart',
+      });
+
+      expect(payload).toBe(
+        '{"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}',
+      );
+    });
+
+    it('cacheKey with all 5 alphabetical fields matches inline SHA-256 computation', () => {
+      // Verifies that cacheKey() uses the documented field set and ordering.
+      // This test guards against field additions or renames that would break
+      // cross-platform cache key alignment with the Flutter client.
+      const { createHash } = require('crypto') as typeof import('crypto');
+
+      const inputs: Array<{ text: string; voice: string; locale: string; provider: string; speechRate: string }> = [
+        { text: 'Breathe in slowly', voice: 'aoede',    locale: 'enUS',  provider: 'gemini',  speechRate: '1.0' },
+        { text: 'Hold the pose',     voice: 'af_heart', locale: 'en-US', provider: 'kokoro',  speechRate: '1.5' },
+        { text: 'Begin now',         voice: 'charon',   locale: 'enIN',  provider: 'gemini',  speechRate: '0.8' },
+      ];
+
+      for (const { text, voice, locale, provider, speechRate } of inputs) {
+        const expectedPayload = JSON.stringify({ locale, provider, speechRate, text, voice });
+        const expected = createHash('sha256').update(expectedPayload).digest('hex');
+        const actual = service.cacheKey(text, voice, locale, provider, speechRate);
+        expect(actual).toBe(expected);
+        expect(actual).toHaveLength(64);
+      }
+    });
+
+    it('speechRate field is included: key changes when speechRate changes', () => {
+      // Guard: speechRate must be part of the JSON payload, otherwise Flutter and
+      // server would produce different keys when speechRate differs from the default.
+      const key10 = service.cacheKey('Hello', 'af_heart', 'en-US', 'kokoro', '1.0');
+      const key15 = service.cacheKey('Hello', 'af_heart', 'en-US', 'kokoro', '1.5');
+      expect(key10).not.toBe(key15);
+      expect(key10).toHaveLength(64);
+      expect(key15).toHaveLength(64);
+    });
+
+    it('key is identical when inputs are identical (determinism across calls)', () => {
+      const args = ['Hello', 'af_heart', 'en-US', 'kokoro', '1.0'] as const;
+      const key1 = service.cacheKey(...args);
+      const key2 = service.cacheKey(...args);
+      const key3 = service.cacheKey(...args);
+      expect(key1).toBe(key2);
+      expect(key2).toBe(key3);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Backward compatibility (TASK-005)
   // -------------------------------------------------------------------------
 

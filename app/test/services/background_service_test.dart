@@ -34,6 +34,7 @@ library background_service_test;
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:instructor/models/enums.dart';
@@ -753,5 +754,300 @@ void main() {
       );
       expect(callHandler, isA<PhoneCallHandler>());
     });
+  });
+
+  // ── PhoneCallHandlerImpl — interruption event filtering ───────────────────
+  //
+  // Verifies that duck interruption events (short notification/navigation
+  // sounds) do NOT trigger a pause, and that the engine is only paused on
+  // genuine non-duck begin interruptions when a plan is actively running.
+  //
+  // This guards against the regression introduced by androidWillPauseWhenDucked:
+  // if that flag were set to true, audio_session would report duck focus-loss
+  // events as AudioInterruptionType.pause, and every notification sound would
+  // spuriously pause execution.
+  //
+  // Uses [PhoneCallHandlerImpl.handleInterruptionForTest] (visibleForTesting)
+  // to drive interruption events without requiring a live AudioSession.
+
+  group('PhoneCallHandlerImpl — interruption event filtering', () {
+    late _FakePlanExecutionEngine engine;
+    late _FakeNotificationService notificationService;
+    late PhoneCallHandlerImpl callHandler;
+
+    /// Pushes a running [ExecutionState] so [PhoneCallHandlerImpl._lastState]
+    /// is set, allowing interruption events to reach the pause logic.
+    Future<void> seedRunningState() async {
+      engine.stateController.add(ExecutionState(
+        plan: _testPlan(),
+        currentStepIndex: 0,
+        timeRemaining: const Duration(minutes: 5),
+        status: ExecutionStatus.running,
+      ));
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    setUp(() {
+      engine = _FakePlanExecutionEngine();
+      notificationService = _FakeNotificationService();
+      callHandler = PhoneCallHandlerImpl(
+        engine: engine,
+        notificationService: notificationService,
+      );
+      // Start the state subscription (AudioSession.instance will fail silently
+      // in the test environment — that is intentional and handled by onError).
+      callHandler.startListening();
+    });
+
+    tearDown(() async {
+      callHandler.stopListening();
+      await engine.dispose();
+    });
+
+    test(
+      'duck interruption (begin=true, type=duck) does NOT pause execution '
+      '— guard against notification/nav sounds being treated as phone calls',
+      () async {
+        await seedRunningState();
+
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(true, AudioInterruptionType.duck),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          engine.pauseCount,
+          0,
+          reason:
+              'Duck interruptions (notification / navigation sounds) must NOT '
+              'pause execution. If androidWillPauseWhenDucked were true, these '
+              'events would arrive as type=pause and spuriously pause the plan.',
+        );
+      },
+    );
+
+    test(
+      'duck end event (begin=false, type=duck) does NOT pause execution',
+      () async {
+        await seedRunningState();
+
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(false, AudioInterruptionType.duck),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(engine.pauseCount, 0);
+      },
+    );
+
+    test(
+      'non-duck begin interruption (type=pause) DOES pause when plan is running',
+      () async {
+        await seedRunningState();
+
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(true, AudioInterruptionType.pause),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          engine.pauseCount,
+          1,
+          reason:
+              'A genuine phone-call interruption (type=pause, begin=true) '
+              'must pause execution when the plan is running.',
+        );
+      },
+    );
+
+    test(
+      'non-duck begin interruption does NOT pause when plan is already paused',
+      () async {
+        // Push a paused state — the handler should short-circuit.
+        engine.stateController.add(ExecutionState(
+          plan: _testPlan(),
+          currentStepIndex: 0,
+          timeRemaining: const Duration(minutes: 3),
+          status: ExecutionStatus.paused,
+        ));
+        await Future<void>.delayed(Duration.zero);
+
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(true, AudioInterruptionType.pause),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          engine.pauseCount,
+          0,
+          reason:
+              'Engine.pause() must not be called when the plan is already '
+              'paused — the engine guards against re-entrant pauses, but '
+              'the phone-call handler should not add unnecessary calls.',
+        );
+      },
+    );
+
+    test(
+      'end event (begin=false) does NOT pause — only shows resume prompt '
+      'when _pausedForCall is true',
+      () async {
+        await seedRunningState();
+
+        // Fire an end event without a preceding begin event — should be a no-op.
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(false, AudioInterruptionType.pause),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(engine.pauseCount, 0);
+        expect(
+          notificationService.resumePromptPlanNames,
+          isEmpty,
+          reason:
+              'No resume prompt should appear when there was no preceding '
+              'phone-call interruption (spurious end events are ignored).',
+        );
+      },
+    );
+
+    test(
+      'end event after begin event shows resume prompt with plan name',
+      () async {
+        await seedRunningState();
+
+        // Begin: phone call starts → pauses plan.
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(true, AudioInterruptionType.pause),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(engine.pauseCount, 1);
+
+        // End: phone call finishes → resume prompt shown.
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(false, AudioInterruptionType.pause),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          notificationService.resumePromptPlanNames,
+          contains('Morning Yoga'),
+          reason:
+              'After the call ends, a resume-prompt notification must be '
+              'shown with the plan name so the user can return to the session.',
+        );
+      },
+    );
+
+    test(
+      'unknown begin interruption (type=unknown) DOES pause when running',
+      () async {
+        await seedRunningState();
+
+        callHandler.handleInterruptionForTest(
+          const AudioInterruptionEvent(true, AudioInterruptionType.unknown),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          engine.pauseCount,
+          1,
+          reason:
+              'Unknown interruption types (e.g. permanent focus loss on '
+              'Android) should pause execution as a safe default.',
+        );
+      },
+    );
+  });
+
+  // ── InstructorAudioHandler — stop latency benchmark (REQ-003) ────────────
+  //
+  // REQ-003 requires the stop action to complete within 500 ms so the
+  // notification is dismissed without a perceptible delay.  In the unit-test
+  // environment all collaborators are fakes (no I/O, no platform channels),
+  // so the test validates that the *code path* itself — i.e. no double-stop,
+  // no unnecessary sequential awaits — does not structurally add latency.
+  //
+  // Note: AudioSession.instance is called inside stop() but is a no-op in the
+  // test environment (the audio_session plugin registers a no-op fallback when
+  // no native platform is present). super.stop() is also a no-op in the
+  // BaseAudioHandler test path.
+
+  group('InstructorAudioHandler — stop latency benchmark', () {
+    late _FakePlanExecutionEngine engine;
+    late _FakePhoneCallHandler phoneCallHandler;
+    late InstructorAudioHandler handler;
+
+    setUp(() {
+      engine = _FakePlanExecutionEngine();
+      phoneCallHandler = _FakePhoneCallHandler();
+      handler = InstructorAudioHandler(
+        engine: engine,
+        phoneCallHandler: phoneCallHandler,
+      );
+    });
+
+    tearDown(() async {
+      await handler.disposeHandler();
+      await engine.dispose();
+    });
+
+    test(
+      'stop() calls engine.stop() exactly once — no double-stop (REQ-003)',
+      () async {
+        await handler.stop();
+
+        // engine.stop() must be called exactly once: the handler delegates to
+        // the engine which internally calls Future.wait([stopAll, ...]).
+        // A count > 1 would mean a redundant stopAll() is being triggered.
+        expect(
+          engine.stopCount,
+          1,
+          reason:
+              'InstructorAudioHandler.stop() must call engine.stop() exactly '
+              'once. A count > 1 indicates a redundant stopAll() call that '
+              'adds latency and violates REQ-003.',
+        );
+      },
+    );
+
+    test(
+      'stop() completes within 500 ms (REQ-003 latency benchmark)',
+      () async {
+        // In the unit-test environment all fakes complete synchronously or
+        // near-synchronously.  If the stop chain were ever serialised with a
+        // redundant _audioEngine.stopAll() it would appear as an extra async
+        // hop here, making the test timing erratic.  Asserting an upper bound
+        // of 500 ms catches regressions even without a real device.
+        final sw = Stopwatch()..start();
+        await handler.stop();
+        sw.stop();
+
+        expect(
+          sw.elapsedMilliseconds,
+          lessThan(500),
+          reason:
+              'stop() must complete within 500 ms to satisfy REQ-003. '
+              'Elapsed: ${sw.elapsedMilliseconds} ms.',
+        );
+      },
+    );
+
+    test(
+      'playbackState is idle after stop() (REQ-003 — notification dismissed)',
+      () async {
+        // Simulate an active session first.
+        engine.stateController.add(_runningState());
+        await Future<void>.delayed(Duration.zero);
+        expect(handler.playbackState.value.playing, isTrue);
+
+        // Stop and verify the handler emits an idle playback state, which
+        // triggers the lock-screen widget and notification to clear.
+        await handler.stop();
+        final state = handler.playbackState.value;
+        expect(state.processingState, AudioProcessingState.idle);
+        expect(state.playing, isFalse);
+      },
+    );
   });
 }

@@ -347,6 +347,148 @@ void main() {
     });
   });
 
+  // ─── updatePlan persistence (integration) ────────────────────────────────
+
+  group('updatePlan persistence (integration)', () {
+    test(
+        'createPlan → updatePlan modified steps → getPlanById verifies text matches exactly',
+        () async {
+      // 1. Create a plan with an initial SayStep.
+      final original = _makePlan(
+        name: 'Breathe Plan',
+        steps: [
+          const PlanStep.say(id: 'say-1', text: 'Breathe in'),
+          const PlanStep.wait(id: 'wait-1', duration: Duration(seconds: 4)),
+        ],
+      );
+      final id = await repo.createPlan(original);
+
+      // 2. Fetch back and verify initial content.
+      final created = await repo.getPlanById(id);
+      expect(created, isNotNull);
+      expect((created!.steps.first as SayStep).text, 'Breathe in');
+
+      // 3. Build updated Plan with modified step text.
+      final updatedPlan = created.copyWith(
+        steps: [
+          const PlanStep.say(id: 'say-1', text: 'Breathe in deeply'),
+          const PlanStep.wait(id: 'wait-1', duration: Duration(seconds: 4)),
+        ],
+      );
+
+      // 4. Persist via updatePlan.
+      await repo.updatePlan(id, updatedPlan);
+
+      // 5. Fetch again and confirm the modification persisted exactly.
+      final fetched = await repo.getPlanById(id);
+      expect(fetched, isNotNull);
+      expect(fetched!.steps, hasLength(2));
+      expect(fetched.steps.first, isA<SayStep>());
+      expect(
+        (fetched.steps.first as SayStep).text,
+        'Breathe in deeply',
+        reason: 'updatePlan must persist the modified SayStep text exactly',
+      );
+      expect(fetched.steps[1], isA<WaitStep>());
+    });
+
+    test('updatePlan persists modified plan name', () async {
+      final id = await repo.createPlan(_makePlan(name: 'Original Name'));
+
+      final created = await repo.getPlanById(id);
+      await repo.updatePlan(id, created!.copyWith(name: 'Updated Name'));
+
+      final fetched = await repo.getPlanById(id);
+      expect(fetched!.name, 'Updated Name');
+    });
+
+    test('updatePlan persists RepeatStep children modifications', () async {
+      // 1. Create plan with a RepeatStep containing a SayStep child.
+      final id = await repo.createPlan(
+        _makePlan(
+          name: 'Repeat Plan',
+          steps: [
+            const PlanStep.repeat(
+              id: 'rep-1',
+              count: 3,
+              children: [
+                PlanStep.say(id: 'child-say-1', text: 'Original child text'),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      // 2. Modify the RepeatStep child text.
+      final created = await repo.getPlanById(id);
+      expect(created, isNotNull);
+
+      final updatedPlan = created!.copyWith(
+        steps: [
+          const PlanStep.repeat(
+            id: 'rep-1',
+            count: 3,
+            children: [
+              PlanStep.say(id: 'child-say-1', text: 'Modified child text'),
+            ],
+          ),
+        ],
+      );
+      await repo.updatePlan(id, updatedPlan);
+
+      // 3. Verify child text persisted through StepListConverter round-trip.
+      final fetched = await repo.getPlanById(id);
+      expect(fetched, isNotNull);
+      final repeat = fetched!.steps.first as RepeatStep;
+      expect(repeat.count, 3);
+      expect(repeat.children, hasLength(1));
+      expect(
+        (repeat.children.first as SayStep).text,
+        'Modified child text',
+        reason:
+            'StepListConverter must round-trip RepeatStep children correctly',
+      );
+    });
+
+    test('updatePlan persists all 2+ step modifications simultaneously',
+        () async {
+      // 1. Create plan with multiple steps.
+      final id = await repo.createPlan(
+        _makePlan(
+          name: 'Multi-Step Plan',
+          steps: [
+            const PlanStep.say(id: 's1', text: 'Step one'),
+            const PlanStep.wait(id: 'w1', duration: Duration(seconds: 5)),
+            const PlanStep.say(id: 's2', text: 'Step three'),
+          ],
+        ),
+      );
+
+      // 2. Modify name and 2+ steps.
+      final created = await repo.getPlanById(id);
+      final updatedPlan = created!.copyWith(
+        name: 'Modified Multi-Step Plan',
+        steps: [
+          const PlanStep.say(id: 's1', text: 'Step one — modified'),
+          const PlanStep.wait(id: 'w1', duration: Duration(seconds: 10)),
+          const PlanStep.say(id: 's2', text: 'Step three — modified'),
+        ],
+      );
+      await repo.updatePlan(id, updatedPlan);
+
+      // 3. Verify all modifications persisted.
+      final fetched = await repo.getPlanById(id);
+      expect(fetched!.name, 'Modified Multi-Step Plan');
+      expect(fetched.steps, hasLength(3));
+      expect((fetched.steps[0] as SayStep).text, 'Step one — modified');
+      expect(
+        (fetched.steps[1] as WaitStep).duration,
+        const Duration(seconds: 10),
+      );
+      expect((fetched.steps[2] as SayStep).text, 'Step three — modified');
+    });
+  });
+
   // ─── Riverpod provider wiring ─────────────────────────────────────────────
 
   group('planRepositoryProvider', () {

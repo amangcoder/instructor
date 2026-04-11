@@ -64,6 +64,7 @@ const BEARER = (tok: string) => `Bearer ${tok}`;
 describe('TtsController', () => {
   let controller: TtsController;
   let ttsService: jest.Mocked<TtsService>;
+  let providerRegistry: jest.Mocked<ProviderRegistryService>;
   let mockJwtService: ReturnType<typeof createMockJwtService>;
 
   beforeEach(async () => {
@@ -76,7 +77,7 @@ describe('TtsController', () => {
       checkCacheOnly: jest.fn().mockResolvedValue(null),
     };
 
-    const mockProviderRegistry: Partial<ProviderRegistryService> = {
+    const mockProviderRegistry: Partial<jest.Mocked<ProviderRegistryService>> = {
       getProviders: jest.fn().mockResolvedValue([]),
     };
 
@@ -91,6 +92,7 @@ describe('TtsController', () => {
 
     controller = module.get<TtsController>(TtsController);
     ttsService = module.get<jest.Mocked<TtsService>>(TtsService);
+    providerRegistry = module.get<jest.Mocked<ProviderRegistryService>>(ProviderRegistryService);
   });
 
   afterEach(() => {
@@ -436,6 +438,81 @@ describe('TtsController', () => {
       expect(res.status).not.toHaveBeenCalledWith(408);
       expect(res.json).not.toHaveBeenCalled();
       expect(res.send).toHaveBeenCalledWith(wav);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/tts/providers — Cache-Control header (TASK-001)
+  // -------------------------------------------------------------------------
+
+  describe('GET /tts/providers — Cache-Control header (TASK-001)', () => {
+    /** Build a minimal mock Express Response for the providers endpoint. */
+    function makeMockProviderRes() {
+      return {
+        set: jest.fn().mockReturnThis(),
+      } as unknown as import('express').Response;
+    }
+
+    it('sets Cache-Control: public, max-age=3600 on the response', async () => {
+      (providerRegistry.getProviders as jest.Mock).mockResolvedValue([]);
+      const res = makeMockProviderRes();
+
+      await controller.getProviders(undefined, res);
+
+      expect(res.set).toHaveBeenCalledWith('Cache-Control', 'public, max-age=3600');
+    });
+
+    it('returns providers from the registry service', async () => {
+      const fakeProviders = [
+        {
+          id: 'gemini',
+          label: 'Google Gemini TTS',
+          voices: [],
+          locales: [],
+          voiceMap: {},
+        },
+      ];
+      (providerRegistry.getProviders as jest.Mock).mockResolvedValue(fakeProviders);
+      const res = makeMockProviderRes();
+
+      const result = await controller.getProviders(undefined, res);
+
+      expect(result).toEqual({ providers: fakeProviders });
+    });
+
+    it('passes provider filter to registry when query param is valid', async () => {
+      (providerRegistry.getProviders as jest.Mock).mockResolvedValue([]);
+      const res = makeMockProviderRes();
+
+      await controller.getProviders('gemini', res);
+
+      expect(providerRegistry.getProviders).toHaveBeenCalledWith('gemini');
+    });
+
+    it('ignores provider filter with invalid characters and logs a warning', async () => {
+      (providerRegistry.getProviders as jest.Mock).mockResolvedValue([]);
+      const res = makeMockProviderRes();
+
+      // Provider with SQL injection attempt — must be sanitised to undefined.
+      await controller.getProviders("gemini'; DROP TABLE providers;--", res);
+
+      expect(providerRegistry.getProviders).toHaveBeenCalledWith(undefined);
+    });
+
+    it('still sets Cache-Control even when provider filter is invalid', async () => {
+      (providerRegistry.getProviders as jest.Mock).mockResolvedValue([]);
+      const res = makeMockProviderRes();
+
+      await controller.getProviders('<script>alert(1)</script>', res);
+
+      expect(res.set).toHaveBeenCalledWith('Cache-Control', 'public, max-age=3600');
+    });
+
+    it('works without a res object (res is optional — passthrough mode)', async () => {
+      (providerRegistry.getProviders as jest.Mock).mockResolvedValue([]);
+
+      // Should not throw when res is undefined.
+      await expect(controller.getProviders(undefined, undefined)).resolves.toBeDefined();
     });
   });
 });

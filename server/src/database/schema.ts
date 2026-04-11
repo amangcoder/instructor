@@ -6,6 +6,7 @@
  *   - otp_records     — email OTP codes (no FK to users: OTPs are created before user exists)
  *   - refresh_tokens  — JWT refresh tokens with revocation support
  *   - sync_metadata   — per-user backup sync state
+ *   - plans           — user-created plans stored server-side for cross-device recovery
  *
  * Index strategy:
  *   - otp_records: composite (email, used, expires_at) — equality on email+used, range on expires_at
@@ -19,6 +20,7 @@ import {
   index,
   integer,
   pgTable,
+  text,
   timestamp,
   uuid,
   varchar,
@@ -109,3 +111,32 @@ export const syncMetadata = pgTable('sync_metadata', {
 
 export type SyncMetadata = typeof syncMetadata.$inferSelect;
 export type NewSyncMetadata = typeof syncMetadata.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// plans
+//
+// Stores user-created plans server-side for cross-device recovery.
+// plan_json holds the full plan serialised as JSON TEXT (max 512 KB enforced
+// at the application layer via @MaxLength(524288) on the DTO).
+// ---------------------------------------------------------------------------
+
+export const plans = pgTable(
+  'plans',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id)
+      .notNull(),
+    name: text('name').notNull(),
+    planJson: text('plan_json').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Plans are always queried by userId — this index makes list queries O(log n).
+    index('idx_plans_user_id').on(table.userId),
+  ],
+);
+
+export type Plan = typeof plans.$inferSelect;
+export type NewPlan = typeof plans.$inferInsert;

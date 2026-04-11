@@ -76,6 +76,24 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     return true;
   }
 
+  // ── NextUpPreview tap debounce ────────────────────────────────────────────
+
+  /// Timestamp of the last accepted NextUpPreview tap. A separate, longer
+  /// debounce (500 ms) prevents accidental double-taps on the card from
+  /// triggering multiple skipForward() calls.
+  DateTime? _lastNextUpTapTime;
+  static const _nextUpTapDebounce = Duration(milliseconds: 500);
+
+  bool _tryAcquireNextUpDebounce() {
+    final now = DateTime.now();
+    if (_lastNextUpTapTime != null &&
+        now.difference(_lastNextUpTapTime!) < _nextUpTapDebounce) {
+      return false;
+    }
+    _lastNextUpTapTime = now;
+    return true;
+  }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   @override
@@ -153,8 +171,36 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     await engine.skipForward();
   }
 
+  /// Called when the user taps the [NextUpPreview] card.
+  ///
+  /// Guards with a 500 ms debounce so accidental double-taps do not fire
+  /// two skipForward() calls. Restores auto-dim timer on touch.
+  Future<void> _onNextUpTap() async {
+    _onTouchDetected(); // reset dim timer on tap
+    if (!_tryAcquireNextUpDebounce()) return;
+    final engine = ref.read(planExecutionEngineProvider);
+    await engine.skipForward();
+  }
+
   Future<void> _skipBackward() async {
     if (!_tryAcquireDebounce()) return;
+
+    // When the engine is already at step 0, skipBackward() is a no-op by
+    // design (it would re-execute the same step, which confuses the user).
+    // Show a brief snackbar instead of forwarding the no-op to the engine.
+    final currentState = ref.read(executionStateProvider).valueOrNull;
+    if (currentState?.currentStepIndex == 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Already at the first step'),
+          duration: Duration(milliseconds: 1500),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     final engine = ref.read(planExecutionEngineProvider);
     await engine.skipBackward();
   }
@@ -190,6 +236,20 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
       ),
     );
     return result ?? false;
+  }
+
+  // ── Stopped / idle ─────────────────────────────────────────────────────────
+
+  /// Called when [stop()] is invoked externally (e.g. from the lock screen or
+  /// Android notification) while the NowPlayingScreen is still mounted.
+  ///
+  /// Without this, the screen would freeze on a loading spinner because the
+  /// engine clears its plan reference and the state stream stops emitting.
+  void _handleStopped(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      this.context.go(AppRoutes.library);
+    });
   }
 
   // ── Completion ──────────────────────────────────────────────────────────────
@@ -348,7 +408,22 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         final engine = ref.read(planExecutionEngineProvider);
                         final session = await engine.getRecoverableSession();
                         if (session != null) {
-                          await engine.resume();
+                          await engine.resumeFromPersistedState(
+                            session.plan.id,
+                          );
+                        } else {
+                          // No persisted session — nothing to recover.
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'No session to recover — returning to library',
+                                ),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                            context.go(AppRoutes.library);
+                          }
                         }
                       },
                       icon: const Icon(Icons.refresh, size: 18),
@@ -377,6 +452,14 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     // Handle completion state.
     if (state.status == ExecutionStatus.completed) {
       _handleCompletion(context, state);
+    }
+
+    // Handle stopped/idle state — e.g. stop() invoked from lock screen or
+    // Android notification while the NowPlayingScreen is still visible.
+    // navigate back to the library on the next frame so the current build
+    // completes without trying to push/pop during build.
+    if (state.status == ExecutionStatus.idle) {
+      _handleStopped(context);
     }
 
     // Use ExecutionState text fields populated by the engine from the flattened
@@ -507,6 +590,10 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       child: NextUpPreview(
                         nextStepText: nextStepText,
                         nextStepType: state.nextStepType,
+                        // Tapping the card skips to the next step immediately.
+                        // onTap is null when nextStepText is null (last step),
+                        // so the FINAL STEP card remains non-interactive.
+                        onTap: nextStepText != null ? _onNextUpTap : null,
                       ),
                     ),
                   ],
@@ -613,11 +700,9 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ),
-          IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.more_vert),
-            color: colorScheme.primary,
-          ),
+          // Placeholder to keep header symmetric; overflow menu not yet
+          // implemented — hidden from accessibility tree to avoid a no-op.
+          const SizedBox(width: 48),
         ],
       ),
     );
@@ -653,30 +738,35 @@ class _ControlsRow extends StatelessWidget {
         ),
         const SizedBox(width: 24),
         // Pause/Play — large gradient circle (Stitch: w-20 h-20)
-        GestureDetector(
-          onTap: onTogglePause,
-          child: Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [colorScheme.primary, colorScheme.primaryContainer],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: colorScheme.primary.withValues(alpha: 0.25),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
+        Semantics(
+          button: true,
+          label: isPaused ? 'Resume session' : 'Pause session',
+          excludeSemantics: true,
+          child: GestureDetector(
+            onTap: onTogglePause,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [colorScheme.primary, colorScheme.primaryContainer],
                 ),
-              ],
-            ),
-            child: Icon(
-              isPaused ? Icons.play_arrow : Icons.pause,
-              color: Colors.white,
-              size: 40,
+                boxShadow: [
+                  BoxShadow(
+                    color: colorScheme.primary.withValues(alpha: 0.25),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Icon(
+                isPaused ? Icons.play_arrow : Icons.pause,
+                color: Colors.white,
+                size: 40,
+              ),
             ),
           ),
         ),

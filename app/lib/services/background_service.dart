@@ -41,7 +41,6 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'package:instructor/models/enums.dart';
-import 'package:instructor/services/audio_engine.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/phone_call_handler.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -61,10 +60,8 @@ import 'package:instructor/services/plan_execution_engine.dart';
 class InstructorAudioHandler extends BaseAudioHandler {
   InstructorAudioHandler({
     required PlanExecutionEngine engine,
-    required AudioEngine audioEngine,
     required PhoneCallHandler phoneCallHandler,
   })  : _engine = engine,
-        _audioEngine = audioEngine,
         _phoneCallHandler = phoneCallHandler {
     // Subscribe to execution state changes immediately so that the lock screen
     // always reflects the current plan state.
@@ -77,7 +74,6 @@ class InstructorAudioHandler extends BaseAudioHandler {
   }
 
   final PlanExecutionEngine _engine;
-  final AudioEngine _audioEngine;
   final PhoneCallHandler _phoneCallHandler;
   StreamSubscription<ExecutionState>? _stateSub;
 
@@ -109,13 +105,24 @@ class InstructorAudioHandler extends BaseAudioHandler {
 
   /// Stops plan execution (maps to the ■ lock screen button).
   ///
-  /// Stops the engine, halts all three [AudioPlayer] instances in parallel,
-  /// releases the [AudioSession], emits a final idle [PlaybackState], and
-  /// calls [super.stop()] to dismiss the media notification.
+  /// Calls [PlanExecutionEngine.stop], which already halts all three
+  /// [AudioPlayer] instances (voice, ambient, silence keep-alive) in parallel
+  /// via [Future.wait]. No redundant [AudioEngine.stopAll] call is made here —
+  /// doing so would add unnecessary latency and violate the 500 ms stop
+  /// deadline required by REQ-003.
+  ///
+  /// After the engine stops:
+  ///   1. The [AudioSession] is deactivated so iOS releases the audio focus.
+  ///   2. An idle [PlaybackState] is emitted to clear the lock screen widget.
+  ///   3. [super.stop()] dismisses the Android foreground notification.
   @override
   Future<void> stop() async {
+    // engine.stop() internally calls Future.wait([
+    //   _audioEngine.stopAll(),
+    //   _ttsService.stopSpeaking(),
+    //   _notificationService.cancelAll(),
+    // ]) — no further stopAll() needed here.
     await _engine.stop();
-    await _audioEngine.stopAll();
     final session = await AudioSession.instance;
     await session.setActive(false);
     playbackState.add(PlaybackState(
@@ -212,7 +219,6 @@ class InstructorAudioHandler extends BaseAudioHandler {
 /// 3. Starts phone-call interruption listening via [PhoneCallHandlerImpl].
 Future<InstructorAudioHandler> initializeBackgroundService({
   required PlanExecutionEngine engine,
-  required AudioEngine audioEngine,
   required NotificationService notificationService,
 }) async {
   // Build the phone-call handler backed by audio_session interruptions.
@@ -227,16 +233,15 @@ Future<InstructorAudioHandler> initializeBackgroundService({
   final handler = await AudioService.init<InstructorAudioHandler>(
     builder: () => InstructorAudioHandler(
       engine: engine,
-      audioEngine: audioEngine,
       phoneCallHandler: phoneCallHandler,
     ),
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.instructor.app.audio',
       androidNotificationChannelName: 'Instructor',
-      // androidStopForegroundOnPause: false keeps the foreground service alive
-      // even during wait steps (no audio playing), so androidNotificationOngoing
-      // is unnecessary — the notification persists as long as the service runs.
-      androidNotificationOngoing: false,
+      // [androidStopForegroundOnPause: false] keeps the Android foreground
+      // service alive even during wait steps (no audio actively playing) so
+      // the OS cannot suspend the app between steps. This is the primary guard
+      // against background auto-pause on Android.
       androidStopForegroundOnPause: false,
     ),
   );
@@ -257,8 +262,13 @@ Future<InstructorAudioHandler> initializeBackgroundService({
       usage: AndroidAudioUsage.media,
     ),
     androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-    // Ask Android to pause (rather than duck) when another app needs focus.
-    androidWillPauseWhenDucked: true,
+    // [androidWillPauseWhenDucked: false] ensures that transient duck focus-
+    // loss events (e.g. navigation prompts, notification sounds) are reported
+    // by audio_session as [AudioInterruptionType.duck] rather than
+    // [AudioInterruptionType.pause]. PhoneCallHandlerImpl correctly ignores
+    // duck events; with true, every notification sound would be misclassified
+    // as a phone-call interruption and spuriously pause execution.
+    androidWillPauseWhenDucked: false,
   ));
 
   // Now that the session is configured, start listening for phone-call

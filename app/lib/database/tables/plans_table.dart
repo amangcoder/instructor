@@ -36,4 +36,10 @@ class PlansTable extends Table {
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   DateTimeColumn get lastUsedAt => dateTime().nullable()();
+
+  /// Whether this plan was created by the user (true) or seeded as a starter
+  /// plan (false). Defaults to true so existing rows after migration are
+  /// treated as user-created.
+  BoolColumn get isUserCreated =>
+      boolean().withDefault(const Constant(true))();
 }

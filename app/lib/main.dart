@@ -8,8 +8,13 @@ import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/data/starter_plans.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/services/audio_engine.dart';
+import 'package:instructor/services/notification_tap_channel.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:instructor/services/tts_service.dart';
+import 'package:instructor/services/widget_state_channel.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+
+const String _sentryDsn = String.fromEnvironment('SENTRY_DSN');
 
 /// Entry point for the Instructor app.
 ///
@@ -29,7 +34,25 @@ import 'package:instructor/services/tts_service.dart';
 ///    container instance, so the [PlanExecutionEngine] wired into the
 ///    background handler is the exact same object used by the UI.
 void main() async {
+  await SentryFlutter.init(
+    (SentryFlutterOptions options) {
+      options
+        ..dsn = _sentryDsn
+        ..tracesSampleRate = 0.2;
+    },
+    appRunner: _bootstrap,
+  );
+}
+
+Future<void> _bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Step 0: Register platform-channel handlers (must be after binding). ───
+  //
+  // Sets up the "com.instructor.app/notification" MethodChannel so that
+  // MainActivity.onNewIntent() can notify Flutter when the user taps the
+  // Android foreground notification body (REQ-004).
+  initNotificationTapChannel();
 
   // ── Step 1: Resolve the SQLite file path and TTS audio directory. ──────────
   await initDatabase();
@@ -44,7 +67,10 @@ void main() async {
   final container = ProviderContainer();
 
   final engine = container.read(planExecutionEngineProvider);
-  final audioEngine = container.read(audioEngineProvider);
+  // Read audioEngine early so the Riverpod singleton is created before
+  // PlanExecutionEngine first references it. The handler no longer holds a
+  // direct reference — engine.stop() calls audioEngine.stopAll() internally.
+  container.read(audioEngineProvider);
   final notificationService = container.read(notificationServiceProvider);
 
   // ── Step 3: Initialise audio_service and the iOS AVAudioSession. ──────────
@@ -57,7 +83,6 @@ void main() async {
   try {
     await initializeBackgroundService(
       engine: engine,
-      audioEngine: audioEngine,
       notificationService: notificationService,
     );
   } catch (e) {
@@ -66,6 +91,13 @@ void main() async {
 
   // ── Step 4: Seed starter plans on first launch. ──────────────────────────
   await seedStarterPlans(container.read(planRepositoryProvider));
+
+  // ── Step 4b: Initialise iOS widget state bridge (TASK-017). ─────────────
+  //
+  // Reads widgetStateChannelProvider to create the singleton, which wires up
+  // the PlanExecutionEngine → UserDefaults → WidgetKit pipeline.
+  // No-op on non-iOS platforms.
+  container.read(widgetStateChannelProvider);
 
   // ── Step 5: Run the Flutter app. ──────────────────────────────────────────
   runApp(

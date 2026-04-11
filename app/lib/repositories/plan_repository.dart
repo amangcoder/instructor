@@ -7,6 +7,7 @@ import 'package:instructor/database/tables/plans_table.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/services/sync_service.dart';
 
 part 'plan_repository.g.dart';
 
@@ -41,6 +42,22 @@ abstract class PlanRepository {
     PlanCategory? category,
   });
 
+  /// Returns a reactive stream of user-created plans ([Plan.isUserCreated]=true).
+  ///
+  /// Supports the same [searchQuery] and [category] filters as [watchAllPlans].
+  Stream<List<Plan>> watchUserPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  });
+
+  /// Returns a reactive stream of starter/seeded plans ([Plan.isUserCreated]=false).
+  ///
+  /// Supports the same [searchQuery] and [category] filters as [watchAllPlans].
+  Stream<List<Plan>> watchStarterPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  });
+
   /// Updates the [Plan.lastUsedAt] timestamp to now.
   Future<void> updateLastUsed(int id);
 
@@ -61,10 +78,17 @@ abstract class PlanRepository {
 ///
 /// All writes use [into] / [update] / [delete] so that Drift's built-in
 /// change-tracking automatically notifies any active [watchAllPlans] streams.
+///
+/// After every mutation ([createPlan], [updatePlan], [deletePlan]) a debounced
+/// sync is scheduled via [SyncService.scheduleDebouncedSync] — no more than
+/// one upload per 30 seconds. The optional [syncService] parameter allows
+/// tests to omit sync entirely.
 class DriftPlanRepository implements PlanRepository {
-  const DriftPlanRepository(this._db);
+  DriftPlanRepository(this._db, {SyncService? syncService})
+      : _syncService = syncService;
 
   final AppDatabase _db;
+  final SyncService? _syncService;
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -86,6 +110,7 @@ class DriftPlanRepository implements PlanRepository {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       lastUsedAt: row.lastUsedAt,
+      isUserCreated: row.isUserCreated,
     );
   }
 
@@ -104,6 +129,7 @@ class DriftPlanRepository implements PlanRepository {
       createdAt: Value(plan.createdAt),
       updatedAt: Value(plan.updatedAt),
       lastUsedAt: Value(plan.lastUsedAt),
+      isUserCreated: Value(plan.isUserCreated),
     );
   }
 
@@ -118,7 +144,9 @@ class DriftPlanRepository implements PlanRepository {
       createdAt: Value(now),
       updatedAt: Value(now),
     );
-    return _db.into(_db.plansTable).insert(companion);
+    final id = await _db.into(_db.plansTable).insert(companion);
+    _syncService?.scheduleDebouncedSync();
+    return id;
   }
 
   @override
@@ -129,6 +157,7 @@ class DriftPlanRepository implements PlanRepository {
     await (_db.update(_db.plansTable)
           ..where((t) => t.id.equals(id)))
         .write(companion);
+    _syncService?.scheduleDebouncedSync();
   }
 
   @override
@@ -143,6 +172,8 @@ class DriftPlanRepository implements PlanRepository {
     await (_db.delete(_db.plansTable)
           ..where((t) => t.id.equals(id)))
         .go();
+
+    _syncService?.scheduleDebouncedSync();
   }
 
   @override
@@ -170,6 +201,58 @@ class DriftPlanRepository implements PlanRepository {
         // Most recently used first among non-null rows.
         (t) => OrderingTerm.desc(t.lastUsedAt),
         // Stable secondary sort by most recently updated.
+        (t) => OrderingTerm.desc(t.updatedAt),
+      ]);
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      query.where(
+        (t) => t.name.like('%${_escapeLikePattern(searchQuery)}%'),
+      );
+    }
+
+    if (category != null) {
+      query.where((t) => t.category.equals(category.name));
+    }
+
+    return query.watch().map((rows) => rows.map(_rowToPlan).toList());
+  }
+
+  @override
+  Stream<List<Plan>> watchUserPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  }) {
+    final query = _db.select(_db.plansTable)
+      ..where((t) => t.isUserCreated.equals(true))
+      ..orderBy([
+        (t) => OrderingTerm.asc(t.lastUsedAt.isNull()),
+        (t) => OrderingTerm.desc(t.lastUsedAt),
+        (t) => OrderingTerm.desc(t.updatedAt),
+      ]);
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      query.where(
+        (t) => t.name.like('%${_escapeLikePattern(searchQuery)}%'),
+      );
+    }
+
+    if (category != null) {
+      query.where((t) => t.category.equals(category.name));
+    }
+
+    return query.watch().map((rows) => rows.map(_rowToPlan).toList());
+  }
+
+  @override
+  Stream<List<Plan>> watchStarterPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  }) {
+    final query = _db.select(_db.plansTable)
+      ..where((t) => t.isUserCreated.equals(false))
+      ..orderBy([
+        (t) => OrderingTerm.asc(t.lastUsedAt.isNull()),
+        (t) => OrderingTerm.desc(t.lastUsedAt),
         (t) => OrderingTerm.desc(t.updatedAt),
       ]);
 
@@ -286,5 +369,6 @@ class DriftPlanRepository implements PlanRepository {
 @Riverpod(keepAlive: true)
 PlanRepository planRepository(Ref ref) {
   final db = ref.watch(appDatabaseProvider);
-  return DriftPlanRepository(db);
+  final sync = ref.watch(syncServiceProvider);
+  return DriftPlanRepository(db, syncService: sync);
 }

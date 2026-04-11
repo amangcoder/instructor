@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/data/audio_assets.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/theme/step_colors.dart';
+import 'package:instructor/widgets/voice_picker_sheet.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
@@ -260,27 +263,31 @@ class StepCard extends StatelessWidget {
 
 // ── Say ───────────────────────────────────────────────────────────────────
 
-class SayStepEditor extends StatefulWidget {
+class SayStepEditor extends ConsumerStatefulWidget {
   const SayStepEditor({required this.step, required this.onUpdate});
 
   final SayStep step;
   final void Function(PlanStep) onUpdate;
 
   @override
-  State<SayStepEditor> createState() => SayStepEditorState();
+  ConsumerState<SayStepEditor> createState() => SayStepEditorState();
 }
 
-class SayStepEditorState extends State<SayStepEditor> {
+class SayStepEditorState extends ConsumerState<SayStepEditor> {
   late final TextEditingController _textController;
+
+  /// The currently selected voice ID for this step.
+  ///
+  /// Accepts any voice ID string — not limited to the [PlanVoice] enum — so
+  /// Gemini, ElevenLabs, and Kokoro voices all work correctly.
   late String _voiceId;
 
   @override
   void initState() {
     super.initState();
     _textController = TextEditingController(text: widget.step.text);
-    final vid = widget.step.voiceId ?? 'af_heart';
-    final validVoices = PlanVoice.values.map((v) => v.name).toSet();
-    _voiceId = validVoices.contains(vid) ? vid : 'af_heart';
+    // Accept any non-null voice ID; fall back to af_heart (Kokoro default).
+    _voiceId = widget.step.voiceId ?? 'af_heart';
   }
 
   @override
@@ -293,14 +300,38 @@ class SayStepEditorState extends State<SayStepEditor> {
     widget.onUpdate(widget.step.copyWith(text: value));
   }
 
-  void _onVoiceChanged(String? voice) {
-    if (voice == null) return;
-    setState(() => _voiceId = voice);
-    widget.onUpdate(widget.step.copyWith(voiceId: voice));
+  /// Opens [showVoicePickerSheet] filtered to the currently selected TTS
+  /// provider and updates [_voiceId] when a new voice is confirmed.
+  Future<void> _onPickVoice() async {
+    final providerId =
+        ref.read(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
+    final picked = await showVoicePickerSheet(
+      context,
+      providerId: providerId,
+      currentVoiceId: _voiceId,
+    );
+    if (picked != null) {
+      setState(() => _voiceId = picked.id);
+      widget.onUpdate(widget.step.copyWith(voiceId: picked.id));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Resolve a human-readable label for the current voice ID.
+    // Uses the catalog for the currently selected provider; falls back to
+    // [formatVoiceId] if the voice is not yet loaded or provider changed.
+    final providerId =
+        ref.watch(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
+    final voicesAsync = ref.watch(voicesForProviderProvider(providerId));
+    final voiceLabel = voicesAsync.valueOrNull
+            ?.where((v) => v.id == _voiceId)
+            .map((v) => v.label)
+            .firstOrNull ??
+        formatVoiceId(_voiceId);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -322,18 +353,27 @@ class SayStepEditorState extends State<SayStepEditor> {
           ),
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          value: _voiceId,
-          decoration: const InputDecoration(labelText: 'Voice'),
-          items: PlanVoice.values
-              .map(
-                (v) => DropdownMenuItem(
-                  value: v.name,
-                  child: Text(formatVoiceId(v.name)),
-                ),
-              )
-              .toList(),
-          onChanged: _onVoiceChanged,
+        // ── Per-step voice selector (opens voice picker sheet) ──────────
+        Semantics(
+          button: true,
+          label: 'Change voice. Current voice: $voiceLabel',
+          child: OutlinedButton.icon(
+            onPressed: _onPickVoice,
+            icon: const Icon(Icons.record_voice_over_outlined, size: 18),
+            label: Text(
+              voiceLabel,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: OutlinedButton.styleFrom(
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              foregroundColor: colorScheme.onSurface,
+              side: BorderSide(color: colorScheme.outline),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
         ),
       ],
     );

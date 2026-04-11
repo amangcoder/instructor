@@ -84,6 +84,16 @@ class $PlansTableTable extends PlansTable
   late final GeneratedColumn<DateTime> lastUsedAt = GeneratedColumn<DateTime>(
       'last_used_at', aliasedName, true,
       type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _isUserCreatedMeta =
+      const VerificationMeta('isUserCreated');
+  @override
+  late final GeneratedColumn<bool> isUserCreated = GeneratedColumn<bool>(
+      'is_user_created', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("is_user_created" IN (0, 1))'),
+      defaultValue: const Constant(true));
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -95,7 +105,8 @@ class $PlansTableTable extends PlansTable
         steps,
         createdAt,
         updatedAt,
-        lastUsedAt
+        lastUsedAt,
+        isUserCreated
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -146,6 +157,12 @@ class $PlansTableTable extends PlansTable
           lastUsedAt.isAcceptableOrUnknown(
               data['last_used_at']!, _lastUsedAtMeta));
     }
+    if (data.containsKey('is_user_created')) {
+      context.handle(
+          _isUserCreatedMeta,
+          isUserCreated.isAcceptableOrUnknown(
+              data['is_user_created']!, _isUserCreatedMeta));
+    }
     return context;
   }
 
@@ -176,6 +193,8 @@ class $PlansTableTable extends PlansTable
           .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
       lastUsedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}last_used_at']),
+      isUserCreated: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_user_created'])!,
     );
   }
 
@@ -209,6 +228,11 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? lastUsedAt;
+
+  /// Whether this plan was created by the user (true) or seeded as a starter
+  /// plan (false). Defaults to true so existing rows after migration are
+  /// treated as user-created.
+  final bool isUserCreated;
   const PlansTableData(
       {required this.id,
       required this.name,
@@ -219,7 +243,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       required this.steps,
       required this.createdAt,
       required this.updatedAt,
-      this.lastUsedAt});
+      this.lastUsedAt,
+      required this.isUserCreated});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -243,6 +268,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
     if (!nullToAbsent || lastUsedAt != null) {
       map['last_used_at'] = Variable<DateTime>(lastUsedAt);
     }
+    map['is_user_created'] = Variable<bool>(isUserCreated);
     return map;
   }
 
@@ -262,6 +288,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       lastUsedAt: lastUsedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastUsedAt),
+      isUserCreated: Value(isUserCreated),
     );
   }
 
@@ -279,6 +306,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       lastUsedAt: serializer.fromJson<DateTime?>(json['lastUsedAt']),
+      isUserCreated: serializer.fromJson<bool>(json['isUserCreated']),
     );
   }
   @override
@@ -295,6 +323,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'lastUsedAt': serializer.toJson<DateTime?>(lastUsedAt),
+      'isUserCreated': serializer.toJson<bool>(isUserCreated),
     };
   }
 
@@ -308,7 +337,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           List<PlanStep>? steps,
           DateTime? createdAt,
           DateTime? updatedAt,
-          Value<DateTime?> lastUsedAt = const Value.absent()}) =>
+          Value<DateTime?> lastUsedAt = const Value.absent(),
+          bool? isUserCreated}) =>
       PlansTableData(
         id: id ?? this.id,
         name: name ?? this.name,
@@ -320,6 +350,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         lastUsedAt: lastUsedAt.present ? lastUsedAt.value : this.lastUsedAt,
+        isUserCreated: isUserCreated ?? this.isUserCreated,
       );
   PlansTableData copyWithCompanion(PlansTableCompanion data) {
     return PlansTableData(
@@ -337,6 +368,9 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       lastUsedAt:
           data.lastUsedAt.present ? data.lastUsedAt.value : this.lastUsedAt,
+      isUserCreated: data.isUserCreated.present
+          ? data.isUserCreated.value
+          : this.isUserCreated,
     );
   }
 
@@ -352,14 +386,15 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           ..write('steps: $steps, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('lastUsedAt: $lastUsedAt')
+          ..write('lastUsedAt: $lastUsedAt, ')
+          ..write('isUserCreated: $isUserCreated')
           ..write(')'))
         .toString();
   }
 
   @override
   int get hashCode => Object.hash(id, name, description, category, tags,
-      defaultVoice, steps, createdAt, updatedAt, lastUsedAt);
+      defaultVoice, steps, createdAt, updatedAt, lastUsedAt, isUserCreated);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -373,7 +408,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           other.steps == this.steps &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
-          other.lastUsedAt == this.lastUsedAt);
+          other.lastUsedAt == this.lastUsedAt &&
+          other.isUserCreated == this.isUserCreated);
 }
 
 class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
@@ -387,6 +423,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<DateTime?> lastUsedAt;
+  final Value<bool> isUserCreated;
   const PlansTableCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
@@ -398,6 +435,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.lastUsedAt = const Value.absent(),
+    this.isUserCreated = const Value.absent(),
   });
   PlansTableCompanion.insert({
     this.id = const Value.absent(),
@@ -410,6 +448,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.lastUsedAt = const Value.absent(),
+    this.isUserCreated = const Value.absent(),
   }) : name = Value(name);
   static Insertable<PlansTableData> custom({
     Expression<int>? id,
@@ -422,6 +461,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<DateTime>? lastUsedAt,
+    Expression<bool>? isUserCreated,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -434,6 +474,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (lastUsedAt != null) 'last_used_at': lastUsedAt,
+      if (isUserCreated != null) 'is_user_created': isUserCreated,
     });
   }
 
@@ -447,7 +488,8 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       Value<List<PlanStep>>? steps,
       Value<DateTime>? createdAt,
       Value<DateTime>? updatedAt,
-      Value<DateTime?>? lastUsedAt}) {
+      Value<DateTime?>? lastUsedAt,
+      Value<bool>? isUserCreated}) {
     return PlansTableCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
@@ -459,6 +501,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       lastUsedAt: lastUsedAt ?? this.lastUsedAt,
+      isUserCreated: isUserCreated ?? this.isUserCreated,
     );
   }
 
@@ -497,6 +540,9 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     if (lastUsedAt.present) {
       map['last_used_at'] = Variable<DateTime>(lastUsedAt.value);
     }
+    if (isUserCreated.present) {
+      map['is_user_created'] = Variable<bool>(isUserCreated.value);
+    }
     return map;
   }
 
@@ -512,7 +558,8 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
           ..write('steps: $steps, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('lastUsedAt: $lastUsedAt')
+          ..write('lastUsedAt: $lastUsedAt, ')
+          ..write('isUserCreated: $isUserCreated')
           ..write(')'))
         .toString();
   }
@@ -1757,6 +1804,242 @@ class AppSettingsTableCompanion extends UpdateCompanion<AppSettingsTableData> {
   }
 }
 
+class $ProviderCatalogTableTable extends ProviderCatalogTable
+    with TableInfo<$ProviderCatalogTableTable, ProviderCatalogTableData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ProviderCatalogTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(1));
+  static const VerificationMeta _catalogJsonMeta =
+      const VerificationMeta('catalogJson');
+  @override
+  late final GeneratedColumn<String> catalogJson = GeneratedColumn<String>(
+      'catalog_json', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _fetchedAtMeta =
+      const VerificationMeta('fetchedAt');
+  @override
+  late final GeneratedColumn<DateTime> fetchedAt = GeneratedColumn<DateTime>(
+      'fetched_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  @override
+  List<GeneratedColumn> get $columns => [id, catalogJson, fetchedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'provider_catalog';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<ProviderCatalogTableData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('catalog_json')) {
+      context.handle(
+          _catalogJsonMeta,
+          catalogJson.isAcceptableOrUnknown(
+              data['catalog_json']!, _catalogJsonMeta));
+    } else if (isInserting) {
+      context.missing(_catalogJsonMeta);
+    }
+    if (data.containsKey('fetched_at')) {
+      context.handle(_fetchedAtMeta,
+          fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta));
+    } else if (isInserting) {
+      context.missing(_fetchedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ProviderCatalogTableData map(Map<String, dynamic> data,
+      {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ProviderCatalogTableData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      catalogJson: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}catalog_json'])!,
+      fetchedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}fetched_at'])!,
+    );
+  }
+
+  @override
+  $ProviderCatalogTableTable createAlias(String alias) {
+    return $ProviderCatalogTableTable(attachedDatabase, alias);
+  }
+}
+
+class ProviderCatalogTableData extends DataClass
+    implements Insertable<ProviderCatalogTableData> {
+  /// Primary key — always 1 (single-row table).
+  final int id;
+
+  /// Full JSON-encoded catalog from GET /api/tts/providers.
+  ///
+  /// Structure:
+  /// ```json
+  /// { "providers": [ { "id": "gemini", "label": "...", "voices": [...], ... } ] }
+  /// ```
+  final String catalogJson;
+
+  /// UTC timestamp of the last successful catalog fetch from the server.
+  final DateTime fetchedAt;
+  const ProviderCatalogTableData(
+      {required this.id, required this.catalogJson, required this.fetchedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['catalog_json'] = Variable<String>(catalogJson);
+    map['fetched_at'] = Variable<DateTime>(fetchedAt);
+    return map;
+  }
+
+  ProviderCatalogTableCompanion toCompanion(bool nullToAbsent) {
+    return ProviderCatalogTableCompanion(
+      id: Value(id),
+      catalogJson: Value(catalogJson),
+      fetchedAt: Value(fetchedAt),
+    );
+  }
+
+  factory ProviderCatalogTableData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ProviderCatalogTableData(
+      id: serializer.fromJson<int>(json['id']),
+      catalogJson: serializer.fromJson<String>(json['catalogJson']),
+      fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'catalogJson': serializer.toJson<String>(catalogJson),
+      'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
+    };
+  }
+
+  ProviderCatalogTableData copyWith(
+          {int? id, String? catalogJson, DateTime? fetchedAt}) =>
+      ProviderCatalogTableData(
+        id: id ?? this.id,
+        catalogJson: catalogJson ?? this.catalogJson,
+        fetchedAt: fetchedAt ?? this.fetchedAt,
+      );
+  ProviderCatalogTableData copyWithCompanion(
+      ProviderCatalogTableCompanion data) {
+    return ProviderCatalogTableData(
+      id: data.id.present ? data.id.value : this.id,
+      catalogJson:
+          data.catalogJson.present ? data.catalogJson.value : this.catalogJson,
+      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProviderCatalogTableData(')
+          ..write('id: $id, ')
+          ..write('catalogJson: $catalogJson, ')
+          ..write('fetchedAt: $fetchedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, catalogJson, fetchedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ProviderCatalogTableData &&
+          other.id == this.id &&
+          other.catalogJson == this.catalogJson &&
+          other.fetchedAt == this.fetchedAt);
+}
+
+class ProviderCatalogTableCompanion
+    extends UpdateCompanion<ProviderCatalogTableData> {
+  final Value<int> id;
+  final Value<String> catalogJson;
+  final Value<DateTime> fetchedAt;
+  const ProviderCatalogTableCompanion({
+    this.id = const Value.absent(),
+    this.catalogJson = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+  });
+  ProviderCatalogTableCompanion.insert({
+    this.id = const Value.absent(),
+    required String catalogJson,
+    required DateTime fetchedAt,
+  })  : catalogJson = Value(catalogJson),
+        fetchedAt = Value(fetchedAt);
+  static Insertable<ProviderCatalogTableData> custom({
+    Expression<int>? id,
+    Expression<String>? catalogJson,
+    Expression<DateTime>? fetchedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (catalogJson != null) 'catalog_json': catalogJson,
+      if (fetchedAt != null) 'fetched_at': fetchedAt,
+    });
+  }
+
+  ProviderCatalogTableCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? catalogJson,
+      Value<DateTime>? fetchedAt}) {
+    return ProviderCatalogTableCompanion(
+      id: id ?? this.id,
+      catalogJson: catalogJson ?? this.catalogJson,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (catalogJson.present) {
+      map['catalog_json'] = Variable<String>(catalogJson.value);
+    }
+    if (fetchedAt.present) {
+      map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProviderCatalogTableCompanion(')
+          ..write('id: $id, ')
+          ..write('catalogJson: $catalogJson, ')
+          ..write('fetchedAt: $fetchedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1766,12 +2049,19 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ExecutionStateTableTable(this);
   late final $AppSettingsTableTable appSettingsTable =
       $AppSettingsTableTable(this);
+  late final $ProviderCatalogTableTable providerCatalogTable =
+      $ProviderCatalogTableTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [plansTable, ttsCacheTable, executionStateTable, appSettingsTable];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        plansTable,
+        ttsCacheTable,
+        executionStateTable,
+        appSettingsTable,
+        providerCatalogTable
+      ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules(
         [
@@ -1804,6 +2094,7 @@ typedef $$PlansTableTableCreateCompanionBuilder = PlansTableCompanion Function({
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<DateTime?> lastUsedAt,
+  Value<bool> isUserCreated,
 });
 typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
   Value<int> id,
@@ -1816,6 +2107,7 @@ typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<DateTime?> lastUsedAt,
+  Value<bool> isUserCreated,
 });
 
 final class $$PlansTableTableReferences
@@ -1899,6 +2191,9 @@ class $$PlansTableTableFilterComposer
   ColumnFilters<DateTime> get lastUsedAt => $composableBuilder(
       column: $table.lastUsedAt, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<bool> get isUserCreated => $composableBuilder(
+      column: $table.isUserCreated, builder: (column) => ColumnFilters(column));
+
   Expression<bool> ttsCacheTableRefs(
       Expression<bool> Function($$TtsCacheTableTableFilterComposer f) f) {
     final $$TtsCacheTableTableFilterComposer composer = $composerBuilder(
@@ -1981,6 +2276,10 @@ class $$PlansTableTableOrderingComposer
 
   ColumnOrderings<DateTime> get lastUsedAt => $composableBuilder(
       column: $table.lastUsedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isUserCreated => $composableBuilder(
+      column: $table.isUserCreated,
+      builder: (column) => ColumnOrderings(column));
 }
 
 class $$PlansTableTableAnnotationComposer
@@ -2021,6 +2320,9 @@ class $$PlansTableTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastUsedAt => $composableBuilder(
       column: $table.lastUsedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get isUserCreated => $composableBuilder(
+      column: $table.isUserCreated, builder: (column) => column);
 
   Expression<T> ttsCacheTableRefs<T extends Object>(
       Expression<T> Function($$TtsCacheTableTableAnnotationComposer a) f) {
@@ -2101,6 +2403,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<DateTime?> lastUsedAt = const Value.absent(),
+            Value<bool> isUserCreated = const Value.absent(),
           }) =>
               PlansTableCompanion(
             id: id,
@@ -2113,6 +2416,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             createdAt: createdAt,
             updatedAt: updatedAt,
             lastUsedAt: lastUsedAt,
+            isUserCreated: isUserCreated,
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
@@ -2125,6 +2429,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<DateTime?> lastUsedAt = const Value.absent(),
+            Value<bool> isUserCreated = const Value.absent(),
           }) =>
               PlansTableCompanion.insert(
             id: id,
@@ -2137,6 +2442,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             createdAt: createdAt,
             updatedAt: updatedAt,
             lastUsedAt: lastUsedAt,
+            isUserCreated: isUserCreated,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
@@ -3029,6 +3335,149 @@ typedef $$AppSettingsTableTableProcessedTableManager = ProcessedTableManager<
     ),
     AppSettingsTableData,
     PrefetchHooks Function()>;
+typedef $$ProviderCatalogTableTableCreateCompanionBuilder
+    = ProviderCatalogTableCompanion Function({
+  Value<int> id,
+  required String catalogJson,
+  required DateTime fetchedAt,
+});
+typedef $$ProviderCatalogTableTableUpdateCompanionBuilder
+    = ProviderCatalogTableCompanion Function({
+  Value<int> id,
+  Value<String> catalogJson,
+  Value<DateTime> fetchedAt,
+});
+
+class $$ProviderCatalogTableTableFilterComposer
+    extends Composer<_$AppDatabase, $ProviderCatalogTableTable> {
+  $$ProviderCatalogTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get catalogJson => $composableBuilder(
+      column: $table.catalogJson, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get fetchedAt => $composableBuilder(
+      column: $table.fetchedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$ProviderCatalogTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $ProviderCatalogTableTable> {
+  $$ProviderCatalogTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get catalogJson => $composableBuilder(
+      column: $table.catalogJson, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get fetchedAt => $composableBuilder(
+      column: $table.fetchedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$ProviderCatalogTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ProviderCatalogTableTable> {
+  $$ProviderCatalogTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get catalogJson => $composableBuilder(
+      column: $table.catalogJson, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get fetchedAt =>
+      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+}
+
+class $$ProviderCatalogTableTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $ProviderCatalogTableTable,
+    ProviderCatalogTableData,
+    $$ProviderCatalogTableTableFilterComposer,
+    $$ProviderCatalogTableTableOrderingComposer,
+    $$ProviderCatalogTableTableAnnotationComposer,
+    $$ProviderCatalogTableTableCreateCompanionBuilder,
+    $$ProviderCatalogTableTableUpdateCompanionBuilder,
+    (
+      ProviderCatalogTableData,
+      BaseReferences<_$AppDatabase, $ProviderCatalogTableTable,
+          ProviderCatalogTableData>
+    ),
+    ProviderCatalogTableData,
+    PrefetchHooks Function()> {
+  $$ProviderCatalogTableTableTableManager(
+      _$AppDatabase db, $ProviderCatalogTableTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ProviderCatalogTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ProviderCatalogTableTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ProviderCatalogTableTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> catalogJson = const Value.absent(),
+            Value<DateTime> fetchedAt = const Value.absent(),
+          }) =>
+              ProviderCatalogTableCompanion(
+            id: id,
+            catalogJson: catalogJson,
+            fetchedAt: fetchedAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String catalogJson,
+            required DateTime fetchedAt,
+          }) =>
+              ProviderCatalogTableCompanion.insert(
+            id: id,
+            catalogJson: catalogJson,
+            fetchedAt: fetchedAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$ProviderCatalogTableTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $ProviderCatalogTableTable,
+        ProviderCatalogTableData,
+        $$ProviderCatalogTableTableFilterComposer,
+        $$ProviderCatalogTableTableOrderingComposer,
+        $$ProviderCatalogTableTableAnnotationComposer,
+        $$ProviderCatalogTableTableCreateCompanionBuilder,
+        $$ProviderCatalogTableTableUpdateCompanionBuilder,
+        (
+          ProviderCatalogTableData,
+          BaseReferences<_$AppDatabase, $ProviderCatalogTableTable,
+              ProviderCatalogTableData>
+        ),
+        ProviderCatalogTableData,
+        PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3041,6 +3490,8 @@ class $AppDatabaseManager {
       $$ExecutionStateTableTableTableManager(_db, _db.executionStateTable);
   $$AppSettingsTableTableTableManager get appSettingsTable =>
       $$AppSettingsTableTableTableManager(_db, _db.appSettingsTable);
+  $$ProviderCatalogTableTableTableManager get providerCatalogTable =>
+      $$ProviderCatalogTableTableTableManager(_db, _db.providerCatalogTable);
 }
 
 // **************************************************************************

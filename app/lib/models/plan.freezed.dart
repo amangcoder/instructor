@@ -31,6 +31,12 @@ mixin _$Plan {
   DateTime get updatedAt => throw _privateConstructorUsedError;
   DateTime? get lastUsedAt => throw _privateConstructorUsedError;
 
+  /// Whether this plan was created by the user.
+  ///
+  /// Seeded starter plans have [isUserCreated]=false; every plan created
+  /// through the editor defaults to true.
+  bool get isUserCreated => throw _privateConstructorUsedError;
+
   /// Serializes this Plan to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
 
@@ -55,7 +61,8 @@ abstract class $PlanCopyWith<$Res> {
       List<PlanStep> steps,
       DateTime createdAt,
       DateTime updatedAt,
-      DateTime? lastUsedAt});
+      DateTime? lastUsedAt,
+      bool isUserCreated});
 }
 
 /// @nodoc
@@ -83,6 +90,7 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
     Object? createdAt = null,
     Object? updatedAt = null,
     Object? lastUsedAt = freezed,
+    Object? isUserCreated = null,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -125,6 +133,10 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
           ? _value.lastUsedAt
           : lastUsedAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
+      isUserCreated: null == isUserCreated
+          ? _value.isUserCreated
+          : isUserCreated // ignore: cast_nullable_to_non_nullable
+              as bool,
     ) as $Val);
   }
 }
@@ -146,7 +158,8 @@ abstract class _$$PlanImplCopyWith<$Res> implements $PlanCopyWith<$Res> {
       List<PlanStep> steps,
       DateTime createdAt,
       DateTime updatedAt,
-      DateTime? lastUsedAt});
+      DateTime? lastUsedAt,
+      bool isUserCreated});
 }
 
 /// @nodoc
@@ -171,6 +184,7 @@ class __$$PlanImplCopyWithImpl<$Res>
     Object? createdAt = null,
     Object? updatedAt = null,
     Object? lastUsedAt = freezed,
+    Object? isUserCreated = null,
   }) {
     return _then(_$PlanImpl(
       id: null == id
@@ -213,6 +227,10 @@ class __$$PlanImplCopyWithImpl<$Res>
           ? _value.lastUsedAt
           : lastUsedAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
+      isUserCreated: null == isUserCreated
+          ? _value.isUserCreated
+          : isUserCreated // ignore: cast_nullable_to_non_nullable
+              as bool,
     ));
   }
 }
@@ -230,7 +248,8 @@ class _$PlanImpl extends _Plan {
       final List<PlanStep> steps = const [],
       required this.createdAt,
       required this.updatedAt,
-      this.lastUsedAt})
+      this.lastUsedAt,
+      this.isUserCreated = true})
       : assert(defaultVoice != '', 'defaultVoice must not be empty'),
         _tags = tags,
         _steps = steps,
@@ -276,9 +295,17 @@ class _$PlanImpl extends _Plan {
   @override
   final DateTime? lastUsedAt;
 
+  /// Whether this plan was created by the user.
+  ///
+  /// Seeded starter plans have [isUserCreated]=false; every plan created
+  /// through the editor defaults to true.
+  @override
+  @JsonKey()
+  final bool isUserCreated;
+
   @override
   String toString() {
-    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt)';
+    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isUserCreated: $isUserCreated)';
   }
 
   @override
@@ -301,7 +328,9 @@ class _$PlanImpl extends _Plan {
             (identical(other.updatedAt, updatedAt) ||
                 other.updatedAt == updatedAt) &&
             (identical(other.lastUsedAt, lastUsedAt) ||
-                other.lastUsedAt == lastUsedAt));
+                other.lastUsedAt == lastUsedAt) &&
+            (identical(other.isUserCreated, isUserCreated) ||
+                other.isUserCreated == isUserCreated));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -317,7 +346,8 @@ class _$PlanImpl extends _Plan {
       const DeepCollectionEquality().hash(_steps),
       createdAt,
       updatedAt,
-      lastUsedAt);
+      lastUsedAt,
+      isUserCreated);
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.
@@ -346,7 +376,8 @@ abstract class _Plan extends Plan {
       final List<PlanStep> steps,
       required final DateTime createdAt,
       required final DateTime updatedAt,
-      final DateTime? lastUsedAt}) = _$PlanImpl;
+      final DateTime? lastUsedAt,
+      final bool isUserCreated}) = _$PlanImpl;
   const _Plan._() : super._();
 
   factory _Plan.fromJson(Map<String, dynamic> json) = _$PlanImpl.fromJson;
@@ -371,6 +402,13 @@ abstract class _Plan extends Plan {
   DateTime get updatedAt;
   @override
   DateTime? get lastUsedAt;
+
+  /// Whether this plan was created by the user.
+  ///
+  /// Seeded starter plans have [isUserCreated]=false; every plan created
+  /// through the editor defaults to true.
+  @override
+  bool get isUserCreated;
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.

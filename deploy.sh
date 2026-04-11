@@ -23,6 +23,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="${SCRIPT_DIR}/infra"
+SERVER_DIR="${SCRIPT_DIR}/server"
 
 echo "==> Instructor Production Deploy"
 echo "    Infra directory : ${INFRA_DIR}"
@@ -30,17 +31,25 @@ echo "    SES from email  : instructor.app@layersiq.com"
 echo "    Env             : prod"
 echo ""
 
-# ── 1. Ensure infra dependencies are installed ───────────────────────────────
+# ── 1. Build server (esbuild bundle) — MUST run before CDK deploy ────────────
+# The Lambda handler is dist/lambda.js (esbuild self-contained bundle).
+# Running 'nest start' or 'tsc' also writes dist/lambda.js but as a thin
+# TypeScript-compiled file that requires external modules → Lambda fails.
+# Always regenerate the esbuild bundle here so CDK packages the correct file.
+echo "==> Building server (esbuild bundle)..."
+(cd "${SERVER_DIR}" && pnpm run build)
+
+# ── 2. Ensure infra dependencies are installed ───────────────────────────────
 if [ ! -d "${INFRA_DIR}/node_modules" ]; then
   echo "==> Installing infra dependencies..."
   (cd "${INFRA_DIR}" && npm install)
 fi
 
-# ── 2. Build TypeScript (CDK needs compiled JS) ───────────────────────────────
+# ── 3. Build TypeScript (CDK needs compiled JS) ───────────────────────────────
 echo "==> Building CDK TypeScript..."
 (cd "${INFRA_DIR}" && npm run build)
 
-# ── 3. CDK Deploy ─────────────────────────────────────────────────────────────
+# ── 4. CDK Deploy ─────────────────────────────────────────────────────────────
 echo "==> Running CDK deploy..."
 cd "${INFRA_DIR}" && npx cdk deploy \
   --all \

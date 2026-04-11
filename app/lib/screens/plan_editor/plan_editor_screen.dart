@@ -12,10 +12,14 @@ import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/providers/execution_providers.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
+import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/services/provider_catalog_manager.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/theme/app_branding.dart';
 import 'package:instructor/theme/gradient_button.dart';
+import 'package:instructor/widgets/active_session_dialog.dart';
+import 'package:instructor/widgets/voice_validation_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'widgets/plan_metadata_sheet.dart';
@@ -78,6 +82,29 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   /// Used by [_hasUnsavedChanges] to detect edits.
   String? _initialFingerprint;
 
+  /// Returns a stable string fingerprint for a single [PlanStep].
+  ///
+  /// For [RepeatStep], children are recursively fingerprinted so that edits
+  /// to any nested step are detected as an unsaved change.
+  String _stepFingerprint(PlanStep s) {
+    final content = switch (s) {
+      SayStep(:final text, :final voiceId) =>
+        'say:$text:${voiceId ?? ''}',
+      WaitStep(:final duration) =>
+        'wait:${duration.inMilliseconds}',
+      NotifyStep(:final title, :final body) =>
+        'notify:$title:$body',
+      PlayStep(:final audioAssetKey) => 'play:$audioAssetKey',
+      // Include children recursively so RepeatStep child edits are detected.
+      RepeatStep(:final count, :final children) =>
+        'repeat:$count:[${children.map(_stepFingerprint).join(',')}]',
+      CountStep(:final from, :final to, :final intervalSeconds) =>
+        'count:$from:$to:$intervalSeconds',
+      StopAudioStep() => 'stop',
+    };
+    return '${s.id}:$content';
+  }
+
   String _currentFingerprint() => [
         _name,
         _description,
@@ -85,22 +112,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         _defaultVoice,
         ..._tags,
         ':',
-        ..._steps.map((s) {
-          final content = switch (s) {
-            SayStep(:final text, :final voiceId) =>
-              'say:$text:${voiceId ?? ''}',
-            WaitStep(:final duration) =>
-              'wait:${duration.inMilliseconds}',
-            NotifyStep(:final title, :final body) =>
-              'notify:$title:$body',
-            PlayStep(:final audioAssetKey) => 'play:$audioAssetKey',
-            RepeatStep(:final count) => 'repeat:$count',
-            CountStep(:final from, :final to, :final intervalSeconds) =>
-              'count:$from:$to:$intervalSeconds',
-            StopAudioStep() => 'stop',
-          };
-          return '${s.id}:$content';
-        }),
+        ..._steps.map(_stepFingerprint),
       ].join('|');
 
   bool get _hasUnsavedChanges {
@@ -246,6 +258,15 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       ),
       items: const [
         PopupMenuItem(
+          value: _StepAction.startFromHere,
+          child: ListTile(
+            leading: Icon(Icons.play_circle_outline),
+            title: Text('Start from here'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        PopupMenuItem(
           value: _StepAction.duplicate,
           child: ListTile(
             leading: Icon(Icons.copy_outlined),
@@ -266,6 +287,9 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       ],
     );
 
+    if (result == _StepAction.startFromHere) {
+      await _startFromStep(context, index);
+    }
     if (result == _StepAction.duplicate) _duplicateStep(index);
     if (result == _StepAction.delete) _deleteStep(index);
   }
@@ -302,6 +326,10 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   ///
   /// Does nothing if the plan has no steps (button is also disabled in that
   /// case via [_steps.isEmpty]).
+  ///
+  /// If another plan session is already running/paused, the active-session
+  /// guard dialog is shown first. The user must confirm before the preview
+  /// can start (stopping the existing session).
   Future<void> _startPreview() async {
     if (_steps.isEmpty) return;
 
@@ -319,12 +347,59 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       lastUsedAt: _originalLastUsedAt,
     );
 
-    final engine = ref.read(planExecutionEngineProvider);
-    await engine.startPreview(plan);
+    await startPlanWithGuard(
+      context,
+      ref,
+      newPlan: plan,
+      onStart: () async {
+        final engine = ref.read(planExecutionEngineProvider);
+        await engine.startPreview(plan);
+        if (mounted) {
+          context.go(AppRoutes.nowPlaying);
+        }
+      },
+    );
+  }
 
-    if (mounted) {
-      context.go(AppRoutes.nowPlaying);
-    }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Start from step (mid-plan start)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Starts the plan from [stepIndex] (0-based top-level step index).
+  ///
+  /// Guards with [startPlanWithGuard] so that an active session confirmation
+  /// dialog is shown if another plan is already running/paused.
+  Future<void> _startFromStep(BuildContext context, int stepIndex) async {
+    if (_steps.isEmpty || stepIndex >= _steps.length) return;
+
+    final now = DateTime.now();
+    final plan = Plan(
+      id: widget.planId ?? 0,
+      name: _name.trim().isEmpty ? 'Plan' : _name.trim(),
+      description: _description.trim().isEmpty ? null : _description.trim(),
+      category: _category,
+      tags: List<String>.unmodifiable(_tags),
+      defaultVoice: _defaultVoice,
+      steps: List<PlanStep>.unmodifiable(_steps),
+      createdAt: _originalCreatedAt ?? now,
+      updatedAt: now,
+      lastUsedAt: _originalLastUsedAt,
+    );
+
+    await startPlanWithGuard(
+      context,
+      ref,
+      newPlan: plan,
+      onStart: () async {
+        final engine = ref.read(planExecutionEngineProvider);
+        // Convert top-level step index to flattened index.
+        final flatIndex = flatStepIndexForOriginalIndex(plan.steps, stepIndex);
+        await engine.startPlanFromStep(plan, flatIndex);
+        if (mounted) {
+          context.go(AppRoutes.nowPlaying);
+        }
+      },
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -397,6 +472,121 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Voice validation
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Collects all unique voice IDs referenced in the plan (default voice +
+  /// any per-step [SayStep.voiceId] overrides, recursing into RepeatSteps).
+  Set<String> _collectPlanVoiceIds(List<PlanStep> steps, String defaultVoice) {
+    final ids = <String>{defaultVoice};
+    void recurse(List<PlanStep> ss) {
+      for (final s in ss) {
+        switch (s) {
+          case SayStep(:final voiceId) when voiceId != null:
+            ids.add(voiceId);
+          case RepeatStep(:final children):
+            recurse(children);
+          default:
+            break;
+        }
+      }
+    }
+
+    recurse(steps);
+    return ids;
+  }
+
+  /// Validates all voices in the current plan against the current TTS provider.
+  ///
+  /// Shows [showVoiceValidationDialog] for the first invalid voice found.
+  /// - Returns `true` when all voices are valid (or the user resolved every
+  ///   mismatch by selecting a replacement voice and [_defaultVoice] has been
+  ///   updated accordingly).
+  /// - Returns `false` when the user cancels the dialog — the caller should
+  ///   abort the save entirely (plan not modified, synthesis skipped).
+  Future<bool> _validateVoicesBeforeSave() async {
+    if (!mounted) return true;
+
+    // Read the current provider from app settings.
+    final settings = ref.read(appSettingsProvider);
+    final rawProvider = await settings.read(AppSettingsKeys.ttsProvider);
+    final providerId =
+        (rawProvider?.isNotEmpty == true) ? rawProvider! : 'kokoro';
+
+    // Provider-label map for human-friendly dialog message.
+    const providerLabels = <String, String>{
+      'kokoro': 'Kokoro',
+      'gemini': 'Gemini',
+      'elevenlabs': 'ElevenLabs',
+    };
+    final providerLabel = providerLabels[providerId] ?? providerId;
+
+    final catalogManager = ref.read(providerCatalogManagerProvider);
+
+    // Collect all voice IDs referenced in this plan.
+    final voiceIds = _collectPlanVoiceIds(_steps, _defaultVoice);
+
+    for (final voiceId in voiceIds) {
+      final isValid =
+          await catalogManager.isVoiceValidForProvider(voiceId, providerId);
+      if (isValid) continue;
+
+      // Found an invalid voice — show the mismatch dialog.
+      if (!mounted) return false;
+      final selectedVoice = await showVoiceValidationDialog(
+        context,
+        voiceId: voiceId,
+        providerId: providerId,
+        providerLabel: providerLabel,
+      );
+
+      if (selectedVoice == null) {
+        // User cancelled — abort save, plan not modified.
+        return false;
+      }
+
+      // User selected a new voice — apply it.
+      // Replace the invalid voice: if it was the default voice, update that.
+      // Also update any step-level SayStep overrides that used the old voice.
+      setState(() {
+        if (_defaultVoice == voiceId) {
+          _defaultVoice = selectedVoice.id;
+        }
+        // Update per-step overrides that used the now-invalid voiceId.
+        _steps = _steps
+            .map((s) => _replaceVoiceInStep(s, voiceId, selectedVoice.id))
+            .toList();
+      });
+
+      // Re-validate remaining voices after the update (the replaced voice may
+      // have revealed another mismatch from a different step).
+      return _validateVoicesBeforeSave();
+    }
+
+    return true; // All voices valid.
+  }
+
+  /// Recursively replaces [oldVoiceId] with [newVoiceId] in [step] and any
+  /// nested [RepeatStep] children.
+  PlanStep _replaceVoiceInStep(
+    PlanStep step,
+    String oldVoiceId,
+    String newVoiceId,
+  ) {
+    switch (step) {
+      case SayStep(:final voiceId) when voiceId == oldVoiceId:
+        return (step as SayStep).copyWith(voiceId: newVoiceId);
+      case RepeatStep(:final children):
+        final updatedChildren = children
+            .map((c) => _replaceVoiceInStep(c, oldVoiceId, newVoiceId))
+            .toList();
+        return (step as RepeatStep).copyWith(children: updatedChildren);
+      default:
+        return step;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Save
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -406,6 +596,38 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       final shouldOpen = await _promptForName();
       if (!shouldOpen) return;
       return; // metadata sheet was opened; user must tap save again
+    }
+
+    // Validate all voices in the plan against the current TTS provider.
+    // If any voice is incompatible, the user is prompted to select a
+    // replacement.  On cancel the save is aborted entirely (plan not modified,
+    // synthesis skipped).
+    final voicesValid = await _validateVoicesBeforeSave();
+    if (!voicesValid) return;
+
+    // ── Debug logging: verify editor state before persisting ─────────────────
+    debugPrint(
+      '[PlanEditor] _save() called — planId=${widget.planId}, '
+      'name="${_name.trim()}", stepCount=${_steps.length}',
+    );
+    if (_steps.isNotEmpty) {
+      for (var i = 0; i < _steps.length; i++) {
+        final s = _steps[i];
+        final detail = switch (s) {
+          SayStep(:final text, :final voiceId) =>
+            'SayStep(text: "$text", voice: ${voiceId ?? 'default'})',
+          WaitStep(:final duration) =>
+            'WaitStep(${duration.inSeconds}s)',
+          RepeatStep(:final count, :final children) =>
+            'RepeatStep(count: $count, children: ${children.length})',
+          NotifyStep(:final title) => 'NotifyStep(title: "$title")',
+          PlayStep(:final audioAssetKey) =>
+            'PlayStep(asset: $audioAssetKey)',
+          CountStep(:final from, :final to) => 'CountStep($from→$to)',
+          StopAudioStep() => 'StopAudioStep',
+        };
+        debugPrint('[PlanEditor]   step[$i]: $detail (id: ${s.id})');
+      }
     }
 
     setState(() => _isSaving = true);
@@ -537,12 +759,12 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           builder: (ctx) => AlertDialog(
             title: const Text('Discard changes?'),
             content: const Text(
-              'You have unsaved changes. Are you sure you want to leave?',
+              'You have unsaved edits that will be lost.',
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Keep editing'),
+                child: const Text('Keep Editing'),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(true),
@@ -881,7 +1103,7 @@ class _DurationHeader extends StatelessWidget {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum _StepAction { duplicate, delete }
+enum _StepAction { duplicate, delete, startFromHere }
 
 /// Returns a deep copy of [step] with a freshly generated ID (and new IDs for
 /// any nested children of a [RepeatStep]).

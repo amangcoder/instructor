@@ -125,9 +125,12 @@ class _FakeCatalogManager extends ProviderCatalogManager {
 class _FakePlanRepository implements PlanRepository {
   final List<Map<String, String>> remapCalls = [];
 
+  /// Records the voiceMap and returns the number of plans updated (always 0
+  /// in this fake since there are no real plans stored).
   @override
-  Future<void> remapPlanVoices(Map<String, String> voiceMap) async {
+  Future<int> remapPlanVoices(Map<String, String> voiceMap) async {
     remapCalls.add(Map.from(voiceMap));
+    return 0; // No real plans in the fake repository.
   }
 
   @override
@@ -140,6 +143,18 @@ class _FakePlanRepository implements PlanRepository {
   Future<Plan?> getPlanById(int id) async => null;
   @override
   Stream<List<Plan>> watchAllPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  }) =>
+      Stream.value([]);
+  @override
+  Stream<List<Plan>> watchUserPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  }) =>
+      Stream.value([]);
+  @override
+  Stream<List<Plan>> watchStarterPlans({
     String? searchQuery,
     PlanCategory? category,
   }) =>
@@ -333,7 +348,57 @@ void main() {
         newProvider: 'gemini',
       );
 
+      // AC1: snackbar must show human-readable voice label.
       expect(result.snackbarMessage, contains('Aoede'));
+    });
+
+    test('snackbar message always includes the locale (AC1)', () async {
+      // en-US locale is supported by Gemini, so localeChanged = false.
+      // The snackbar must still show the locale.
+      await _setKey(db, AppSettingsKeys.defaultVoice, 'af_heart');
+      await _setKey(db, AppSettingsKeys.ttsLocale, 'enUS');
+      await _setKey(db, AppSettingsKeys.ttsProvider, 'kokoro');
+
+      final service = VoiceRemapService(
+        catalogManager: _FakeCatalogManager(),
+        planRepository: _FakePlanRepository(),
+        settings: AppSettings(db),
+      );
+
+      final result = await service.remapVoicesForProvider(
+        oldProvider: 'kokoro',
+        newProvider: 'gemini',
+      );
+
+      expect(result.localeChanged, isFalse,
+          reason: 'Gemini supports enUS — locale should not change');
+      // Even when locale is unchanged, it must appear in the snackbar message.
+      expect(result.snackbarMessage, contains('enUS'));
+    });
+
+    test('snackbar mentions locale change when locale is remapped (AC2)',
+        () async {
+      // 'enIN' is not supported by Gemini → remapped to 'enUS'.
+      await _setKey(db, AppSettingsKeys.defaultVoice, 'af_heart');
+      await _setKey(db, AppSettingsKeys.ttsLocale, 'enIN');
+      await _setKey(db, AppSettingsKeys.ttsProvider, 'kokoro');
+
+      // Gemini catalog from _testCatalog has only enUS / enGB — no enIN.
+      final service = VoiceRemapService(
+        catalogManager: _FakeCatalogManager(),
+        planRepository: _FakePlanRepository(),
+        settings: AppSettings(db),
+      );
+
+      final result = await service.remapVoicesForProvider(
+        oldProvider: 'kokoro',
+        newProvider: 'gemini',
+      );
+
+      expect(result.localeChanged, isTrue,
+          reason: 'Gemini has no enIN locale');
+      // AC2: snackbar must mention locale change.
+      expect(result.snackbarMessage, contains('locale also changed'));
     });
 
     test('falls back to first provider voice when voiceMap lacks mapping',

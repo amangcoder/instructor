@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PlansService } from './plans.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
+import { DatabaseService } from '../database/database.service';
 import type { Phase1Requirements } from './prompts/phase1.prompt';
 
 // ---------------------------------------------------------------------------
@@ -108,10 +109,16 @@ describe('PlansService', () => {
 
     mockRateLimiter = createMockRateLimiter();
 
+    const mockDatabaseService = {
+      savePlan: jest.fn().mockResolvedValue({ planId: 'test-plan-id', updatedAt: new Date() }),
+      listPlans: jest.fn().mockResolvedValue([]),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PlansService,
         { provide: UpstashRateLimitService, useValue: mockRateLimiter },
+        { provide: DatabaseService, useValue: mockDatabaseService },
       ],
     }).compile();
 

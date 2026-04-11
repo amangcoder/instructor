@@ -9,6 +9,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/tables/execution_state_table.dart';
 import 'package:instructor/database/tables/plans_table.dart';
+import 'package:instructor/database/tables/provider_catalog_table.dart';
 import 'package:instructor/database/tables/settings_table.dart';
 import 'package:instructor/database/tables/tts_cache_table.dart';
 import 'package:instructor/database/type_converters.dart';
@@ -26,12 +27,14 @@ part 'app_database.g.dart';
 /// - [TtsCacheTable] — cached TTS audio file paths keyed by content hash
 /// - [ExecutionStateTable] — crash-recovery state for the execution engine
 /// - [AppSettingsTable] — key/value app preferences
+/// - [ProviderCatalogTable] — cached TTS provider catalog (single-row, id=1)
 @DriftDatabase(
   tables: [
     PlansTable,
     TtsCacheTable,
     ExecutionStateTable,
     AppSettingsTable,
+    ProviderCatalogTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -59,7 +62,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -67,6 +70,36 @@ class AppDatabase extends _$AppDatabase {
           await m.createAll();
         },
         onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 5) {
+            // v4 → v5: add is_user_created column to plans.
+            // SQLite ALTER TABLE applies the column default (true = 1) to all
+            // existing rows, so current user plans retain isUserCreated=true.
+            // Then mark the five built-in starter plan names as false so they
+            // appear in the "Starter Plans" section after the upgrade.
+            await customStatement(
+              'ALTER TABLE plans ADD COLUMN is_user_created INTEGER NOT NULL DEFAULT 1',
+            );
+            const starterPlanNames = [
+              '108 Surya Namaskar',
+              'Yoga Nidra',
+              'Full Body Strength Circuit',
+              'Morning Routine',
+              'Deep Work Session',
+            ];
+            for (final name in starterPlanNames) {
+              // Single-quote escape: replace ' with ''
+              final escaped = name.replaceAll("'", "''");
+              await customStatement(
+                "UPDATE plans SET is_user_created = 0 WHERE name = '$escaped'",
+              );
+            }
+          }
+          if (from < 4) {
+            // v3 → v4: add provider_catalog table for caching TTS provider
+            // catalogs fetched from GET /api/tts/providers. Single-row table
+            // (id = 1) replaced via INSERT OR REPLACE on every refresh.
+            await m.createTable(providerCatalogTable);
+          }
           if (from < 3) {
             // v2 → v3: add ambientAssetKey column to execution_state for
             // crash-recovery ambient track identity persistence.

@@ -312,6 +312,19 @@ export class InstructorStack extends cdk.Stack {
         resources: [this.bucket.arnForObjects('tts/*')],
       }),
     );
+    // ListBucket for tts/ prefix — required so S3 returns NoSuchKey (404) instead
+    // of AccessDenied (403) on GetObject misses (versioned bucket behaviour).
+    lambdaRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'S3TtsCacheList',
+        effect: iam.Effect.ALLOW,
+        actions: ['s3:ListBucket'],
+        resources: [this.bucket.bucketArn],
+        conditions: {
+          StringLike: { 's3:prefix': ['tts/*'] },
+        },
+      }),
+    );
 
     // 9d. S3 — User backups: generate pre-signed PUT/GET URLs; read size for /sync/status.
     //     Object-level actions are scoped to backups/* by the resource ARN — no extra condition.
@@ -463,8 +476,10 @@ export class InstructorStack extends cdk.Stack {
         // (reduces per-request latency on warm invocations by ~10–30 ms).
         AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1',
         // Application config — non-secret values passed directly.
+        LLM_PROVIDER: 'gemini',
         AWS_S3_BUCKET: this.bucket.bucketName,
         SES_FROM_EMAIL: sesFromEmail,
+        // SENTRY_DSN is injected from Secrets Manager (instructor/prod/app-secrets).
         // Lambda extension config — the extension listens on this port.
         PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773',
         // Cache TTL for secrets (seconds). 300 s = 5 minutes.

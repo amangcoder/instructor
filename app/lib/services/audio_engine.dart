@@ -114,6 +114,16 @@ abstract class AudioEngine {
   /// Stops all audio channels immediately (no fade).
   Future<void> stopAll();
 
+  /// Duration of the currently loaded voice audio file.
+  ///
+  /// Available as soon as the voice player has decoded the file header
+  /// (i.e. right after [playVoice] calls `setFilePath`). Returns `null`
+  /// when no voice file is loaded or the file has not yet been decoded.
+  ///
+  /// Used by [PlanExecutionEngine] to display an accurate countdown timer
+  /// for [SayStep]s.
+  Duration? get currentVoiceDuration;
+
   /// The current playback position of the ambient audio.
   ///
   /// Returns `null` when no ambient track is loaded.  Used by
@@ -492,6 +502,14 @@ class AudioEngineImpl implements AudioEngine {
   // ────────────────────────────────────────────────────────────────────────
   // Public API — Position tracking
   // ────────────────────────────────────────────────────────────────────────
+
+  @override
+  Duration? get currentVoiceDuration {
+    // just_audio returns null for duration when no file is loaded.
+    final d = _voicePlayer.duration;
+    if (d == null || d == Duration.zero) return null;
+    return d;
+  }
 
   @override
   Duration? get currentAmbientPosition {

@@ -25,6 +25,11 @@ class Plan with _$Plan {
     required DateTime createdAt,
     required DateTime updatedAt,
     DateTime? lastUsedAt,
+    /// Whether this plan was created by the user.
+    ///
+    /// Seeded starter plans have [isUserCreated]=false; every plan created
+    /// through the editor defaults to true.
+    @Default(true) bool isUserCreated,
   }) = _Plan;
 
   factory Plan.fromJson(Map<String, dynamic> json) => _$PlanFromJson(json);

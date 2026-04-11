@@ -12,12 +12,19 @@ import 'package:instructor/screens/now_playing/widgets/next_up_preview.dart';
 ///    wait icon/color, not the say icon/color.
 /// 3. Last step still shows 'Last step' indicator correctly.
 /// 4. When nextStepType is null, NextUpPreview falls back to generic chevron icon.
+///
+/// ## Acceptance criteria (TASK-013)
+/// 5. Tapping NextUpPreview calls onTap once immediately.
+/// 6. The FINAL STEP variant (nextStepText == null) is never tappable.
+/// 7. When onTap is null, the card is rendered non-interactively.
+/// 8. The interactive card carries button semantics and a tap hint.
 void main() {
   /// Wraps [NextUpPreview] in a minimal [MaterialApp] so that theming and
   /// [MediaQuery] are available for the widget tree.
   Widget buildWidget({
     required String? nextStepText,
     StepType? nextStepType,
+    VoidCallback? onTap,
   }) {
     return MaterialApp(
       home: Scaffold(
@@ -26,6 +33,7 @@ void main() {
           child: NextUpPreview(
             nextStepText: nextStepText,
             nextStepType: nextStepType,
+            onTap: onTap,
           ),
         ),
       ),
@@ -41,16 +49,7 @@ void main() {
           nextStepType: null,
         ));
 
-        expect(find.text('Last step'), findsOneWidget);
-      });
-
-      testWidgets('does not show "Next: " prefix', (tester) async {
-        await tester.pumpWidget(buildWidget(
-          nextStepText: null,
-          nextStepType: null,
-        ));
-
-        expect(find.text('Next: '), findsNothing);
+        expect(find.text('Last step in this session'), findsOneWidget);
       });
 
       testWidgets('shows check_circle_outline icon', (tester) async {
@@ -78,6 +77,20 @@ void main() {
           find.bySemanticsLabel('Last step — no next step'),
           findsOneWidget,
         );
+      });
+
+      // TASK-013: FINAL STEP card must never be tappable.
+      testWidgets('is not tappable even when onTap is provided', (tester) async {
+        var tapped = false;
+        await tester.pumpWidget(buildWidget(
+          nextStepText: null,
+          nextStepType: null,
+          onTap: () => tapped = true,
+        ));
+
+        // The FINAL STEP card ignores onTap — no InkWell is rendered.
+        expect(find.byType(InkWell), findsNothing);
+        expect(tapped, isFalse);
       });
     });
 
@@ -194,15 +207,6 @@ void main() {
         expect(find.text(nextText), findsOneWidget);
       });
 
-      testWidgets('shows "Next: " prefix', (tester) async {
-        await tester.pumpWidget(buildWidget(
-          nextStepText: 'Some next step',
-          nextStepType: null,
-        ));
-
-        expect(find.text('Next: '), findsOneWidget);
-      });
-
       testWidgets('has accessible semantics label "Next up: <text>"',
           (tester) async {
         const nextText = 'Some next step';
@@ -218,16 +222,16 @@ void main() {
       });
     });
 
-    // ── Verify "Next: " prefix appears for non-null nextStepText ────────────
-    group('"Next: " prefix display', () {
-      testWidgets('shows "Next: " label when nextStepText is non-null',
+    // ── "NEXT UP" label display ──────────────────────────────────────────────
+    group('"NEXT UP" label display', () {
+      testWidgets('shows "NEXT UP" label when nextStepText is non-null',
           (tester) async {
         await tester.pumpWidget(buildWidget(
           nextStepText: 'Relax',
           nextStepType: StepType.wait,
         ));
 
-        expect(find.text('Next: '), findsOneWidget);
+        expect(find.text('NEXT UP'), findsOneWidget);
       });
 
       testWidgets('truncates long next step text with ellipsis', (tester) async {
@@ -240,6 +244,123 @@ void main() {
 
         // No overflow errors — widget renders successfully.
         expect(tester.takeException(), isNull);
+      });
+    });
+
+    // ── TASK-013: Tap-to-skip behaviour ─────────────────────────────────────
+    group('TASK-013 — tap-to-skip interaction', () {
+      testWidgets('calls onTap once when tapped', (tester) async {
+        var tapCount = 0;
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Inhale',
+          nextStepType: StepType.say,
+          onTap: () => tapCount++,
+        ));
+
+        await tester.tap(find.byType(InkWell));
+        await tester.pump();
+
+        expect(tapCount, 1);
+      });
+
+      testWidgets('renders InkWell when onTap is provided', (tester) async {
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Exhale',
+          nextStepType: StepType.wait,
+          onTap: () {},
+        ));
+
+        expect(find.byType(InkWell), findsOneWidget);
+      });
+
+      testWidgets('does NOT render InkWell when onTap is null', (tester) async {
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Exhale',
+          nextStepType: StepType.wait,
+          // no onTap
+        ));
+
+        expect(find.byType(InkWell), findsNothing);
+      });
+
+      testWidgets('shows arrow affordance icon when tappable', (tester) async {
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Exhale',
+          nextStepType: StepType.wait,
+          onTap: () {},
+        ));
+
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Icon && w.icon == Icons.arrow_forward_ios_rounded,
+          ),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets('does NOT show arrow affordance when non-interactive',
+          (tester) async {
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Exhale',
+          nextStepType: StepType.wait,
+          // no onTap
+        ));
+
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Icon && w.icon == Icons.arrow_forward_ios_rounded,
+          ),
+          findsNothing,
+        );
+      });
+
+      testWidgets('has button semantics when tappable', (tester) async {
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Hold breath',
+          nextStepType: StepType.wait,
+          onTap: () {},
+        ));
+
+        final semanticsNode = tester.getSemantics(
+          find.bySemanticsLabel('Next up: Hold breath'),
+        );
+
+        // The Semantics wrapper marks it as a button with a tap hint.
+        expect(semanticsNode.hasAction(SemanticsAction.tap), isTrue);
+      });
+
+      testWidgets('does not have button semantics when non-interactive',
+          (tester) async {
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Hold breath',
+          nextStepType: StepType.wait,
+          // no onTap
+        ));
+
+        final semanticsNode = tester.getSemantics(
+          find.bySemanticsLabel('Next up: Hold breath'),
+        );
+
+        expect(semanticsNode.hasAction(SemanticsAction.tap), isFalse);
+      });
+
+      testWidgets('multiple rapid taps all fire (debounce lives in parent)',
+          (tester) async {
+        // The widget itself does NOT debounce — debounce is handled in
+        // NowPlayingScreen._onNextUpTap(). The widget just calls onTap each time.
+        var tapCount = 0;
+        await tester.pumpWidget(buildWidget(
+          nextStepText: 'Sprint',
+          nextStepType: StepType.wait,
+          onTap: () => tapCount++,
+        ));
+
+        await tester.tap(find.byType(InkWell));
+        await tester.tap(find.byType(InkWell));
+        await tester.pump();
+
+        // Both taps reach the callback — the caller (NowPlayingScreen) guards.
+        expect(tapCount, 2);
       });
     });
   });

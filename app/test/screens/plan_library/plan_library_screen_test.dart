@@ -93,8 +93,24 @@ class _FakePlanRepository implements PlanRepository {
 class _FakePlanExecutionEngine implements PlanExecutionEngine {
   Plan? startedPlan;
   bool pauseCalled = false;
+  bool stopCalled = false;
 
   final _stateController = StreamController<ExecutionState>.broadcast();
+
+  // Override to simulate an active session (non-null → triggers the guard).
+  ExecutionState? _currentState;
+
+  @override
+  ExecutionState? get currentState => _currentState;
+
+  void setRunningPlan(Plan plan) {
+    _currentState = ExecutionState(
+      plan: plan,
+      currentStepIndex: 0,
+      timeRemaining: const Duration(minutes: 5),
+      status: ExecutionStatus.running,
+    );
+  }
 
   @override
   Future<void> startPlan(Plan plan) async => startedPlan = plan;
@@ -112,13 +128,22 @@ class _FakePlanExecutionEngine implements PlanExecutionEngine {
   Future<void> skipBackward() async {}
 
   @override
-  Future<void> stop() async {}
+  Future<void> stop() async {
+    stopCalled = true;
+    _currentState = null;
+  }
 
   @override
   Stream<ExecutionState> get stateStream => _stateController.stream;
 
   @override
-  Future<ExecutionState?> getRecoverableSession() async => null;
+  Future<ExecutionState?> getRecoverableSession([int? planId]) async => null;
+
+  @override
+  Future<int?> getRecoverableStepIndexForPlan(int planId) async => null;
+
+  @override
+  Future<bool> resumeFromPersistedState(int planId) async => false;
 
   @override
   Future<void> startPreview(Plan plan) async {}
@@ -614,6 +639,102 @@ void main() {
       // No navigation — still on library screen.
       expect(find.text('My Plans'), findsOneWidget);
       expect(engine.startedPlan, isNull);
+    });
+  });
+
+  // ── Active session guard ──────────────────────────────────────────────────
+
+  group('Active session guard', () {
+    testWidgets(
+        'shows confirmation dialog when another plan is running and user taps a card',
+        (tester) async {
+      // Set up Plan 1 as the currently running plan.
+      final plan1 = _makePlan(id: 1, name: 'Plan One');
+      engine.setRunningPlan(plan1);
+
+      await tester.pumpWidget(_buildApp(repo: repo, engine: engine));
+      // Add Plan 2 to the library.
+      await repo.createPlan(_makePlan(id: 2, name: 'Plan Two'));
+      await tester.pumpAndSettle();
+
+      // Tap Plan Two's play button.
+      await tester.tap(find.text('Plan Two'));
+      await tester.pumpAndSettle();
+
+      // Active session dialog should appear.
+      expect(find.text('Session already running'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.text('Start'), findsOneWidget);
+    });
+
+    testWidgets(
+        'Cancel keeps the active session — engine.stop() not called and plan not started',
+        (tester) async {
+      final plan1 = _makePlan(id: 1, name: 'Active Plan');
+      engine.setRunningPlan(plan1);
+
+      await tester.pumpWidget(_buildApp(repo: repo, engine: engine));
+      await repo.createPlan(_makePlan(id: 2, name: 'New Plan'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('New Plan'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Session already running'), findsOneWidget);
+
+      // Tap Cancel.
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      // stop() should NOT have been called.
+      expect(engine.stopCalled, isFalse);
+      // startPlan should NOT have been called.
+      expect(engine.startedPlan, isNull);
+      // Still on library screen.
+      expect(find.text('Plan Library'), findsOneWidget);
+    });
+
+    testWidgets(
+        'Start stops active session and begins countdown for new plan',
+        (tester) async {
+      final plan1 = _makePlan(id: 1, name: 'Running Plan');
+      engine.setRunningPlan(plan1);
+
+      await tester.pumpWidget(_buildApp(repo: repo, engine: engine));
+      await repo.createPlan(_makePlan(id: 2, name: 'Incoming Plan'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Incoming Plan'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Session already running'), findsOneWidget);
+
+      // Tap Start to confirm.
+      await tester.tap(find.text('Start'));
+      // pump() — guard calls engine.stop() then shows the countdown overlay.
+      await tester.pump();
+
+      // engine.stop() must have been called.
+      expect(engine.stopCalled, isTrue);
+
+      // Countdown overlay should appear (shows '3').
+      expect(find.text('3'), findsOneWidget);
+    });
+
+    testWidgets('no dialog when no session is active', (tester) async {
+      // engine has no active session (currentState is null, default).
+      await tester.pumpWidget(_buildApp(repo: repo, engine: engine));
+      await repo.createPlan(_makePlan(name: 'Solo Plan'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Solo Plan'));
+      // Pump once — should go straight to countdown.
+      await tester.pump();
+
+      // No session dialog.
+      expect(find.text('Session already running'), findsNothing);
+      // Countdown overlay is visible.
+      expect(find.text('3'), findsOneWidget);
     });
   });
 

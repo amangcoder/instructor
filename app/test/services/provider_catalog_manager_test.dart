@@ -386,5 +386,47 @@ void main() {
       expect(await mgr.isVoiceValidForProvider('af_heart', 'kokoro'), isTrue);
       expect(await mgr.isVoiceValidForProvider('af_heart', 'gemini'), isFalse);
     });
+
+    // ── Acceptance-criteria explicit coverage ──────────────────────────────
+
+    // AC-5: getVoicesForProvider('kokoro') returns af_heart, af_sky, af_bella,
+    //       am_adam (and more) from the static fallback catalog.
+    test(
+        'getVoicesForProvider(kokoro) includes af_heart, af_sky, af_bella, '
+        'am_adam from static catalog when DB is empty', () async {
+      final mgr =
+          ProviderCatalogManager(db: db, httpClient: _failingClient());
+
+      final voices = await mgr.getVoicesForProvider('kokoro');
+      final ids = voices.map((v) => v.id).toSet();
+
+      expect(ids, contains('af_heart'));
+      expect(ids, contains('af_sky'));
+      expect(ids, contains('af_bella'));
+      expect(ids, contains('am_adam'));
+
+      // Must NOT include Gemini voices.
+      expect(ids, isNot(contains('aoede')));
+      expect(ids, isNot(contains('zephyr')));
+    });
+
+    // AC-6: cross-provider voice validation.
+    test(
+        'isVoiceValidForProvider(af_heart, kokoro) = true; '
+        'isVoiceValidForProvider(af_heart, gemini) = false', () async {
+      final mgr =
+          ProviderCatalogManager(db: db, httpClient: _failingClient());
+
+      expect(
+        await mgr.isVoiceValidForProvider('af_heart', 'kokoro'),
+        isTrue,
+        reason: 'af_heart is a valid Kokoro voice',
+      );
+      expect(
+        await mgr.isVoiceValidForProvider('af_heart', 'gemini'),
+        isFalse,
+        reason: 'af_heart is not in the Gemini voice list',
+      );
+    });
   });
 }

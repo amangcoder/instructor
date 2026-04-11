@@ -131,6 +131,19 @@ abstract class SyncService {
   ///
   /// Default implementation is a no-op — concrete classes override as needed.
   void cancelDebouncedSync() {}
+
+  /// Starts a repeating background sync that fires every [interval].
+  ///
+  /// If a sync is already in progress when the timer fires, it is skipped
+  /// (shared [_isUploading] guard prevents concurrent uploads).
+  ///
+  /// Default implementation is a no-op — concrete classes override as needed.
+  void schedulePeriodicSync(Duration interval) {}
+
+  /// Cancels the repeating periodic sync timer.
+  ///
+  /// Default implementation is a no-op — concrete classes override as needed.
+  void cancelPeriodicSync() {}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +167,13 @@ class SyncServiceImpl implements SyncService {
   final http.Client _httpClient;
 
   Timer? _debounceTimer;
+  Timer? _periodicTimer;
+
+  /// Guards concurrent uploads — true while [syncToCloud] is executing.
+  ///
+  /// Both the debounced mutation sync and the periodic timer check this flag
+  /// before starting an upload to prevent overlapping requests.
+  bool _isUploading = false;
 
   static const Duration _debounceDuration = Duration(seconds: 30);
   static const int _maxRetries = 3;
@@ -162,79 +182,91 @@ class SyncServiceImpl implements SyncService {
 
   @override
   Future<void> syncToCloud() async {
+    // Prevent concurrent uploads from both the debounce timer and the periodic
+    // timer running at the same time.
+    if (_isUploading) {
+      debugPrint('SyncService: upload already in progress, skipping');
+      return;
+    }
+
     final dbPath = _db.dbFilePath;
     if (dbPath.isEmpty) {
       debugPrint('SyncService: no db file path (in-memory db?), skipping sync');
       return;
     }
 
-    // 1. Checkpoint WAL to merge pending writes into the main .db file.
-    debugPrint('SyncService: checkpointing WAL…');
-    await _db.walCheckpoint();
+    _isUploading = true;
+    try {
+      // 1. Checkpoint WAL to merge pending writes into the main .db file.
+      debugPrint('SyncService: checkpointing WAL…');
+      await _db.walCheckpoint();
 
-    final dbFile = File(dbPath);
-    if (!await dbFile.exists()) {
-      debugPrint('SyncService: db file not found at $dbPath');
-      return;
-    }
-
-    final dbBytes = await dbFile.readAsBytes();
-
-    // 2. Check if content has changed since last sync.
-    // Compute hash directly on the raw bytes to avoid double-encoding issues
-    // with binary data (String.fromCharCodes may mangle bytes > 127).
-    final currentHash = sha256.convert(dbBytes).toString();
-    final lastHash = await _settings.read(AppSettingsKeys.lastSyncHash);
-    if (lastHash == currentHash) {
-      debugPrint('SyncService: db unchanged (hash match), skipping upload.');
-      return;
-    }
-
-    // 3. Get pre-signed PUT URL from backend.
-    debugPrint('SyncService: requesting upload URL…');
-    final uploadResponse = await _withRetry(() async {
-      final baseUrl = await _apiClient.backendBaseUrl;
-      return _apiClient.postJson(
-          Uri.parse('$baseUrl/api/sync/upload'), {});
-    });
-
-    final uploadUrl = uploadResponse['uploadUrl']?.toString();
-    if (uploadUrl == null || uploadUrl.isEmpty) {
-      throw Exception('Server returned an empty upload URL.');
-    }
-
-    // 4. Upload directly to S3.
-    debugPrint('SyncService: uploading ${dbBytes.length} bytes to S3…');
-    await _withRetry(() async {
-      final response = await _httpClient
-          .put(
-            Uri.parse(uploadUrl),
-            headers: {
-              'Content-Type': 'application/octet-stream',
-              'Content-Length': '${dbBytes.length}',
-            },
-            body: dbBytes,
-          )
-          .timeout(const Duration(minutes: 5));
-
-      if (response.statusCode != 200 && response.statusCode != 204) {
-        throw Exception(
-            'S3 upload failed (HTTP ${response.statusCode})');
+      final dbFile = File(dbPath);
+      if (!await dbFile.exists()) {
+        debugPrint('SyncService: db file not found at $dbPath');
+        return;
       }
-      return response;
-    });
 
-    // 5. Record sync metadata.
-    final now = DateTime.now();
-    await Future.wait([
-      _settings.write(AppSettingsKeys.lastSyncAt, now.toIso8601String()),
-      _settings.write(
-          AppSettingsKeys.lastSyncSizeBytes, dbBytes.length.toString()),
-      _settings.write(AppSettingsKeys.lastSyncHash, currentHash),
-    ]);
+      final dbBytes = await dbFile.readAsBytes();
 
-    debugPrint(
-        'SyncService: sync complete — ${dbBytes.length} bytes at $now');
+      // 2. Check if content has changed since last sync.
+      // Compute hash directly on the raw bytes to avoid double-encoding issues
+      // with binary data (String.fromCharCodes may mangle bytes > 127).
+      final currentHash = sha256.convert(dbBytes).toString();
+      final lastHash = await _settings.read(AppSettingsKeys.lastSyncHash);
+      if (lastHash == currentHash) {
+        debugPrint('SyncService: db unchanged (hash match), skipping upload.');
+        return;
+      }
+
+      // 3. Get pre-signed PUT URL from backend.
+      debugPrint('SyncService: requesting upload URL…');
+      final uploadResponse = await _withRetry(() async {
+        final baseUrl = await _apiClient.backendBaseUrl;
+        return _apiClient.postJson(
+            Uri.parse('$baseUrl/api/sync/upload'), {});
+      });
+
+      final uploadUrl = uploadResponse['uploadUrl']?.toString();
+      if (uploadUrl == null || uploadUrl.isEmpty) {
+        throw Exception('Server returned an empty upload URL.');
+      }
+
+      // 4. Upload directly to S3.
+      debugPrint('SyncService: uploading ${dbBytes.length} bytes to S3…');
+      await _withRetry(() async {
+        final response = await _httpClient
+            .put(
+              Uri.parse(uploadUrl),
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': '${dbBytes.length}',
+              },
+              body: dbBytes,
+            )
+            .timeout(const Duration(minutes: 5));
+
+        if (response.statusCode != 200 && response.statusCode != 204) {
+          throw Exception(
+              'S3 upload failed (HTTP ${response.statusCode})');
+        }
+        return response;
+      });
+
+      // 5. Record sync metadata.
+      final now = DateTime.now();
+      await Future.wait([
+        _settings.write(AppSettingsKeys.lastSyncAt, now.toIso8601String()),
+        _settings.write(
+            AppSettingsKeys.lastSyncSizeBytes, dbBytes.length.toString()),
+        _settings.write(AppSettingsKeys.lastSyncHash, currentHash),
+      ]);
+
+      debugPrint(
+          'SyncService: sync complete — ${dbBytes.length} bytes at $now');
+    } finally {
+      _isUploading = false;
+    }
   }
 
   @override
@@ -363,6 +395,26 @@ class SyncServiceImpl implements SyncService {
   void cancelDebouncedSync() {
     _debounceTimer?.cancel();
     _debounceTimer = null;
+  }
+
+  @override
+  void schedulePeriodicSync(Duration interval) {
+    _periodicTimer?.cancel();
+    _periodicTimer = Timer.periodic(interval, (_) {
+      // Skip if a sync is already in progress (guarded by _isUploading).
+      syncToCloud().catchError((e) {
+        debugPrint('SyncService: periodic sync failed: $e');
+      });
+    });
+    debugPrint(
+        'SyncService: periodic sync started (interval: ${interval.inMinutes}m)');
+  }
+
+  @override
+  void cancelPeriodicSync() {
+    _periodicTimer?.cancel();
+    _periodicTimer = null;
+    debugPrint('SyncService: periodic sync cancelled');
   }
 
   @override

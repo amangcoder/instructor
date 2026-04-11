@@ -19,7 +19,7 @@ library phone_call_handler;
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/services/notification_service.dart';
@@ -135,6 +135,15 @@ class PhoneCallHandlerImpl implements PhoneCallHandler {
   }
 
   // ── Interruption handling ─────────────────────────────────────────────────
+
+  /// Handles a raw [AudioInterruptionEvent] from [AudioSession.interruptionEventStream].
+  ///
+  /// Exposed with [visibleForTesting] so unit tests can drive interruption
+  /// scenarios (duck vs. pause) without requiring a live [AudioSession].
+  @visibleForTesting
+  // ignore: use_setters_to_change_properties
+  void handleInterruptionForTest(AudioInterruptionEvent event) =>
+      _onInterruption(event);
 
   void _onInterruption(AudioInterruptionEvent event) {
     debugPrint(

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/models/tts_provider_config.dart';
-import 'package:instructor/services/provider_catalog_manager.dart';
+import 'package:instructor/providers/tts_providers.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -52,17 +52,16 @@ class _VoicePickerSheet extends ConsumerStatefulWidget {
 }
 
 class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
-  List<TtsVoiceOption> _allVoices = [];
-  List<TtsVoiceOption> _filteredVoices = [];
-  bool _isLoading = true;
   String? _selectedVoiceId;
   final TextEditingController _searchController = TextEditingController();
+
+  // Local search query — kept in state so the search field is stateful.
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _selectedVoiceId = widget.currentVoiceId;
-    _loadVoices();
     _searchController.addListener(_onSearch);
   }
 
@@ -72,40 +71,30 @@ class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
     super.dispose();
   }
 
-  Future<void> _loadVoices() async {
-    final manager = ref.read(providerCatalogManagerProvider);
-    final voices = await manager.getVoicesForProvider(widget.providerId);
-    if (mounted) {
-      setState(() {
-        _allVoices = voices;
-        _filteredVoices = voices;
-        _isLoading = false;
-      });
+  void _onSearch() {
+    final query = _searchController.text.toLowerCase().trim();
+    if (query != _searchQuery) {
+      setState(() => _searchQuery = query);
     }
   }
 
-  void _onSearch() {
-    final query = _searchController.text.toLowerCase().trim();
-    setState(() {
-      if (query.isEmpty) {
-        _filteredVoices = _allVoices;
-      } else {
-        _filteredVoices = _allVoices
-            .where(
-              (v) =>
-                  v.label.toLowerCase().contains(query) ||
-                  v.id.toLowerCase().contains(query),
-            )
-            .toList();
-      }
-    });
+  /// Filters [voices] by the current [_searchQuery].
+  List<TtsVoiceOption> _applyFilter(List<TtsVoiceOption> voices) {
+    if (_searchQuery.isEmpty) return voices;
+    return voices
+        .where(
+          (v) =>
+              v.label.toLowerCase().contains(_searchQuery) ||
+              v.id.toLowerCase().contains(_searchQuery),
+        )
+        .toList();
   }
 
-  void _onConfirm() {
+  void _onConfirm(List<TtsVoiceOption> allVoices) {
     if (_selectedVoiceId == null) return;
-    final selected = _allVoices.firstWhere(
+    final selected = allVoices.firstWhere(
       (v) => v.id == _selectedVoiceId,
-      orElse: () => _allVoices.first,
+      orElse: () => allVoices.first,
     );
     Navigator.of(context).pop(selected);
   }
@@ -114,6 +103,9 @@ class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final mediaQuery = MediaQuery.of(context);
+
+    // Watch the Riverpod provider — rebuilds instantly when catalog refreshes.
+    final voicesAsync = ref.watch(voicesForProviderProvider(widget.providerId));
 
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -164,15 +156,23 @@ class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
                             ),
                       ),
                       const Spacer(),
-                      Text(
-                        const {
-                          'kokoro': 'Kokoro',
-                          'gemini': 'Gemini',
-                          'elevenlabs': 'ElevenLabs',
-                        }[widget.providerId] ?? widget.providerId,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
+                      // Show provider label from loaded catalog if available;
+                      // fall back to a simple string map for loading state.
+                      voicesAsync.when(
+                        data: (_) => Text(
+                          const {
+                            'kokoro': 'Kokoro',
+                            'gemini': 'Gemini',
+                            'elevenlabs': 'ElevenLabs',
+                          }[widget.providerId] ??
+                              widget.providerId,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                        ),
+                        loading: () => const SizedBox.shrink(),
+                        error: (_, __) => const SizedBox.shrink(),
                       ),
                     ],
                   ),
@@ -191,9 +191,7 @@ class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear, size: 18),
-                              onPressed: () {
-                                _searchController.clear();
-                              },
+                              onPressed: () => _searchController.clear(),
                             )
                           : null,
                       filled: true,
@@ -212,94 +210,139 @@ class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
 
                 // ── Voice list ──────────────────────────────────────────────
                 Flexible(
-                  child: _isLoading
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(32),
-                            child: CircularProgressIndicator(),
-                          ),
-                        )
-                      : _filteredVoices.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.all(32),
-                              child: Text(
-                                'No voices found.',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
+                  child: voicesAsync.when(
+                    loading: () => const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(32),
+                        child: CircularProgressIndicator(),
+                      ),
+                    ),
+                    error: (error, _) => Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        'Could not load voices.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.error,
+                            ),
+                      ),
+                    ),
+                    data: (allVoices) {
+                      final filtered = _applyFilter(allVoices);
+                      if (filtered.isEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Text(
+                            _searchQuery.isEmpty
+                                ? 'No voices available.'
+                                : 'No voices found.',
+                            style:
+                                Theme.of(context).textTheme.bodyMedium?.copyWith(
                                       color: colorScheme.onSurfaceVariant,
                                     ),
-                              ),
-                            )
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              padding: const EdgeInsets.only(
-                                  left: 8, right: 8, bottom: 8),
-                              itemCount: _filteredVoices.length,
-                              itemBuilder: (context, index) {
-                                final voice = _filteredVoices[index];
-                                final isSelected =
-                                    _selectedVoiceId == voice.id;
-                                return RadioListTile<String>(
-                                  value: voice.id,
-                                  groupValue: _selectedVoiceId,
-                                  onChanged: (v) =>
-                                      setState(() => _selectedVoiceId = v),
-                                  title: Text(
-                                    voice.label,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w500),
-                                  ),
-                                  subtitle: voice.gender != null
-                                      ? Text(
-                                          voice.gender!,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        )
-                                      : null,
-                                  activeColor: colorScheme.primary,
-                                  selected: isSelected,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                );
-                              },
+                          ),
+                        );
+                      }
+                      return ListView.builder(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.only(
+                            left: 8, right: 8, bottom: 8),
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final voice = filtered[index];
+                          final isSelected = _selectedVoiceId == voice.id;
+                          return RadioListTile<String>(
+                            value: voice.id,
+                            groupValue: _selectedVoiceId,
+                            onChanged: (v) =>
+                                setState(() => _selectedVoiceId = v),
+                            title: Text(
+                              voice.label,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w500),
                             ),
+                            subtitle: voice.gender != null
+                                ? Text(
+                                    voice.gender!,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  )
+                                : null,
+                            activeColor: colorScheme.primary,
+                            selected: isSelected,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
 
                 // ── Action buttons ──────────────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(context).pop(null),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                voicesAsync.when(
+                  data: (allVoices) => Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(context).pop(null),
+                            style: OutlinedButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
+                            child: const Text('Cancel'),
                           ),
-                          child: const Text('Cancel'),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: _selectedVoiceId != null
+                                ? () => _onConfirm(allVoices)
+                                : null,
+                            style: FilledButton.styleFrom(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text('Confirm'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  loading: () => Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: _selectedVoiceId != null ? _onConfirm : null,
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: const Text('Confirm'),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  error: (_, __) => Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(null),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                    ],
+                      child: const Text('Close'),
+                    ),
                   ),
                 ),
               ],

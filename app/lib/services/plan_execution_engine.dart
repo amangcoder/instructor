@@ -161,6 +161,28 @@ class ExecutionState {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Persisted session summary (lightweight DB read result)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Lightweight summary of a persisted execution session returned by
+/// [PlanExecutionEngine.getPersistedSessionSummaryForPlan].
+///
+/// Unlike [getRecoverableSession], this does **not** restore engine state —
+/// it is safe to call before the user confirms they want to resume.
+class PersistedSessionSummary {
+  const PersistedSessionSummary({
+    required this.stepIndex,
+    required this.elapsedMs,
+  });
+
+  /// 0-based flattened step index of the paused/interrupted session.
+  final int stepIndex;
+
+  /// Total elapsed milliseconds accumulated in the current step at pause time.
+  final int elapsedMs;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Abstract interface
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -174,6 +196,17 @@ class ExecutionState {
 abstract class PlanExecutionEngine {
   /// Begins executing [plan] from step 0 (always starts fresh).
   Future<void> startPlan(Plan plan);
+
+  /// Begins executing [plan] at the given [flatStepIndex] (mid-plan start).
+  ///
+  /// [flatStepIndex] is the index into the flattened step list produced by
+  /// expanding all [RepeatStep] blocks. Callers can compute this by summing
+  /// the flat-expansion counts for each top-level step before the target
+  /// (see [flatStepCountForSteps]).
+  ///
+  /// If [flatStepIndex] is out of range (< 0 or ≥ total flat steps), the
+  /// call is treated as a normal [startPlan] from step 0.
+  Future<void> startPlanFromStep(Plan plan, int flatStepIndex);
 
   /// Pauses at the current position and persists state.
   Future<void> pause();
@@ -211,11 +244,39 @@ abstract class PlanExecutionEngine {
   /// the initial state on the broadcast stream).
   ExecutionState? get currentState;
 
+  /// Returns a lightweight summary of any persisted session for [planId].
+  ///
+  /// Returns the [PersistedSessionSummary] (step index + elapsed ms) without
+  /// restoring engine state, so it is safe to call before the user confirms
+  /// they want to resume. Returns `null` when no session exists.
+  Future<PersistedSessionSummary?> getPersistedSessionSummaryForPlan(
+      int planId);
+
   /// Returns a recoverable session if one exists (for crash recovery on launch).
   ///
   /// Also restores the engine's internal state so that [resume] can be called
   /// immediately after the user confirms they want to resume.
-  Future<ExecutionState?> getRecoverableSession();
+  ///
+  /// If [planId] is provided, only the session for that specific plan is
+  /// considered (used by the plan library to check before showing the
+  /// "Continue where you left off?" dialog).
+  Future<ExecutionState?> getRecoverableSession([int? planId]);
+
+  /// Returns the 0-based flattened step index of any persisted session for
+  /// [planId], or `null` if no recoverable session exists.
+  ///
+  /// This is a lightweight read-only DB query that does **not** restore the
+  /// engine's internal state — safe to call before the user confirms they want
+  /// to resume.
+  Future<int?> getRecoverableStepIndexForPlan(int planId);
+
+  /// Restores the persisted session for [planId] and resumes execution from
+  /// the saved step and audio position.
+  ///
+  /// Returns `true` if a session was found and successfully resumed.
+  /// Returns `false` if no recovery data exists for [planId] (caller should
+  /// fall back to [startPlan]).
+  Future<bool> resumeFromPersistedState(int planId);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -296,6 +357,32 @@ class PlanExecutionEngineImpl
   /// Tracks when we last persisted state mid-WaitStep.
   DateTime? _lastMidWaitPersistTime;
 
+  // ── Say step tracking ─────────────────────────────────────────────────────
+
+  /// Actual duration of the currently playing voice audio file.
+  ///
+  /// Set once [AudioEngine.currentVoiceDuration] becomes non-null after the
+  /// voice player has loaded the file. Cleared when the step ends or when
+  /// skip/stop is called.
+  Duration? _currentSayStepActualDuration;
+
+  /// Timestamp when voice playback started for the current Say step.
+  ///
+  /// Used to compute elapsed time for the countdown timer. Set just before
+  /// [AudioEngine.playVoice] is called; cleared in the step's finally block.
+  DateTime? _sayStepPlaybackStartTime;
+
+  /// Elapsed playback time (ms) accumulated before the current play call.
+  ///
+  /// Non-zero on resume: captures how much of the Say step had already played
+  /// before a previous interruption in the same step execution. Reset to 0
+  /// when a new step begins.
+  int _sayStepElapsedBeforeCurrentPlayMs = 0;
+
+  /// Periodic timer that fires every 100 ms during Say step playback to emit
+  /// [ExecutionState] updates and capture the actual voice file duration.
+  Timer? _sayStepProgressTimer;
+
   // ── Preview speed ─────────────────────────────────────────────────────────
 
   /// Speed multiplier applied to [WaitStep] durations during preview mode.
@@ -367,6 +454,33 @@ class PlanExecutionEngineImpl
   }
 
   @override
+  Future<void> startPlanFromStep(Plan plan, int flatStepIndex) async {
+    // Stop any in-progress execution cleanly first.
+    if (_status == ExecutionStatus.running ||
+        _status == ExecutionStatus.paused) {
+      await stop();
+    }
+
+    _currentPlan = plan;
+    _flatSteps = _flattenPlan(plan.steps);
+
+    // Clamp to valid range; fall back to 0 if index is out of bounds.
+    _currentStepIndex =
+        (flatStepIndex >= 0 && flatStepIndex < _flatSteps.length)
+            ? flatStepIndex
+            : 0;
+    _waitStepElapsedMs = 0;
+    _cancelled = false;
+    _status = ExecutionStatus.running;
+
+    _emitState();
+    await _persistState();
+
+    // Run the execution loop on the next microtask.
+    unawaited(_runFromCurrentStep());
+  }
+
+  @override
   Future<void> startPreview(Plan plan) async {
     _speedMultiplier = 4.0;
     await startPlan(plan);
@@ -381,6 +495,15 @@ class PlanExecutionEngineImpl
       _waitStepElapsedMs +=
           DateTime.now().difference(_waitStepStartTime!).inMilliseconds;
       _waitStepStartTime = null;
+    }
+
+    // Capture elapsed time within a SayStep and stop its progress timer.
+    _sayStepProgressTimer?.cancel();
+    _sayStepProgressTimer = null;
+    if (_sayStepPlaybackStartTime != null) {
+      _sayStepElapsedBeforeCurrentPlayMs +=
+          DateTime.now().difference(_sayStepPlaybackStartTime!).inMilliseconds;
+      _sayStepPlaybackStartTime = null;
     }
 
     // Capture ambient state BEFORE stopAll() clears it — stopAll() sets
@@ -422,7 +545,9 @@ class PlanExecutionEngineImpl
     // Wait for any in-progress execution loop to exit before starting a new one.
     // This ensures the old loop's long-running async ops (e.g. renderTTS) have
     // fully unwound before we reset _cancelled and launch a new loop.
-    await _loopDoneCompleter?.future;
+    // A 3-second timeout prevents an indefinite hang during long TTS renders.
+    await _loopDoneCompleter?.future
+        .timeout(const Duration(seconds: 3), onTimeout: () {});
 
     _cancelled = false;
     _status = ExecutionStatus.running;
@@ -479,7 +604,10 @@ class PlanExecutionEngineImpl
     // Future.delayed(Duration.zero), which is insufficient when renderTTS is
     // awaiting a long-running network call. This mutex await serialises the
     // old loop's exit with the new loop's start.
-    await _loopDoneCompleter?.future;
+    // A 3-second timeout prevents an indefinite hang when a TTS network call
+    // has not yet returned — the loop will exit once the step completes.
+    await _loopDoneCompleter?.future
+        .timeout(const Duration(seconds: 3), onTimeout: () {});
 
     if (_currentStepIndex < _flatSteps.length - 1) {
       _currentStepIndex++;
@@ -498,6 +626,16 @@ class PlanExecutionEngineImpl
   @override
   Future<void> skipBackward() async {
     if (_status == ExecutionStatus.idle) return;
+
+    // At step 0: do not cancel the current step or restart anything.
+    // The UI is responsible for showing "Already at first step" feedback.
+    if (_currentStepIndex == 0) {
+      debugPrint(
+        'PlanExecutionEngine: skipBackward at step 0 — already at first step.',
+      );
+      return;
+    }
+
     await _cancelCurrentStep();
     // Stop audio BEFORE resetting _cancelled so the old execution loop's
     // pending playVoice() is unblocked and can observe _cancelled == true
@@ -505,15 +643,12 @@ class PlanExecutionEngineImpl
     await _audioEngine.stopAll();
 
     // Wait for the old execution loop to exit completely.
-    // _cancelCurrentStep() sets _cancelled=true and yields once with
-    // Future.delayed(Duration.zero), which is insufficient when renderTTS is
-    // awaiting a long-running network call. This mutex await serialises the
-    // old loop's exit with the new loop's start.
-    await _loopDoneCompleter?.future;
+    // A 3-second timeout prevents an indefinite hang when a long-running TTS
+    // render (e.g. slow network) is in-flight and has not yet returned.
+    await _loopDoneCompleter?.future
+        .timeout(const Duration(seconds: 3), onTimeout: () {});
 
-    if (_currentStepIndex > 0) {
-      _currentStepIndex--;
-    }
+    _currentStepIndex--;
     _waitStepElapsedMs = 0;
 
     _emitState();
@@ -540,8 +675,17 @@ class PlanExecutionEngineImpl
 
     await _clearPersistedState();
 
+    // Emit a terminal idle state BEFORE clearing _currentPlan so that
+    // subscribers (NowPlayingScreen, MiniPlayerBar, lock screen widgets) can
+    // gracefully transition to their idle/hidden states. Without this emit,
+    // widgets that read currentState after stop() would receive null and could
+    // break (e.g. buttons become unresponsive, REQ-010/#10 fix).
+    _emitState();
+
     _currentPlan = null;
-    _lastState = null;
+    // Do NOT clear _lastState here — keep the terminal idle ExecutionState
+    // so that late subscribers (e.g. widgets that mount after stop) can still
+    // read executionStateProvider.currentState and handle idle gracefully.
     _flatSteps = [];
     _currentStepIndex = 0;
     _waitStepElapsedMs = 0;
@@ -590,13 +734,27 @@ class PlanExecutionEngineImpl
   }
 
   @override
-  Future<ExecutionState?> getRecoverableSession() async {
+  Future<ExecutionState?> getRecoverableSession([int? planId]) async {
     // Query for paused or running rows, most recently saved first.
-    final rows = await (_db.select(_db.executionStateTable)
-          ..where((t) => t.status.isIn(['paused', 'running']))
-          ..orderBy([(t) => OrderingTerm.desc(t.savedAt)])
-          ..limit(1))
-        .get();
+    // When [planId] is provided, restrict to that plan only.
+    final List<ExecutionStateTableData> rows;
+    if (planId != null) {
+      rows = await (_db.select(_db.executionStateTable)
+            ..where(
+              (t) =>
+                  t.planId.equals(planId) &
+                  t.status.isIn(['paused', 'running']),
+            )
+            ..orderBy([(t) => OrderingTerm.desc(t.savedAt)])
+            ..limit(1))
+          .get();
+    } else {
+      rows = await (_db.select(_db.executionStateTable)
+            ..where((t) => t.status.isIn(['paused', 'running']))
+            ..orderBy([(t) => OrderingTerm.desc(t.savedAt)])
+            ..limit(1))
+          .get();
+    }
 
     if (rows.isEmpty) return null;
 
@@ -677,6 +835,58 @@ class PlanExecutionEngineImpl
           : Duration.zero,
       nextStepType: nextFlatStep?.step.type,
     );
+  }
+
+  @override
+  Future<int?> getRecoverableStepIndexForPlan(int planId) async {
+    // Lightweight read-only query — does NOT restore engine state.
+    final rows = await (_db.select(_db.executionStateTable)
+          ..where(
+            (t) =>
+                t.planId.equals(planId) &
+                t.status.isIn(['paused', 'running']),
+          )
+          ..orderBy([(t) => OrderingTerm.desc(t.savedAt)])
+          ..limit(1))
+        .get();
+
+    if (rows.isEmpty) return null;
+    return rows.first.currentStepIndex;
+  }
+
+  @override
+  Future<PersistedSessionSummary?> getPersistedSessionSummaryForPlan(
+      int planId) async {
+    // Lightweight read-only query — does NOT restore engine state.
+    final rows = await (_db.select(_db.executionStateTable)
+          ..where(
+            (t) =>
+                t.planId.equals(planId) &
+                t.status.isIn(['paused', 'running']),
+          )
+          ..orderBy([(t) => OrderingTerm.desc(t.savedAt)])
+          ..limit(1))
+        .get();
+
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    return PersistedSessionSummary(
+      stepIndex: row.currentStepIndex,
+      elapsedMs: row.elapsedMs,
+    );
+  }
+
+  @override
+  Future<bool> resumeFromPersistedState(int planId) async {
+    // Load persisted state into the engine for this specific plan.
+    final session = await getRecoverableSession(planId);
+    if (session == null) return false;
+
+    // Engine internal state is now restored by getRecoverableSession:
+    // _currentPlan, _flatSteps, _currentStepIndex, _waitStepElapsedMs,
+    // _status = paused. Call resume() to start the ambient track and loop.
+    await resume();
+    return true;
   }
 
   // ── Execution loop ────────────────────────────────────────────────────────
@@ -1611,4 +1821,45 @@ PlanExecutionEngine planExecutionEngine(Ref ref) {
   );
   ref.onDispose(engine.dispose);
   return engine;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Public step-flattening helper (used by plan editor "Start from here")
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Returns the total number of flat steps produced when expanding [steps].
+///
+/// Each non-[RepeatStep] contributes 1 flat step. Each [RepeatStep] contributes
+/// `count × flatStepCountForSteps(children)` flat steps (recursively).
+///
+/// Use this to compute the flat step index for a given top-level step index
+/// so that [PlanExecutionEngine.startPlanFromStep] can be called correctly:
+///
+/// ```dart
+/// int flatIndex = flatStepIndexForOriginalIndex(plan.steps, targetIndex);
+/// await engine.startPlanFromStep(plan, flatIndex);
+/// ```
+int flatStepCountForSteps(List<PlanStep> steps) {
+  var count = 0;
+  for (final step in steps) {
+    if (step is RepeatStep) {
+      count += step.count * flatStepCountForSteps(step.children);
+    } else {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/// Computes the flat step index that corresponds to the top-level [PlanStep]
+/// at [originalIndex] within [steps].
+///
+/// All flat steps produced by steps 0 through [originalIndex]-1 are counted,
+/// and that total is returned as the starting flat index for [originalIndex].
+///
+/// Returns 0 if [originalIndex] is 0 or negative.
+int flatStepIndexForOriginalIndex(List<PlanStep> steps, int originalIndex) {
+  if (originalIndex <= 0) return 0;
+  final prefix = steps.take(originalIndex).toList();
+  return flatStepCountForSteps(prefix);
 }

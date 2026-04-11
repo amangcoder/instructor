@@ -61,12 +61,16 @@ class _MiniPlayerContent extends ConsumerWidget {
     final isPlaying = state.status == ExecutionStatus.running;
 
     return GestureDetector(
-      // Swipe-up gesture (TASK-012) — handled by outer GestureDetector on body
+      // Swipe-up or tap on body area both navigate to NowPlayingScreen.
+      // Both handlers live on the outermost GestureDetector to avoid gesture
+      // arena conflicts from nested GestureDetectors.
+      onTap: () => _navigateToNowPlaying(context),
       onVerticalDragEnd: (details) {
         if (details.velocity.pixelsPerSecond.dy < -500) {
           _navigateToNowPlaying(context);
         }
       },
+      behavior: HitTestBehavior.opaque,
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
         child: BackdropFilter(
@@ -118,9 +122,6 @@ class _MiniPlayerContent extends ConsumerWidget {
                           label: 'Open ${state.plan.name}',
                           button: true,
                           hint: 'Double tap to open now playing screen',
-                          child: GestureDetector(
-                          onTap: () => _navigateToNowPlaying(context),
-                          behavior: HitTestBehavior.opaque,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: Column(
@@ -155,7 +156,6 @@ class _MiniPlayerContent extends ConsumerWidget {
                               ],
                             ),
                           ),
-                        ),
                         ),
                       ),
 

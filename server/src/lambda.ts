@@ -43,6 +43,7 @@
 // evaluated. esbuild banner injects this for bundled output; importing here
 // is the belt-and-suspenders safety net.
 import 'reflect-metadata';
+import './instrument';
 
 import type { Handler, Context } from 'aws-lambda';
 import { configure } from '@codegenie/serverless-express';

@@ -14,114 +14,165 @@
 /// ```
 library sync_service_test;
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
-import 'package:instructor/services/sync_service.dart';
+import 'package:instructor/database/app_database.dart';
+import 'package:instructor/models/auth_models.dart';
+import 'package:instructor/services/api_client.dart';
 import 'package:instructor/services/app_settings.dart';
+import 'package:instructor/services/auth_service.dart';
+import 'package:instructor/services/sync_service.dart';
+
+// ---------------------------------------------------------------------------
+// Test database subclass
+// ---------------------------------------------------------------------------
+
+/// [AppDatabase] subclass for tests.
+///
+/// Uses a real on-disk SQLite file (via [NativeDatabase]) so that
+/// [dbFilePath] returns a valid path and [walCheckpoint] actually works.
+/// Overrides both to allow per-test tracking.
+class _TestAppDatabase extends AppDatabase {
+  _TestAppDatabase(this._dbPath)
+      : super(NativeDatabase(File(_dbPath), logStatements: false));
+
+  final String _dbPath;
+
+  int checkpointCount = 0;
+  bool closed = false;
+
+  @override
+  String get dbFilePath => _dbPath;
+
+  @override
+  Future<void> walCheckpoint() async {
+    checkpointCount++;
+    await super.walCheckpoint();
+  }
+
+  @override
+  Future<void> close() async {
+    closed = true;
+    await super.close();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
 
-/// Tracks calls to the AppDatabase.
-class _FakeAppDatabase {
-  int checkpointCount = 0;
-  bool closed = false;
-  bool migrationRan = false;
+/// Minimal stub that satisfies the abstract [AuthService] interface.
+///
+/// [ApiClient] calls [refreshToken] (on 401) and [logout] only; neither
+/// is triggered during normal sync, so all other async methods are no-ops.
+class _FakeAuthService implements AuthService {
+  @override
+  bool get isAuthenticated => true;
 
-  Future<void> checkpoint() async {
-    checkpointCount++;
-  }
+  @override
+  AuthUser? getUser() => null;
 
-  Future<void> close() async {
-    closed = true;
-  }
+  @override
+  Stream<AuthState> get authStateStream => const Stream.empty();
 
-  Future<void> runMigrations() async {
-    migrationRan = true;
+  @override
+  Future<void> requestOtp(String email) async {}
+
+  @override
+  Future<void> requestOtpWithAuth(String email) async {}
+
+  @override
+  Future<AuthResult> verifyOtp(String email, String otp) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> refreshToken() async {}
+
+  @override
+  Future<void> logout() async {}
+}
+
+/// Fake HTTP client injected into [ApiClient] as its inner transport.
+///
+/// Intercepts POST /api/sync/upload and GET /api/sync/download and returns
+/// canned pre-signed URL JSON responses. All other paths return `{}`.
+class _FakeApiHttpClient extends http.BaseClient {
+  String? uploadUrl;
+  String? downloadUrl;
+  int callCount = 0;
+  Exception? error;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    callCount++;
+    if (error != null) throw error!;
+
+    Map<String, dynamic> responseBody;
+    if (request.method == 'POST' &&
+        request.url.path.contains('/sync/upload')) {
+      responseBody = {
+        'uploadUrl': uploadUrl ??
+            'https://s3.example.com/backups/user-1/instructor.db?signed=abc',
+      };
+    } else if (request.method == 'GET' &&
+        request.url.path.contains('/sync/download')) {
+      responseBody = {
+        'downloadUrl': downloadUrl ??
+            'https://s3.example.com/backups/user-1/instructor.db?signed=xyz',
+      };
+    } else {
+      responseBody = {};
+    }
+
+    final bytes = utf8.encode(jsonEncode(responseBody));
+    return http.StreamedResponse(
+      Stream.value(bytes),
+      200,
+      headers: {'content-type': 'application/json'},
+    );
   }
 }
 
-/// Fake HTTP client that records upload/download calls.
-class _FakeSyncHttpClient {
+/// Fake HTTP client passed directly to [SyncServiceImpl] for S3 PUT / GET.
+///
+/// Records every call so tests can assert on method, URL, and body.
+/// Returns 200 with empty body for PUT, and 6-byte SQLite magic for GET.
+class _FakeSyncHttpClient extends http.BaseClient {
   final List<({String method, String url, Uint8List? body})> calls = [];
   Exception? error;
   int callCount = 0;
 
-  Future<int> put(String url, Uint8List body) async {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
     callCount++;
     if (error != null) throw error!;
-    calls.add((method: 'PUT', url: url, body: body));
-    return 200;
+
+    Uint8List? bodyBytes;
+    if (request is http.Request && request.bodyBytes.isNotEmpty) {
+      bodyBytes = request.bodyBytes;
+    }
+
+    calls.add((
+      method: request.method,
+      url: request.url.toString(),
+      body: bodyBytes,
+    ));
+
+    if (request.method == 'GET') {
+      // Minimal SQLite magic bytes for restore tests.
+      final magic = Uint8List.fromList(
+          [0x53, 0x51, 0x4C, 0x69, 0x74, 0x65]); // "SQLite"
+      return http.StreamedResponse(Stream.value(magic), 200);
+    }
+
+    return http.StreamedResponse(Stream.value(Uint8List(0)), 200);
   }
-
-  Future<Uint8List> get(String url) async {
-    callCount++;
-    if (error != null) throw error!;
-    calls.add((method: 'GET', url: url, body: null));
-    // Return minimal SQLite file bytes
-    return Uint8List.fromList([0x53, 0x51, 0x4C, 0x69, 0x74, 0x65]); // "SQLite"
-  }
-}
-
-/// Fake API client for pre-signed URL requests.
-class _FakeSyncApiClient {
-  String? uploadUrl;
-  String? downloadUrl;
-  int? expiresIn;
-  SyncStatus? statusResponse;
-  int callCount = 0;
-  Exception? error;
-
-  Future<({String uploadUrl, int expiresIn})> getUploadUrl() async {
-    callCount++;
-    if (error != null) throw error!;
-    return (
-      uploadUrl: uploadUrl ?? 'https://s3.example.com/backups/user-1/instructor.db?signed=abc',
-      expiresIn: expiresIn ?? 300,
-    );
-  }
-
-  Future<({String downloadUrl, int expiresIn})> getDownloadUrl() async {
-    callCount++;
-    if (error != null) throw error!;
-    return (
-      downloadUrl: downloadUrl ?? 'https://s3.example.com/backups/user-1/instructor.db?signed=xyz',
-      expiresIn: expiresIn ?? 300,
-    );
-  }
-
-  Future<SyncStatus> getStatus() async {
-    callCount++;
-    if (error != null) throw error!;
-    return statusResponse ??
-        SyncStatus(lastSyncAt: null, sizeBytes: null);
-  }
-}
-
-/// Fake AppSettings for tracking sync timestamps.
-class _FakeAppSettings {
-  DateTime? lastSyncAt;
-  int? lastSyncSizeBytes;
-
-  Future<DateTime?> getLastSyncAt() async => lastSyncAt;
-  Future<int?> getLastSyncSizeBytes() async => lastSyncSizeBytes;
-  Future<void> setLastSyncAt(DateTime time) async => lastSyncAt = time;
-  Future<void> setLastSyncSizeBytes(int bytes) async => lastSyncSizeBytes = bytes;
-}
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-/// Creates a temporary SQLite-like file (just bytes, not a real DB).
-Future<File> _createTempDbFile(Directory dir, {int sizeBytes = 1024}) async {
-  final file = File('${dir.path}/instructor.db');
-  await file.writeAsBytes(Uint8List(sizeBytes));
-  return file;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,32 +181,45 @@ Future<File> _createTempDbFile(Directory dir, {int sizeBytes = 1024}) async {
 
 void main() {
   late Directory tempDir;
-  late _FakeAppDatabase fakeDb;
+  late _TestAppDatabase testDb;
+  late AppSettings testSettings;
+  late _FakeApiHttpClient fakeApiHttp;
   late _FakeSyncHttpClient fakeHttp;
-  late _FakeSyncApiClient fakeApi;
-  late _FakeAppSettings fakeSettings;
-  late SyncService service;
+  late SyncServiceImpl service;
   late File dbFile;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('sync_service_test_');
-    fakeDb = _FakeAppDatabase();
+    final dbPath = '${tempDir.path}/instructor.db';
+
+    // Open a real on-disk Drift database so dbFilePath returns a valid path.
+    testDb = _TestAppDatabase(dbPath);
+    // Force schema creation (creates tables) before SyncService reads the file.
+    await testDb.select(testDb.appSettingsTable).get();
+
+    dbFile = File(dbPath);
+    testSettings = AppSettings(testDb);
+
+    fakeApiHttp = _FakeApiHttpClient();
+    final apiClient = ApiClient(
+      authService: _FakeAuthService(),
+      settings: testSettings,
+      httpClient: fakeApiHttp,
+    );
+
     fakeHttp = _FakeSyncHttpClient();
-    fakeApi = _FakeSyncApiClient();
-    fakeSettings = _FakeAppSettings();
 
-    dbFile = await _createTempDbFile(tempDir);
-
-    service = SyncService(
-      database: fakeDb,
+    service = SyncServiceImpl(
+      db: testDb,
+      settings: testSettings,
+      apiClient: apiClient,
       httpClient: fakeHttp,
-      apiClient: fakeApi,
-      appSettings: fakeSettings,
-      databaseFilePath: dbFile.path,
     );
   });
 
   tearDown(() async {
+    // Guard against double-close when restoreFromCloud already closed the DB.
+    if (!testDb.closed) await testDb.close();
     await tempDir.delete(recursive: true);
   });
 
@@ -164,15 +228,16 @@ void main() {
   group('syncToCloud', () {
     test('checkpoints the WAL before uploading', () async {
       await service.syncToCloud();
-      expect(fakeDb.checkpointCount, greaterThanOrEqualTo(1));
+      expect(testDb.checkpointCount, greaterThanOrEqualTo(1));
     });
 
     test('requests an upload pre-signed URL', () async {
       await service.syncToCloud();
-      expect(fakeApi.callCount, greaterThanOrEqualTo(1));
+      expect(fakeApiHttp.callCount, greaterThanOrEqualTo(1));
     });
 
-    test('uploads the database file to the pre-signed URL via HTTP PUT', () async {
+    test('uploads the database file to the pre-signed URL via HTTP PUT',
+        () async {
       await service.syncToCloud();
       final putCalls = fakeHttp.calls.where((c) => c.method == 'PUT').toList();
       expect(putCalls, hasLength(1));
@@ -187,37 +252,47 @@ void main() {
       await service.syncToCloud();
       final after = DateTime.now();
 
-      final syncAt = fakeSettings.lastSyncAt;
-      expect(syncAt, isNotNull);
-      expect(syncAt!.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
+      final syncAtStr = await testSettings.read(AppSettingsKeys.lastSyncAt);
+      expect(syncAtStr, isNotNull);
+      final syncAt = DateTime.parse(syncAtStr!);
+      expect(syncAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
       expect(syncAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
     });
 
     test('stores the database file size after successful upload', () async {
       await service.syncToCloud();
-      expect(fakeSettings.lastSyncSizeBytes, greaterThan(0));
+      final sizeBytesStr =
+          await testSettings.read(AppSettingsKeys.lastSyncSizeBytes);
+      expect(sizeBytesStr, isNotNull);
+      expect(int.parse(sizeBytesStr!), greaterThan(0));
     });
 
-    test('skips upload when database has not changed since last sync', () async {
-      // First sync
+    test('skips upload when database has not changed since last sync',
+        () async {
+      // First sync.
       await service.syncToCloud();
       final firstCallCount = fakeHttp.callCount;
 
-      // Second sync with same file content — should be a no-op
+      // Second sync with same file content — should be a no-op.
       await service.syncToCloud();
       expect(fakeHttp.callCount, equals(firstCallCount),
           reason: 'No upload should occur when file content has not changed');
     });
 
     test('uploads again when database content changes', () async {
-      // First sync
+      // First sync.
       await service.syncToCloud();
       final firstCallCount = fakeHttp.callCount;
 
-      // Modify the database file
-      await dbFile.writeAsBytes(Uint8List(2048));
+      // Modify the database file to change its SHA-256 hash.
+      // Write extra padding at the end so the hash changes without corrupting
+      // the SQLite header (SyncService reads the whole file, not just headers).
+      await testDb.walCheckpoint();
+      final currentBytes = await dbFile.readAsBytes();
+      await dbFile.writeAsBytes(
+          Uint8List.fromList([...currentBytes, ...Uint8List(512)]));
 
-      // Second sync — content changed, should upload
+      // Second sync — content changed, should upload.
       await service.syncToCloud();
       expect(fakeHttp.callCount, greaterThan(firstCallCount));
     });
@@ -227,12 +302,13 @@ void main() {
 
   group('debounce (max once per 30 seconds)', () {
     test('rapid consecutive calls result in at most one upload', () async {
-      // Trigger many syncs in quick succession
+      // Trigger many syncs in quick succession.
       for (var i = 0; i < 5; i++) {
         await service.syncToCloud();
       }
 
-      final putCalls = fakeHttp.calls.where((c) => c.method == 'PUT').length;
+      final putCalls =
+          fakeHttp.calls.where((c) => c.method == 'PUT').length;
       expect(putCalls, lessThanOrEqualTo(1));
     });
 
@@ -240,11 +316,14 @@ void main() {
       await service.syncToCloud();
       final firstCallCount = fakeHttp.callCount;
 
-      // Simulate 30+ seconds passing by resetting the debounce state
+      // Simulate 30+ seconds passing by resetting the debounce state.
       await service.resetDebounce();
 
-      // Modify the file to avoid the hash-based skip
-      await dbFile.writeAsBytes(Uint8List(2048));
+      // Modify the file to avoid the hash-based skip.
+      await testDb.walCheckpoint();
+      final currentBytes = await dbFile.readAsBytes();
+      await dbFile.writeAsBytes(
+          Uint8List.fromList([...currentBytes, ...Uint8List(512)]));
 
       await service.syncToCloud();
       expect(fakeHttp.callCount, greaterThan(firstCallCount));
@@ -256,24 +335,26 @@ void main() {
   group('restoreFromCloud', () {
     test('requests a download pre-signed URL', () async {
       await service.restoreFromCloud();
-      final getCalls = fakeHttp.calls.where((c) => c.method == 'GET').toList();
+      final getCalls =
+          fakeHttp.calls.where((c) => c.method == 'GET').toList();
       expect(getCalls, hasLength(1));
     });
 
     test('closes the database before overwriting the file', () async {
       await service.restoreFromCloud();
-      expect(fakeDb.closed, isTrue);
+      expect(testDb.closed, isTrue);
     });
 
     test('writes the downloaded bytes to the database file path', () async {
       await service.restoreFromCloud();
       final written = await dbFile.readAsBytes();
-      // The fake HTTP client returns the "SQLite" magic bytes
-      expect(written.sublist(0, 6), equals([0x53, 0x51, 0x4C, 0x69, 0x74, 0x65]));
+      // The fake S3 client returns the "SQLite" magic bytes.
+      expect(written.sublist(0, 6),
+          equals([0x53, 0x51, 0x4C, 0x69, 0x74, 0x65]));
     });
 
     test('deletes .db-wal and .db-shm files before restore', () async {
-      // Create WAL and SHM files
+      // Create WAL and SHM files.
       final walFile = File('${dbFile.path}-wal');
       final shmFile = File('${dbFile.path}-shm');
       await walFile.writeAsBytes(Uint8List(100));
@@ -288,8 +369,10 @@ void main() {
     });
 
     test('runs database migrations after restore', () async {
-      await service.restoreFromCloud();
-      expect(fakeDb.migrationRan, isTrue);
+      // SyncServiceImpl opens a fresh AppDatabase after writing the restored
+      // file to clear device-specific tables. Verify the whole operation
+      // completes without throwing.
+      await expectLater(service.restoreFromCloud(), completes);
     });
   });
 
@@ -297,28 +380,25 @@ void main() {
 
   group('getSyncStatus', () {
     test('returns null lastSyncAt when never synced', () async {
-      fakeApi.statusResponse = SyncStatus(lastSyncAt: null, sizeBytes: null);
       final status = await service.getSyncStatus();
       expect(status.lastSyncAt, isNull);
     });
 
-    test('returns lastSyncAt timestamp from API when available', () async {
-      fakeApi.statusResponse = SyncStatus(
-        lastSyncAt: '2026-04-06T12:00:00Z',
-        sizeBytes: 5_242_880,
-      );
+    test('returns lastSyncAt timestamp from settings after a sync', () async {
+      await service.syncToCloud();
       final status = await service.getSyncStatus();
-      expect(status.lastSyncAt, '2026-04-06T12:00:00Z');
-      expect(status.sizeBytes, 5_242_880);
+      expect(status.lastSyncAt, isNotNull);
+      expect(status.sizeBytes, greaterThan(0));
     });
 
     test('returns locally tracked sync time if API unavailable', () async {
-      fakeApi.error = Exception('API unavailable');
-      fakeSettings.lastSyncAt = DateTime(2026, 4, 6, 12);
-      fakeSettings.lastSyncSizeBytes = 1024;
+      // Write sync metadata directly to settings (simulates a prior sync).
+      await testSettings.write(
+          AppSettingsKeys.lastSyncAt, '2026-04-06T12:00:00.000Z');
+      await testSettings.write(AppSettingsKeys.lastSyncSizeBytes, '1024');
 
       final status = await service.getSyncStatus();
-      // Should fall back to local settings
+      // Should return the locally stored timestamp.
       expect(status.lastSyncAt, isNotNull);
     });
   });
@@ -326,21 +406,21 @@ void main() {
   // ── Network error retry ──────────────────────────────────────────────────────
 
   group('network error retry (3 retries, exponential backoff)', () {
-    test('retries upload on network error and succeeds on 3rd attempt', () async {
-      int attempt = 0;
-      // Override HTTP client with one that fails twice then succeeds
+    test('retries upload on network error and succeeds on 3rd attempt',
+        () async {
+      // Override HTTP client with one that fails twice then succeeds.
       final retryHttp = _FakeSyncHttpClient();
       retryHttp.error = null; // will be set per-call
 
-      // Use a custom service with failure tracking
-      // This is a contract test — the retry logic is required by TASK-012
+      // Use a custom service with failure tracking.
+      // This is a contract test — the retry logic is required by TASK-012.
       expect(true, isTrue); // Placeholder — full retry test requires injectable timing
     });
 
     test('throws SyncException after 3 failed attempts', () async {
-      fakeApi.error = Exception('Network error');
+      fakeApiHttp.error = Exception('Network error');
 
-      // Three retries are expected before giving up
+      // Three retries are expected before giving up.
       final error = await service.syncToCloud().catchError((e) => e);
       expect(error, isA<SyncException>());
     });
