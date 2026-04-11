@@ -13,7 +13,7 @@ part 'app_settings.g.dart';
 ///   flutter run --dart-define=BACKEND_URL=https://api.example.com
 const String kBackendUrl = String.fromEnvironment(
   'BACKEND_URL',
-  defaultValue: 'http://192.168.29.197:3071',
+  defaultValue: 'https://instructor.api.layersiq.com',
 );
 
 /// String keys for the [AppSettingsTable].

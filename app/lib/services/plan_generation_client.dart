@@ -75,19 +75,19 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
     }
 
     // Breakpoint: inspect `uri` and `body` before the request fires.
-    debugger(message: 'PlanGen: about to POST');
+    // debugger(message: 'PlanGen: about to POST');
 
     try {
       final response = await _apiClient.postJson(uri, body);
 
       // Breakpoint: inspect raw `response` from the server.
-      debugger(message: 'PlanGen: received response');
+      // debugger(message: 'PlanGen: received response');
 
       final planJson = response['plan'] as Map<String, dynamic>?;
 
       if (planJson == null) {
         // Breakpoint: response unexpectedly missing the "plan" key.
-        debugger(message: 'PlanGen: missing plan key in response');
+        // debugger(message: 'PlanGen: missing plan key in response');
         throw const PlanGenerationException(
           'Server returned an invalid response (missing plan).',
           userMessage: 'Plan generation failed. Please try again.',
@@ -97,12 +97,12 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
       final plan = _parsePlan(planJson);
 
       // Breakpoint: inspect parsed `plan` before navigating away.
-      debugger(message: 'PlanGen: plan parsed successfully');
+      // debugger(message: 'PlanGen: plan parsed successfully');
 
       return plan;
     } on ApiException catch (e) {
       // Breakpoint: inspect `e.statusCode` and `e.message` on API errors.
-      debugger(message: 'PlanGen: ApiException');
+      // debugger(message: 'PlanGen: ApiException');
       throw PlanGenerationException(
         'API error: ${e.message}',
         userMessage: _friendlyError(e),

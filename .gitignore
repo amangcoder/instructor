@@ -1,10 +1,22 @@
 
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+infra/cdk.out/
+app/build/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+app/ios/Runner/GoogleService-Info.plist
+app/android/app/google-services.json
+
 # Orchestrator runtime artifacts
 .knowledge/
 workspace/
-node_modules
-dist
-.env
 
 # Server TTS audio cache
 tts-cache/
@@ -13,9 +25,37 @@ tts-cache/
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+venv/
 
 # Modal
 .modal/
 
+# ML models
 *.onnx
 voices-v1.0.bin
+
+# IDE / Editor
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Flutter / Dart
+app/android/.gradle/
+app/android/local.properties
+app/ios/Pods/
+app/ios/.symlinks/
+
+# Gradle
+.gradle/
+
+# App binaries
+*.apk
+*.ipa
+*.aab
