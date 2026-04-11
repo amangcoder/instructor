@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Request } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { TtsService } from './tts.service';
 import { ProviderRegistryService } from './providers/provider-registry.service';
 import { SynthesizeDto } from './dto/synthesize.dto';
@@ -174,10 +175,18 @@ export class TtsController {
       }
     }
 
-    // Try x-api-key.
+    // Try x-api-key (constant-time comparison to prevent timing attacks).
     const serverKey = process.env.API_KEY;
-    if (serverKey && apiKey === serverKey) {
-      return; // Valid API key → allow
+    if (serverKey && apiKey) {
+      try {
+        const keyBuf = Buffer.from(apiKey);
+        const serverBuf = Buffer.from(serverKey);
+        if (keyBuf.length === serverBuf.length && timingSafeEqual(keyBuf, serverBuf)) {
+          return; // Valid API key → allow
+        }
+      } catch {
+        // Buffers of different lengths — fall through to reject
+      }
     }
 
     // Neither credential passed.

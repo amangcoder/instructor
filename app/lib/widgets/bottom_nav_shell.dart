@@ -1,7 +1,11 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/widgets/mini_player_bar.dart';
 
 /// Glassmorphic bottom navigation bar matching the Stitch design:
 /// bg-white/70, backdrop-blur-3xl, shadow, rounded-t-2xl.
@@ -10,15 +14,16 @@ import 'package:go_router/go_router.dart';
 /// Active item: gradient bg (primary → primaryContainer), white text/icon.
 /// Inactive: primary/60 color.
 /// Labels: Inter 11px semibold uppercase tracking-0.5.
-class BottomNavShell extends StatelessWidget {
+///
+/// When a plan execution session is active (running or paused), a
+/// [MiniPlayerBar] is displayed directly above the glassmorphic nav bar.
+class BottomNavShell extends ConsumerWidget {
   const BottomNavShell({
     super.key,
-    required this.child,
-    required this.currentIndex,
+    required this.navigationShell,
   });
 
-  final Widget child;
-  final int currentIndex;
+  final StatefulNavigationShell navigationShell;
 
   static const _destinations = [
     _NavItem(icon: Icons.auto_stories, label: 'Library', route: '/'),
@@ -28,13 +33,24 @@ class BottomNavShell extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final hasSession = ref.watch(hasActiveSessionProvider);
 
     return Scaffold(
-      body: child,
+      body: navigationShell,
       extendBody: true,
-      bottomNavigationBar: ClipRRect(
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Spotify-like mini-player: visible when a session is active ───
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            child: hasSession ? const MiniPlayerBar() : const SizedBox.shrink(),
+          ),
+          // ── Glassmorphic nav bar ─────────────────────────────────────────
+          ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
@@ -60,17 +76,13 @@ class BottomNavShell extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: List.generate(_destinations.length, (i) {
                     final item = _destinations[i];
-                    final isActive = i == currentIndex;
+                    final isActive = i == navigationShell.currentIndex;
                     return _NavButton(
                       icon: item.icon,
                       label: item.label,
                       isActive: isActive,
                       colorScheme: colorScheme,
-                      onTap: () {
-                        if (i != currentIndex) {
-                          context.go(item.route);
-                        }
-                      },
+                      onTap: () => navigationShell.goBranch(i),
                     );
                   }),
                 ),
@@ -78,6 +90,8 @@ class BottomNavShell extends StatelessWidget {
             ),
           ),
         ),
+      ),
+        ],
       ),
     );
   }
@@ -112,7 +126,11 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Semantics(
+      label: label,
+      selected: isActive,
+      button: true,
+      child: GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
@@ -160,6 +178,7 @@ class _NavButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

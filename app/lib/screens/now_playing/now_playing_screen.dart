@@ -434,54 +434,69 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            // Timer / loading indicator
-                            if (state.stepPhase == StepPhase.loadingTts)
-                              _TtsLoadingIndicator(color: stepColor)
-                            else
-                              StepCountdownTimer(
-                                timeRemaining: state.timeRemaining,
-                                totalDuration: state.currentStepDuration,
-                                isPaused: isPaused,
-                              ),
+                        // LayoutBuilder measures the actual available height so
+                        // timer size and spacing are always proportional — no
+                        // overflow on any screen size or orientation.
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final availH = constraints.maxHeight;
+                            // Timer occupies ~45 % of available height, capped
+                            // at the design maximum of 288 px.
+                            final timerSize = (availH * 0.45).clamp(160.0, 288.0);
+                            // Vertical gaps scale with height (8–32 px).
+                            final spacing = (availH * 0.04).clamp(8.0, 32.0);
 
-                            const SizedBox(height: 32),
+                            return Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // Timer / loading indicator
+                                if (state.stepPhase == StepPhase.loadingTts)
+                                  _TtsLoadingIndicator(color: stepColor, size: timerSize)
+                                else
+                                  StepCountdownTimer(
+                                    timeRemaining: state.timeRemaining,
+                                    totalDuration: state.currentStepDuration,
+                                    isPaused: isPaused,
+                                    size: timerSize,
+                                  ),
 
-                            // ── Current instruction (centered text) ────
-                            Text(
-                              currentStepText,
-                              style: GoogleFonts.manrope(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.5,
-                                color: colorScheme.onSurface,
-                              ),
-                              textAlign: TextAlign.center,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _stepTypeLabel(stepType),
-                              style: TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w500,
-                                fontSize: 14,
-                              ),
-                            ),
+                                SizedBox(height: spacing),
 
-                            const SizedBox(height: 32),
+                                // ── Current instruction (centered text) ────
+                                Text(
+                                  currentStepText,
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.5,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _stepTypeLabel(stepType),
+                                  style: TextStyle(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 14,
+                                  ),
+                                ),
 
-                            // ── Controls row ───────────────────────────
-                            _ControlsRow(
-                              isPaused: isPaused,
-                              onTogglePause: _togglePause,
-                              onSkipForward: _skipForward,
-                              onSkipBackward: _skipBackward,
-                            ),
-                          ],
+                                SizedBox(height: spacing),
+
+                                // ── Controls row ───────────────────────────
+                                _ControlsRow(
+                                  isPaused: isPaused,
+                                  onTogglePause: _togglePause,
+                                  onSkipForward: _skipForward,
+                                  onSkipBackward: _skipBackward,
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     ),
@@ -678,15 +693,16 @@ class _ControlsRow extends StatelessWidget {
 
 /// Indeterminate loading spinner shown while TTS audio is being fetched.
 class _TtsLoadingIndicator extends StatelessWidget {
-  const _TtsLoadingIndicator({required this.color});
+  const _TtsLoadingIndicator({required this.color, this.size = 288.0});
   final Color color;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
-      width: 288,
-      height: 288,
+      width: size,
+      height: size,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

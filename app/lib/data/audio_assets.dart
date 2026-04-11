@@ -3,7 +3,7 @@
 /// Used by [AudioEngine.startAmbient] to resolve asset keys from [PlayStep]
 /// and [StopAudioStep] into actual Flutter asset paths.
 ///
-/// ## Ambient tracks (5 total — compressed AAC/OGG, ≤5 MB each)
+/// ## Ambient tracks (15 total — compressed MP3, ≤7 MB each)
 /// Looping background audio designed for meditation, yoga, workouts, etc.
 ///
 /// ## Effect sounds (3 total — short, percussive)
@@ -34,6 +34,38 @@ const String kAmbientWhiteNoise = 'white_noise';
 /// Tibetan singing bowls drone — meditative, good for deep meditation /
 /// body scans.
 const String kAmbientTibetanBowls = 'tibetan_bowls';
+
+/// Crackling campfire — warm, cozy; good for journaling / evening wind-downs.
+const String kAmbientCampfire = 'campfire';
+
+/// Night crickets — gentle, rhythmic; good for evening meditation / sleep.
+const String kAmbientCrickets = 'crickets';
+
+/// Babbling brook — serene, flowing; good for mindfulness / walking meditation.
+const String kAmbientBabblingBrook = 'babbling_brook';
+
+/// Waterfall — immersive, steady; good for deep focus / stress relief.
+const String kAmbientWaterfall = 'waterfall';
+
+/// Tropical rainforest ambience (birds + insects) — lush; good for energising yoga.
+const String kAmbientRainforest = 'rainforest';
+
+/// Thunderstorm (rain + thunder) — dramatic; good for intense breathwork /
+/// power workouts.
+const String kAmbientThunderstorm = 'thunderstorm';
+
+/// Steady wind — airy, open; good for grounding exercises / visualisation.
+const String kAmbientWind = 'wind';
+
+/// Bird song in forest — uplifting; good for morning routines / nature meditation.
+const String kAmbientBirdSong = 'bird_song';
+
+/// Beach soundscape (waves + shore ambience) — relaxing; good for coastal
+/// visualisations / breathwork.
+const String kAmbientBeach = 'beach';
+
+/// Frogs at dusk — earthy, alive; good for sleep wind-downs / restorative yoga.
+const String kAmbientFrogs = 'frogs';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Effect sound asset keys
@@ -74,6 +106,16 @@ const Map<String, String> kAudioAssetPaths = {
   kAmbientOcean: 'assets/audio/ambient/ocean.mp3',
   kAmbientWhiteNoise: 'assets/audio/ambient/white_noise.mp3',
   kAmbientTibetanBowls: 'assets/audio/ambient/tibetan_bowls.mp3',
+  kAmbientCampfire: 'assets/audio/ambient/campfire.mp3',
+  kAmbientCrickets: 'assets/audio/ambient/crickets.mp3',
+  kAmbientBabblingBrook: 'assets/audio/ambient/babbling_brook.mp3',
+  kAmbientWaterfall: 'assets/audio/ambient/waterfall.mp3',
+  kAmbientRainforest: 'assets/audio/ambient/rainforest.mp3',
+  kAmbientThunderstorm: 'assets/audio/ambient/thunderstorm.mp3',
+  kAmbientWind: 'assets/audio/ambient/wind.mp3',
+  kAmbientBirdSong: 'assets/audio/ambient/bird_song.mp3',
+  kAmbientBeach: 'assets/audio/ambient/beach.mp3',
+  kAmbientFrogs: 'assets/audio/ambient/frogs.mp3',
 
   // Effects
   kEffectBell: 'assets/audio/effects/bell.mp3',
@@ -91,6 +133,16 @@ bool isAmbientKey(String key) => const {
       kAmbientOcean,
       kAmbientWhiteNoise,
       kAmbientTibetanBowls,
+      kAmbientCampfire,
+      kAmbientCrickets,
+      kAmbientBabblingBrook,
+      kAmbientWaterfall,
+      kAmbientRainforest,
+      kAmbientThunderstorm,
+      kAmbientWind,
+      kAmbientBirdSong,
+      kAmbientBeach,
+      kAmbientFrogs,
     }.contains(key);
 
 /// Returns `true` if [key] is a known effect sound key.

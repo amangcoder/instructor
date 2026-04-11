@@ -20,6 +20,7 @@ import {
 } from './providers/provider-registry.service';
 import { KokoroProxyService } from './providers/kokoro-proxy.service';
 import { ElevenLabsProxyService } from './providers/elevenlabs-proxy.service';
+import { buildWav } from './wav-utils';
 
 /**
  * L1: local disk cache directory.
@@ -33,21 +34,38 @@ const TTS_CACHE_DIR = process.env.AWS_LAMBDA_FUNCTION_NAME
 /** S3 key prefix for all TTS audio files. */
 const S3_PREFIX = 'tts';
 
-/** Maps Gemini locale codes to accent descriptions used in the Gemini prompt. */
-const LOCALE_ACCENT_MAP: Record<string, string> = {
-  enIN: 'Indian English accent',
+/** Maps locale codes to prompt descriptions used in the Gemini TTS prompt. */
+const LOCALE_PROMPT_MAP: Record<string, string> = {
+  enUS: 'American English accent',
   enGB: 'British English accent',
+  enIN: 'Indian English accent',
   enAU: 'Australian English accent',
   enCA: 'Canadian English accent',
-  enUS: 'American English accent',
+  hi: 'Hindi',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+  ja: 'Japanese',
+  pt: 'Portuguese',
+  it: 'Italian',
+  ar: 'Arabic',
+  zh: 'Mandarin Chinese',
+  ko: 'Korean',
+  ru: 'Russian',
 };
 
-/** Valid Kokoro voice IDs. */
+/** Non-English locales that bypass Kokoro and route to Gemini TTS. */
+const NON_ENGLISH_LOCALES = new Set(['es', 'fr', 'de', 'ja', 'pt', 'it', 'ar', 'zh', 'ko', 'ru']);
+
+/** Valid Kokoro voice IDs (English + Hindi). */
 const KOKORO_VOICES = new Set([
+  // English
   'af_heart', 'af_sky', 'af_bella', 'af_sarah', 'af_nicole', 'af_nova',
   'am_adam', 'am_michael', 'am_echo', 'am_eric', 'am_liam', 'am_onyx',
   'bf_emma', 'bf_isabella', 'bf_alice', 'bf_lily',
   'bm_george', 'bm_lewis', 'bm_daniel', 'bm_fable',
+  // Hindi
+  'hf_alpha', 'hf_beta', 'hm_omega', 'hm_psi',
 ]);
 
 /** Valid Gemini voice IDs. */
@@ -62,6 +80,22 @@ const KOKORO_LOCALE_MAP: Record<string, string> = {
   enIN: 'en-us',
   enAU: 'en-gb',
   enCA: 'en-us',
+  hi: 'h',
+};
+
+/**
+ * When an English Kokoro voice is requested with Hindi locale, remap to the
+ * closest Hindi voice so Kokoro can synthesize it correctly.
+ */
+const HINDI_VOICE_FALLBACK: Record<string, string> = {
+  // Female English → Female Hindi
+  af_heart: 'hf_alpha', af_sky: 'hf_alpha', af_bella: 'hf_alpha',
+  af_sarah: 'hf_beta',  af_nicole: 'hf_beta', af_nova: 'hf_beta',
+  bf_emma: 'hf_alpha',  bf_isabella: 'hf_alpha', bf_alice: 'hf_beta', bf_lily: 'hf_beta',
+  // Male English → Male Hindi
+  am_adam: 'hm_omega',  am_michael: 'hm_omega', am_echo: 'hm_omega',
+  am_eric: 'hm_psi',    am_liam: 'hm_psi',    am_onyx: 'hm_psi',
+  bm_george: 'hm_omega', bm_lewis: 'hm_omega', bm_daniel: 'hm_psi', bm_fable: 'hm_psi',
 };
 
 /** HTTP status codes that should trigger a retry (Gemini path only). */
@@ -278,7 +312,12 @@ export class TtsService {
     provider = 'gemini',
     speechRate = '1.0',
   ): Promise<Buffer | null> {
-    const rawVoice = (voice ?? 'aoede').trim().toLowerCase();
+    // ElevenLabs voice IDs are case-sensitive opaque strings — preserve casing.
+    // Gemini and Kokoro IDs are lowercase by convention.
+    const rawVoice =
+      provider === 'elevenlabs'
+        ? (voice ?? '').trim()
+        : (voice ?? 'aoede').trim().toLowerCase();
     const hash = this.cacheKey(text, rawVoice, locale, provider, speechRate);
     const legacyHash =
       provider === 'gemini'
@@ -301,7 +340,12 @@ export class TtsService {
       throw new BadRequestException(`Unknown provider: ${provider}`);
     }
 
-    const rawVoice = (voice ?? 'aoede').trim().toLowerCase();
+    // ElevenLabs voice IDs are case-sensitive opaque strings — preserve casing.
+    // Gemini and Kokoro IDs are lowercase by convention.
+    const rawVoice =
+      provider === 'elevenlabs'
+        ? (voice ?? '').trim()
+        : (voice ?? 'aoede').trim().toLowerCase();
 
     // Compute new key (provider + speechRate inclusive) and legacy key (backward compat).
     const hash = this.cacheKey(text, rawVoice, locale, provider, speechRate);
@@ -317,21 +361,42 @@ export class TtsService {
     }
     this.logger.log(`Cache MISS — hash=${hash.slice(0, 12)}… (provider=${provider})`);
 
+    // Non-English locales bypass Kokoro (English-only) and go directly to Gemini.
+    const skipValidation = provider === 'kokoro' && !!locale && NON_ENGLISH_LOCALES.has(locale);
+
     // Validate voice is native to the requested provider.
     // Voice remapping is handled by the frontend when the user switches providers.
-    this.validateVoice(rawVoice, provider);
+    if (!skipValidation) {
+      this.validateVoice(rawVoice, provider);
+    }
 
     // Route to appropriate provider, falling back to Gemini on failure.
     let audio: Buffer;
     if (provider === 'kokoro') {
-      try {
-        audio = await this.synthesizeKokoro(text, rawVoice, locale ?? 'en-us');
-      } catch (err: unknown) {
-        const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'charon';
-        this.logger.warn(
-          `Kokoro failed (${err instanceof Error ? err.message : err}) — falling back to Gemini voice=${geminiVoice}`,
+      if (locale && NON_ENGLISH_LOCALES.has(locale)) {
+        // Kokoro does not support this locale — route to Gemini TTS instead.
+        const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'aoede';
+        this.logger.log(
+          `Kokoro unsupported locale '${locale}' — routing to Gemini voice=${geminiVoice}`,
         );
         audio = await this.synthesizeGemini(text, geminiVoice, locale);
+      } else {
+        // Remap English voice to Hindi voice when Hindi locale is requested.
+        const kokoroVoice = (locale === 'hi' && HINDI_VOICE_FALLBACK[rawVoice])
+          ? HINDI_VOICE_FALLBACK[rawVoice]
+          : rawVoice;
+        if (kokoroVoice !== rawVoice) {
+          this.logger.log(`Hindi voice remap: ${rawVoice} → ${kokoroVoice}`);
+        }
+        try {
+          audio = await this.synthesizeKokoro(text, kokoroVoice, locale ?? 'en-us');
+        } catch (err: unknown) {
+          const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'charon';
+          this.logger.warn(
+            `Kokoro failed (${err instanceof Error ? err.message : err}) — falling back to Gemini voice=${geminiVoice}`,
+          );
+          audio = await this.synthesizeGemini(text, geminiVoice, locale);
+        }
       }
     } else if (provider === 'elevenlabs') {
       try {
@@ -435,7 +500,7 @@ export class TtsService {
         }
         const pcm = Buffer.from(base64Pcm, 'base64');
         this.logger.log(`Decoded PCM ${pcm.length} bytes → building WAV`);
-        return this.buildWav(pcm);
+        return buildWav(pcm);
       }
 
       lastStatus = httpResponse.status;
@@ -540,9 +605,12 @@ export class TtsService {
    */
   private buildPrompt(text: string, locale?: string): string {
     if (!locale) return text;
-    const accent = LOCALE_ACCENT_MAP[locale];
-    if (!accent) return text;
-    return `Say the following in ${accent}: ${text}`;
+    const descriptor = LOCALE_PROMPT_MAP[locale];
+    if (!descriptor) return text;
+    if (NON_ENGLISH_LOCALES.has(locale)) {
+      return `Speak the following in ${descriptor}: ${text}`;
+    }
+    return `Say the following in ${descriptor}: ${text}`;
   }
 
   /**
@@ -559,33 +627,5 @@ export class TtsService {
     return null;
   }
 
-  /**
-   * Prepends a standard 44-byte WAV header to raw 16-bit LE, 24 kHz, mono PCM
-   * data returned by the Gemini TTS API.
-   */
-  private buildWav(pcm: Buffer): Buffer {
-    const dataSize = pcm.length;
-    const header = Buffer.alloc(44);
-
-    // RIFF chunk descriptor
-    header.write('RIFF', 0, 'ascii');
-    header.writeUInt32LE(36 + dataSize, 4);   // ChunkSize
-    header.write('WAVE', 8, 'ascii');
-
-    // "fmt " sub-chunk (16 bytes)
-    header.write('fmt ', 12, 'ascii');
-    header.writeUInt32LE(16, 16);              // Subchunk1Size (PCM = 16)
-    header.writeUInt16LE(1, 20);               // AudioFormat  (1 = PCM)
-    header.writeUInt16LE(1, 22);               // NumChannels  (mono)
-    header.writeUInt32LE(24000, 24);           // SampleRate   (24 kHz)
-    header.writeUInt32LE(48000, 28);           // ByteRate = 24000 * 1 * 2
-    header.writeUInt16LE(2, 32);               // BlockAlign   = 1 * 2
-    header.writeUInt16LE(16, 34);              // BitsPerSample
-
-    // "data" sub-chunk
-    header.write('data', 36, 'ascii');
-    header.writeUInt32LE(dataSize, 40);        // Subchunk2Size
-
-    return Buffer.concat([header, pcm]);
-  }
 }
+

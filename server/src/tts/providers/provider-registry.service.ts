@@ -1,5 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Redis } from '@upstash/redis';
 import { ElevenLabsProxyService } from './elevenlabs-proxy.service';
+
+// ── Redis catalog cache ───────────────────────────────────────────────────────
+
+/** Redis key for the full provider catalog JSON. */
+const CATALOG_CACHE_KEY = 'tts:provider-catalog';
+
+/** Catalog cache TTL in seconds (60 minutes). */
+const CATALOG_CACHE_TTL_SEC = 3600;
+
 
 export interface VoiceOption {
   id: string;
@@ -35,11 +45,23 @@ const GEMINI_VOICES: VoiceOption[] = [
 ];
 
 const GEMINI_LOCALES: LocaleOption[] = [
+  // English accents
   { id: 'enUS', label: 'English (US)' },
   { id: 'enGB', label: 'English (UK)' },
   { id: 'enIN', label: 'English (India)' },
   { id: 'enAU', label: 'English (Australia)' },
   { id: 'enCA', label: 'English (Canada)' },
+  // Non-English languages routed to Gemini TTS
+  { id: 'es', label: 'Spanish' },
+  { id: 'fr', label: 'French' },
+  { id: 'de', label: 'German' },
+  { id: 'ja', label: 'Japanese' },
+  { id: 'pt', label: 'Portuguese' },
+  { id: 'it', label: 'Italian' },
+  { id: 'ar', label: 'Arabic' },
+  { id: 'zh', label: 'Mandarin Chinese' },
+  { id: 'ko', label: 'Korean' },
+  { id: 'ru', label: 'Russian' },
 ];
 
 // ── Kokoro fallback catalog (used when Kokoro server is unreachable) ──────────
@@ -70,11 +92,18 @@ const KOKORO_FALLBACK_VOICES: VoiceOption[] = [
   { id: 'bm_lewis', label: 'Lewis (Male, UK)' },
   { id: 'bm_daniel', label: 'Daniel (Male, UK)' },
   { id: 'bm_fable', label: 'Fable (Male, UK)' },
+  // Hindi — Female
+  { id: 'hf_alpha', label: 'Alpha (Female, Hindi)' },
+  { id: 'hf_beta', label: 'Beta (Female, Hindi)' },
+  // Hindi — Male
+  { id: 'hm_omega', label: 'Omega (Male, Hindi)' },
+  { id: 'hm_psi', label: 'Psi (Male, Hindi)' },
 ];
 
 const KOKORO_FALLBACK_LOCALES: LocaleOption[] = [
   { id: 'en-us', label: 'English (US)' },
   { id: 'en-gb', label: 'English (UK)' },
+  { id: 'hi', label: 'Hindi' },
 ];
 
 // ── ElevenLabs static voice/locale catalog ──────────────────────────────────
@@ -221,10 +250,19 @@ const ELEVENLABS_VOICE_MAP: Record<string, string> = {
 export class ProviderRegistryService {
   private readonly logger = new Logger(ProviderRegistryService.name);
   private readonly kokoroUrl: string;
+  private readonly redis: Redis | null;
+  private readonly cacheNoop: boolean;
 
   constructor(private readonly elevenLabs: ElevenLabsProxyService) {
     this.kokoroUrl =
       process.env.KOKORO_SERVER_URL ?? 'http://127.0.0.1:3070';
+    const url = process.env.UPSTASH_REDIS_REST_URL ?? '';
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
+    this.cacheNoop = url === '';
+    this.redis = this.cacheNoop ? null : new Redis({ url, token });
+    if (this.cacheNoop) {
+      this.logger.warn('UPSTASH_REDIS_REST_URL not set — provider catalog caching disabled');
+    }
   }
 
   /** Returns the static list of registered provider IDs. */
@@ -239,31 +277,78 @@ export class ProviderRegistryService {
 
   /**
    * Returns provider configs for the requested provider(s).
+   *
+   * When no provider filter is specified (all providers requested), results
+   * are cached in Upstash Redis with a 3600s TTL. Cache misses and
+   * single-provider queries fetch fresh data from upstream services.
+   *
    * Kokoro voices are fetched live from the Python server; falls back to
    * a static list if the server is unreachable.
    * ElevenLabs voices are fetched from the API when a key is configured.
    */
   async getProviders(provider?: string): Promise<ProviderConfig[]> {
-    const ids = provider ? [provider] : this.getProviderIds();
-    const configs: ProviderConfig[] = [];
-
-    for (const id of ids) {
-      if (id === 'gemini') {
-        configs.push({
-          id: 'gemini',
-          label: 'Google Gemini TTS',
-          voices: GEMINI_VOICES,
-          locales: GEMINI_LOCALES,
-          voiceMap: GEMINI_VOICE_MAP,
-        });
-      } else if (id === 'kokoro') {
-        configs.push(await this.getKokoroConfig());
-      } else if (id === 'elevenlabs') {
-        configs.push(await this.getElevenLabsConfig());
-      }
+    // Always operate on the full catalog — fetch/cache all 3 providers, then
+    // filter to the requested provider if one was specified.
+    const cached = await this._getCachedCatalog();
+    if (cached !== null) {
+      this.logger.log('Provider catalog cache HIT');
+      return provider ? cached.filter(c => c.id === provider) : cached;
     }
 
-    return configs;
+    this.logger.log('Provider catalog cache MISS — fetching live');
+
+    const allConfigs: ProviderConfig[] = [
+      {
+        id: 'gemini',
+        label: 'Google Gemini TTS',
+        voices: GEMINI_VOICES,
+        locales: GEMINI_LOCALES,
+        voiceMap: GEMINI_VOICE_MAP,
+      },
+      await this.getKokoroConfig(),
+      await this.getElevenLabsConfig(),
+    ];
+
+    // Fire-and-forget: store in Redis without blocking the response.
+    this._setCachedCatalog(allConfigs);
+
+    return provider ? allConfigs.filter(c => c.id === provider) : allConfigs;
+  }
+
+  // ── Redis cache helpers ───────────────────────────────────────────────────
+
+  /**
+   * Attempts to read the provider catalog from Redis.
+   * Returns null on cache miss, Redis error, or noop mode.
+   * All errors are swallowed so callers always fall back to live fetch.
+   */
+  private async _getCachedCatalog(): Promise<ProviderConfig[] | null> {
+    if (this.cacheNoop) return null;
+    try {
+      const raw = await this.redis!.get<string>(CATALOG_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as ProviderConfig[];
+      return parsed;
+    } catch (err) {
+      this.logger.warn(`Redis catalog GET failed — falling back to live fetch: ${err}`);
+      return null;
+    }
+  }
+
+  /**
+   * Stores the provider catalog in Redis with a CATALOG_CACHE_TTL_SEC TTL.
+   * All errors are swallowed so a Redis failure never blocks the response.
+   */
+  private async _setCachedCatalog(configs: ProviderConfig[]): Promise<void> {
+    if (this.cacheNoop) return;
+    try {
+      await this.redis!.set(CATALOG_CACHE_KEY, JSON.stringify(configs), {
+        ex: CATALOG_CACHE_TTL_SEC,
+      });
+      this.logger.debug('Provider catalog stored in Redis cache');
+    } catch (err) {
+      this.logger.warn(`Redis catalog SET failed (non-fatal): ${err}`);
+    }
   }
 
   private async getKokoroConfig(): Promise<ProviderConfig> {

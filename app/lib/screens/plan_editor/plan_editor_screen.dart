@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:async' show Timer, unawaited;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/providers/execution_providers.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -72,6 +73,40 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   DateTime? _originalCreatedAt;
   DateTime? _originalLastUsedAt;
 
+  // ── Unsaved-changes tracking ───────────────────────────────────────────────
+  /// Fingerprint of the state as loaded (or initial empty state for new plans).
+  /// Used by [_hasUnsavedChanges] to detect edits.
+  String? _initialFingerprint;
+
+  String _currentFingerprint() => [
+        _name,
+        _description,
+        _category.name,
+        _defaultVoice,
+        ..._tags,
+        ':',
+        ..._steps.map((s) {
+          final content = switch (s) {
+            SayStep(:final text, :final voiceId) =>
+              'say:$text:${voiceId ?? ''}',
+            WaitStep(:final duration) =>
+              'wait:${duration.inMilliseconds}',
+            NotifyStep(:final title, :final body) =>
+              'notify:$title:$body',
+            PlayStep(:final audioAssetKey) => 'play:$audioAssetKey',
+            RepeatStep(:final count) => 'repeat:$count',
+            StopAudioStep() => 'stop',
+          };
+          return '${s.id}:$content';
+        }),
+      ].join('|');
+
+  bool get _hasUnsavedChanges {
+    final snap = _initialFingerprint;
+    if (snap == null) return false;
+    return _currentFingerprint() != snap;
+  }
+
   // ── Steps ─────────────────────────────────────────────────────────────────
   List<PlanStep> _steps = [];
 
@@ -91,7 +126,12 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.planId != null) _loadPlan();
+    if (widget.planId != null) {
+      _loadPlan();
+    } else {
+      // Capture initial fingerprint for new plans immediately.
+      _initialFingerprint = _currentFingerprint();
+    }
   }
 
   @override
@@ -121,6 +161,8 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           _originalCreatedAt = plan.createdAt;
           _originalLastUsedAt = plan.lastUsedAt;
         });
+        // Capture snapshot after all fields are set.
+        _initialFingerprint = _currentFingerprint();
       } else if (mounted) {
         setState(() => _loadError = 'Plan not found.');
       }
@@ -403,7 +445,11 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         );
       }
 
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        // Reset fingerprint so PopScope doesn't block navigation after save.
+        _initialFingerprint = _currentFingerprint();
+        context.pop();
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -469,7 +515,45 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Scaffold(
+    // ── Running-session warning (REQ-014) ───────────────────────────────────
+    final executionAsync = ref.watch(executionStateProvider);
+    final isRunningThisPlan = executionAsync.maybeWhen(
+      data: (s) =>
+          (s.status == ExecutionStatus.running ||
+              s.status == ExecutionStatus.paused) &&
+          widget.planId != null &&
+          s.plan.id == widget.planId,
+      orElse: () => false,
+    );
+
+    return PopScope(
+      canPop: !_hasUnsavedChanges,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Discard changes?'),
+            content: const Text(
+              'You have unsaved changes. Are you sure you want to leave?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Keep editing'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true && context.mounted) {
+          context.pop();
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: AppBranding.gradientTitle(fontSize: 18),
         centerTitle: false,
@@ -546,6 +630,19 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── Running-session banner (REQ-014) ─────────────────────────────
+          if (isRunningThisPlan)
+            MaterialBanner(
+              content: const Text(
+                'This plan is currently running. Changes will not affect the active session.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {},
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
           // ── Sticky duration header ───────────────────────────────────────
           _DurationHeader(
             duration: _totalDuration,
@@ -800,5 +897,4 @@ PlanStep _deepCopy(PlanStep step) {
   };
 }
 
-/// Fire-and-forget helper that suppresses the unused-result lint.
-void unawaited(Future<void> future) {}
+// unawaited() is provided by dart:async (imported at the top of the file).

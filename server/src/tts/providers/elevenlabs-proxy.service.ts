@@ -4,6 +4,7 @@ import {
   BadGatewayException,
   BadRequestException,
 } from '@nestjs/common';
+import { buildWav } from '../wav-utils';
 
 export interface ElevenLabsSynthesizeParams {
   text: string;
@@ -47,7 +48,8 @@ export class ElevenLabsProxyService {
       throw new BadGatewayException('ElevenLabs TTS is not configured');
     }
 
-    const url = `${this.baseUrl}/text-to-speech/${voice}?output_format=pcm_24000`;
+    const encodedVoice = encodeURIComponent(voice);
+    const url = `${this.baseUrl}/text-to-speech/${encodedVoice}?output_format=pcm_24000`;
 
     this.logger.log(
       `ElevenLabs synthesize — voice=${voice}, model=${modelId}, text="${text.slice(0, 60)}…"`,
@@ -98,7 +100,7 @@ export class ElevenLabsProxyService {
 
     // Wrap raw PCM in a WAV header (16-bit LE, 24 kHz, mono) to match
     // the format used by Gemini and Kokoro paths.
-    return this.buildWav(pcm);
+    return buildWav(pcm);
   }
 
   /**
@@ -140,29 +142,5 @@ export class ElevenLabsProxyService {
     }
   }
 
-  /**
-   * Prepends a standard 44-byte WAV header to raw 16-bit LE, 24 kHz, mono PCM.
-   */
-  private buildWav(pcm: Buffer): Buffer {
-    const dataSize = pcm.length;
-    const header = Buffer.alloc(44);
-
-    header.write('RIFF', 0, 'ascii');
-    header.writeUInt32LE(36 + dataSize, 4);
-    header.write('WAVE', 8, 'ascii');
-
-    header.write('fmt ', 12, 'ascii');
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);        // PCM
-    header.writeUInt16LE(1, 22);        // Mono
-    header.writeUInt32LE(24000, 24);    // 24 kHz
-    header.writeUInt32LE(48000, 28);    // ByteRate = 24000 * 1 * 2
-    header.writeUInt16LE(2, 32);        // BlockAlign
-    header.writeUInt16LE(16, 34);       // BitsPerSample
-
-    header.write('data', 36, 'ascii');
-    header.writeUInt32LE(dataSize, 40);
-
-    return Buffer.concat([header, pcm]);
-  }
 }
+

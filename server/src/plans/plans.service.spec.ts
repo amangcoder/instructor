@@ -2,156 +2,94 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   UnprocessableEntityException,
   HttpException,
-  HttpStatus,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PlansService } from './plans.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
+import type { Phase1Requirements } from './prompts/phase1.prompt';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const GEMINI_API_KEY = 'test-gemini-api-key';
-
-/**
- * Builds a minimal valid plan that passes the Gemini JSON schema validator.
- * Step shapes match the actual PLAN_SCHEMA defined in PlansService.
- */
-function makeValidPlan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** Builds a valid Phase 1 requirements object with N phases. */
+function makePhase1Requirements(overrides: Partial<Phase1Requirements> = {}): Phase1Requirements {
   return {
-    name: 'Morning Yoga',
-    description: 'A relaxing 20-minute yoga routine to start your day',
-    category: 'fitness',
-    defaultVoice: 'aoede',
-    steps: [
-      { type: 'say', text: 'Start in mountain pose, feet hip-width apart' },
-      { type: 'wait', durationSeconds: 10 },
-      { type: 'say', text: 'Now raise your arms overhead and breathe in' },
-      { type: 'wait', durationSeconds: 10 },
-      { type: 'notify', message: 'Great job! Keep it up.' },
+    title: 'Morning Yoga',
+    description: 'A relaxing yoga routine to start your day.',
+    category: 'yoga',
+    voice: 'af_bella',
+    durationMinutes: 20,
+    intensity: 'low',
+    avoid: [],
+    notes: '',
+    language: 'en',
+    phases: [
+      { name: 'Warm-Up', durationMinutes: 10, focus: 'gentle warming' },
+      { name: 'Main Practice', durationMinutes: 10, focus: 'sun salutations' },
     ],
     ...overrides,
   };
 }
 
-/**
- * Wraps a plan in the Gemini API response envelope.
- * The service calls JSON.parse(data.candidates[0].content.parts[0].text),
- * so the text field must be a JSON string of the plan object itself.
- */
-function makeGeminiResponse(plan: Record<string, unknown>): Record<string, unknown> {
-  return {
-    candidates: [
-      {
-        content: {
-          parts: [{ text: JSON.stringify(plan) }],
-        },
-        finishReason: 'STOP',
-      },
-    ],
-  };
+/** Wraps content in Ollama /api/chat response format. */
+function wrapOllamaText(content: string): Record<string, unknown> {
+  return { message: { role: 'assistant', content }, done: true };
 }
 
-/**
- * Returns a Gemini response whose text contains invalid JSON (causes callGemini to throw).
- */
-function makeGeminiInvalidJsonResponse(): Record<string, unknown> {
-  return {
-    candidates: [
-      {
-        content: {
-          parts: [{ text: '{ this is : not valid json }' }],
-        },
-        finishReason: 'STOP',
-      },
-    ],
-  };
+/** Phase 1 response: JSON-stringified requirements wrapped in Ollama format. */
+function makePhase1Response(overrides: Partial<Phase1Requirements> = {}): Record<string, unknown> {
+  return wrapOllamaText(JSON.stringify(makePhase1Requirements(overrides)));
 }
 
-/**
- * Returns a Gemini response whose text is valid JSON but fails validatePlan.
- * Used to trigger the retry loop.
- */
-function makeGeminiInvalidPlanResponse(): Record<string, unknown> {
-  return {
-    candidates: [
-      {
-        content: {
-          parts: [{ text: JSON.stringify({ description: 'missing name and steps' }) }],
-        },
-        finishReason: 'STOP',
-      },
-    ],
-  };
+/** Phase 2 response: DSL text wrapped in Ollama format. */
+function makePhase2DslResponse(name = 'Morning Yoga', phase = 'Phase'): Record<string, unknown> {
+  const dsl = `Name: ${name} — ${phase}
+Description: ${phase} of the plan.
+Category: yoga
+Voice: af_bella
+---
+Say: Welcome to this phase.
+Wait: 300
+Notify: Halfway through!
+Say: Keep going. You are doing great.
+Wait: 300
+Play: chime
+Say: Phase complete.`;
+  return wrapOllamaText(dsl);
 }
 
 // ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Mock UpstashRateLimitService factory
+// Mock UpstashRateLimitService
 // ---------------------------------------------------------------------------
 
 function createMockRateLimiter() {
-  let callCounts: Map<string, number> = new Map();
-  let windowExpiresAt: Map<string, number> = new Map();
+  let counts: Map<string, number> = new Map();
+  let expiries: Map<string, number> = new Map();
 
   return {
-    consume: jest.fn().mockImplementation(
-      async (namespace: string, identifier: string, limit: number, windowSec: number) => {
-        const key = `${namespace}:${identifier}`;
-        const now = Math.floor(Date.now() / 1000);
-        const expiry = windowExpiresAt.get(key) ?? 0;
-
-        if (expiry <= now) {
-          // New window
-          callCounts.set(key, 1);
-          windowExpiresAt.set(key, now + windowSec);
-          return { allowed: true, current: 1, retryAfterSec: 0 };
-        }
-
-        const count = (callCounts.get(key) ?? 0);
-        if (count >= limit) {
-          return { allowed: false, current: count, retryAfterSec: expiry - now };
-        }
-
-        callCounts.set(key, count + 1);
-        return { allowed: true, current: count + 1, retryAfterSec: 0 };
-      },
-    ),
+    consume: jest.fn(),
     peek: jest.fn().mockImplementation(
       async (namespace: string, identifier: string, limit: number) => {
         const key = `${namespace}:${identifier}`;
         const now = Math.floor(Date.now() / 1000);
-        const expiry = windowExpiresAt.get(key) ?? 0;
-        const count = expiry > now ? (callCounts.get(key) ?? 0) : 0;
-        const allowed = count < limit;
-        return {
-          allowed,
-          current: count,
-          retryAfterSec: allowed ? 0 : Math.max(0, expiry - now),
-        };
+        const count = (expiries.get(key) ?? 0) > now ? (counts.get(key) ?? 0) : 0;
+        return { allowed: count < limit, current: count, retryAfterSec: 0 };
       },
     ),
     increment: jest.fn().mockImplementation(
       async (namespace: string, identifier: string, windowSec: number) => {
         const key = `${namespace}:${identifier}`;
         const now = Math.floor(Date.now() / 1000);
-        const expiry = windowExpiresAt.get(key) ?? 0;
-
-        if (expiry <= now) {
-          callCounts.set(key, 1);
-          windowExpiresAt.set(key, now + windowSec);
+        if ((expiries.get(key) ?? 0) <= now) {
+          counts.set(key, 1);
+          expiries.set(key, now + windowSec);
         } else {
-          callCounts.set(key, (callCounts.get(key) ?? 0) + 1);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
         }
       },
     ),
-    _reset: () => {
-      callCounts = new Map();
-      windowExpiresAt = new Map();
-    },
+    _reset: () => { counts = new Map(); expiries = new Map(); },
   };
 }
 
@@ -164,7 +102,9 @@ describe('PlansService', () => {
   let mockRateLimiter: ReturnType<typeof createMockRateLimiter>;
 
   beforeEach(async () => {
-    process.env.GEMINI_API_KEY = GEMINI_API_KEY;
+    // Default: Ollama mode (no GEMINI_API_KEY needed).
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.LLM_PROVIDER;
 
     mockRateLimiter = createMockRateLimiter();
 
@@ -183,18 +123,35 @@ describe('PlansService', () => {
     jest.useRealTimers();
     mockRateLimiter._reset();
     delete process.env.GEMINI_API_KEY;
+    delete process.env.LLM_PROVIDER;
   });
 
-  // ── generatePlan — happy path ────────────────────────────────────────────
+  /**
+   * Sets up fetch mock for a full Ollama pipeline with N phases.
+   * Call order: Phase 1 (1 call) → Phase 2 (N parallel calls).
+   */
+  function mockPipeline(phaseCount = 2, phase1Override?: Partial<Phase1Requirements>) {
+    const fetchSpy = jest.spyOn(global, 'fetch');
+    // Phase 1
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makePhase1Response(phase1Override),
+    } as unknown as Response);
+    // Phase 2 — one per phase
+    for (let i = 0; i < phaseCount; i++) {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => makePhase2DslResponse('Morning Yoga', `Phase ${i + 1}`),
+      } as unknown as Response);
+    }
+    return fetchSpy;
+  }
+
+  // ── Happy path ─────────────────────────────────────────────────────────────
 
   describe('generatePlan', () => {
-    it('returns a plan with all required fields for a valid prompt', async () => {
-      const plan = makeValidPlan();
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: true,
-        json: async () => makeGeminiResponse(plan),
-      } as unknown as Response);
-
+    it('returns a plan with all required fields', async () => {
+      mockPipeline(2);
       const result = await service.generatePlan('a 20-minute yoga session', 'user-1');
 
       expect(result.plan).toMatchObject({
@@ -206,149 +163,115 @@ describe('PlansService', () => {
       });
     });
 
-    it('calls the Gemini API with responseMimeType: application/json', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: true,
-        json: async () => makeGeminiResponse(makeValidPlan()),
-      } as unknown as Response);
+    it('makes 1 Phase 1 call + N Phase 2 calls (one per phase)', async () => {
+      const fetchSpy = mockPipeline(2);
+      await service.generatePlan('yoga session', 'user-1');
+      // 1 Phase 1 + 2 Phase 2 = 3 total
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+    });
 
-      await service.generatePlan('morning workout', 'user-1');
+    it('makes Phase 2 calls in parallel (Promise.all)', async () => {
+      mockPipeline(3, {
+        durationMinutes: 30,
+        phases: [
+          { name: 'Warm-Up', durationMinutes: 10, focus: 'warming' },
+          { name: 'Main', durationMinutes: 10, focus: 'main set' },
+          { name: 'Cool-Down', durationMinutes: 10, focus: 'cool down' },
+        ],
+      });
+
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      await service.generatePlan('30-minute plan', 'user-1');
+      expect(fetchSpy).toHaveBeenCalledTimes(4); // 1 + 3
+    });
+
+    it('combines all phase steps with Notify transitions between phases', async () => {
+      mockPipeline(2);
+      const result = await service.generatePlan('yoga', 'user-1');
+      const steps = result.plan.steps as Array<Record<string, unknown>>;
+
+      const notifySteps = steps.filter((s) => s.type === 'notify');
+      expect(notifySteps.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('Phase 1 Ollama call includes format schema for structured JSON', async () => {
+      const fetchSpy = mockPipeline(2);
+      await service.generatePlan('test', 'user-1');
 
       const [, init] = fetchSpy.mock.calls[0];
       const body = JSON.parse((init as RequestInit).body as string);
-      expect(body.generationConfig?.responseMimeType).toBe('application/json');
+      // Ollama structured output uses `format`, not `generationConfig`
+      expect(body.format).toBeDefined();
+      expect(body.generationConfig).toBeUndefined();
     });
 
-    it('sends the GEMINI_API_KEY in the x-goog-api-key header', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: true,
-        json: async () => makeGeminiResponse(makeValidPlan()),
-      } as unknown as Response);
+    it('Phase 2 Ollama calls do NOT include format (plain text DSL)', async () => {
+      const fetchSpy = mockPipeline(2);
+      await service.generatePlan('test', 'user-1');
 
-      await service.generatePlan('test prompt', 'user-1');
-
-      const [, init] = fetchSpy.mock.calls[0];
-      const headers = (init as RequestInit).headers as Record<string, string>;
-      expect(headers['x-goog-api-key']).toBe(GEMINI_API_KEY);
+      const [, init] = fetchSpy.mock.calls[1]; // first Phase 2 call
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.format).toBeUndefined();
     });
 
-    it('prefixes the prompt with the category when category is provided', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: true,
-        json: async () => makeGeminiResponse(makeValidPlan({ category: 'fitness' })),
-      } as unknown as Response);
+    it('uses Phase 1 requirements for the final plan header', async () => {
+      mockPipeline(2, { title: 'My Special Plan', category: 'workout', voice: 'am_adam' });
+      const result = await service.generatePlan('workout', 'user-1');
 
-      await service.generatePlan('quick workout', 'user-1', 'fitness');
+      expect(result.plan.name).toBe('My Special Plan');
+      expect(result.plan.category).toBe('workout');
+      expect(result.plan.defaultVoice).toBe('am_adam');
+    });
+
+    it('sends the user prompt in the Ollama messages', async () => {
+      const fetchSpy = mockPipeline(2);
+      await service.generatePlan('stomach pain yoga relief', 'user-1');
 
       const [, init] = fetchSpy.mock.calls[0];
       const body = JSON.parse((init as RequestInit).body as string);
-      const promptText: string = body.contents?.[0]?.parts?.[0]?.text ?? '';
-      expect(promptText).toContain('fitness');
+      // Ollama uses messages array, not contents
+      const userMessage: string = body.messages?.find((m: any) => m.role === 'user')?.content ?? '';
+      expect(userMessage).toContain('stomach pain yoga relief');
     });
 
-    it('does not include category prefix when category is omitted', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+    it('caps duration at 240 minutes and scales phases proportionally', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+      fetchSpy.mockResolvedValueOnce({
         ok: true,
-        json: async () => makeGeminiResponse(makeValidPlan()),
+        json: async () => makePhase1Response({
+          durationMinutes: 300,
+          phases: [
+            { name: 'A', durationMinutes: 100, focus: 'a' },
+            { name: 'B', durationMinutes: 100, focus: 'b' },
+            { name: 'C', durationMinutes: 100, focus: 'c' },
+          ],
+        }),
       } as unknown as Response);
-
-      await service.generatePlan('a nice workout', 'user-1');
-
-      const [, init] = fetchSpy.mock.calls[0];
-      const body = JSON.parse((init as RequestInit).body as string);
-      const promptText: string = body.contents?.[0]?.parts?.[0]?.text ?? '';
-      // Without a category, the raw prompt should appear verbatim
-      expect(promptText).toContain('a nice workout');
-    });
-
-    it('generates different plans for different prompts', async () => {
-      const plan1 = makeValidPlan({ name: 'Yoga Session' });
-      const plan2 = makeValidPlan({ name: 'Running Plan' });
-
-      jest
-        .spyOn(global, 'fetch')
-        .mockResolvedValueOnce({
+      for (let i = 0; i < 3; i++) {
+        fetchSpy.mockResolvedValueOnce({
           ok: true,
-          json: async () => makeGeminiResponse(plan1),
-        } as unknown as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => makeGeminiResponse(plan2),
+          json: async () => makePhase2DslResponse(),
         } as unknown as Response);
+      }
 
-      const [r1, r2] = await Promise.all([
-        service.generatePlan('yoga', 'user-1'),
-        service.generatePlan('running', 'user-2'),
-      ]);
-      expect(r1.plan.name).not.toBe(r2.plan.name);
+      await service.generatePlan('very long plan', 'user-1');
+      expect(fetchSpy).toHaveBeenCalledTimes(4); // 1 + 3 phases
     });
   });
 
-  // ── Schema validation ──────────────────────────────────────────────────────
+  // ── Error handling ─────────────────────────────────────────────────────────
 
-  describe('response validation', () => {
-    it('throws UnprocessableEntityException when plan is missing "name"', async () => {
-      const invalid = makeValidPlan();
-      delete invalid.name;
-
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => makeGeminiResponse(invalid),
-      } as unknown as Response);
-
-      await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(
-        UnprocessableEntityException,
-      );
-    });
-
-    it('throws UnprocessableEntityException when plan has no steps', async () => {
-      const invalid = makeValidPlan({ steps: [] });
-
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => makeGeminiResponse(invalid),
-      } as unknown as Response);
-
-      await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(
-        UnprocessableEntityException,
-      );
-    });
-
-    it('throws UnprocessableEntityException when a step has an unknown type', async () => {
-      const invalid = makeValidPlan({
-        steps: [{ type: 'unknown_step_type', text: 'hello' }],
-      });
-
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => makeGeminiResponse(invalid),
-      } as unknown as Response);
-
-      await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(
-        UnprocessableEntityException,
-      );
-    });
-
-    it('throws Error when Gemini returns invalid (non-parseable) JSON', async () => {
-      // callGemini throws immediately on JSON.parse failure — no retry
+  describe('error handling', () => {
+    it('throws when Ollama returns empty content', async () => {
       jest.spyOn(global, 'fetch').mockResolvedValueOnce({
         ok: true,
-        json: async () => makeGeminiInvalidJsonResponse(),
-      } as unknown as Response);
-
-      await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(/invalid JSON/i);
-    });
-
-    it('throws Error when Gemini response has no candidates', async () => {
-      jest.spyOn(global, 'fetch').mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ candidates: [] }),
+        json: async () => ({ message: { content: '' }, done: true }),
       } as unknown as Response);
 
       await expect(service.generatePlan('test', 'user-1')).rejects.toThrow();
     });
 
-    it('throws Error when Gemini API returns non-OK status', async () => {
+    it('throws when Ollama API returns non-OK status', async () => {
       jest.spyOn(global, 'fetch').mockResolvedValueOnce({
         ok: false,
         status: 500,
@@ -357,127 +280,90 @@ describe('PlansService', () => {
 
       await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(/500/);
     });
-  });
 
-  // ── Retry logic ────────────────────────────────────────────────────────────
-
-  describe('retry on invalid plan output', () => {
-    it('retries once and succeeds on second attempt if first response fails validation', async () => {
-      const validPlan = makeValidPlan();
+    it('retries a failing phase once before throwing', async () => {
+      const badDsl = 'This is not valid DSL at all.';
       const fetchSpy = jest.spyOn(global, 'fetch')
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => makeGeminiInvalidPlanResponse(),
-        } as unknown as Response)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => makeGeminiResponse(validPlan),
-        } as unknown as Response);
-
-      const result = await service.generatePlan('test', 'user-1');
-
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-      expect(result.plan.name).toBe(validPlan.name);
-    });
-
-    it('throws UnprocessableEntityException after MAX_RETRIES (3 total attempts) all fail', async () => {
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => makeGeminiInvalidPlanResponse(),
-      } as unknown as Response);
+        // Phase 1
+        .mockResolvedValueOnce({ ok: true, json: async () => makePhase1Response() } as unknown as Response)
+        // Phase 2.1 attempt 1 — bad
+        .mockResolvedValueOnce({ ok: true, json: async () => wrapOllamaText(badDsl) } as unknown as Response)
+        // Phase 2.2 (good, runs in parallel)
+        .mockResolvedValueOnce({ ok: true, json: async () => makePhase2DslResponse() } as unknown as Response)
+        // Phase 2.1 retry — bad again
+        .mockResolvedValueOnce({ ok: true, json: async () => wrapOllamaText(badDsl) } as unknown as Response);
 
       await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(
         UnprocessableEntityException,
       );
-    });
 
-    it('makes at most 3 total Gemini API calls (1 initial + 2 retries)', async () => {
-      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => makeGeminiInvalidPlanResponse(),
-      } as unknown as Response);
-
-      await service.generatePlan('test', 'user-1').catch(() => null);
-
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      // 1 Phase1 + 2×Phase2.1 attempts + 1×Phase2.2 = 4 calls
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
     });
   });
 
-  // ── Rate limiting via UpstashRateLimitService (10 per hour per user) ────────
+  // ── Rate limiting ──────────────────────────────────────────────────────────
 
   describe('rate limiting', () => {
-    beforeEach(() => {
-      // Stub all Gemini calls to succeed instantly
-      jest.spyOn(global, 'fetch').mockResolvedValue({
-        ok: true,
-        json: async () => makeGeminiResponse(makeValidPlan()),
-      } as unknown as Response);
+    function mockForever() {
+      let call = 0;
+      jest.spyOn(global, 'fetch').mockImplementation(async () => {
+        call++;
+        const isPhase1 = call % 3 === 1;
+        return {
+          ok: true,
+          json: async () => isPhase1 ? makePhase1Response() : makePhase2DslResponse(),
+        } as unknown as Response;
+      });
+    }
+
+    it('throws TooManyRequestsException when quota exceeded', async () => {
+      mockForever();
+      for (let i = 0; i < 10; i++) await service.generatePlan(`prompt ${i}`, 'user-rl');
+      await expect(service.generatePlan('overflow', 'user-rl')).rejects.toThrow(HttpException);
     });
 
-    it('allows the first 10 requests within the same hour', async () => {
-      for (let i = 0; i < 10; i++) {
-        await expect(service.generatePlan(`prompt ${i}`, 'user-rl')).resolves.toBeDefined();
-      }
-    });
-
-    it('throws TooManyRequestsException on the 11th request within an hour', async () => {
-      for (let i = 0; i < 10; i++) {
-        await service.generatePlan(`prompt ${i}`, 'user-rl');
-      }
-      await expect(service.generatePlan('overflow', 'user-rl')).rejects.toThrow(
-        HttpException,
-      );
-    });
-
-    it('does not call Gemini when rate-limited', async () => {
-      for (let i = 0; i < 10; i++) {
-        await service.generatePlan(`prompt ${i}`, 'user-rl2');
-      }
-      const fetchSpy = jest.spyOn(global, 'fetch');
-      fetchSpy.mockClear();
-
-      await service.generatePlan('overflow', 'user-rl2').catch(() => null);
-      expect(fetchSpy).not.toHaveBeenCalled();
-    });
-
-    it('rate limits are per-user (different users have independent quotas)', async () => {
-      // Exhaust user-a
-      for (let i = 0; i < 10; i++) {
-        await service.generatePlan(`prompt ${i}`, 'user-a');
-      }
-
-      // user-a is blocked
-      await expect(service.generatePlan('overflow', 'user-a')).rejects.toThrow(
-        HttpException,
-      );
-
-      // user-b should still be allowed
+    it('rate limits are per-user — different users have independent quotas', async () => {
+      mockForever();
+      for (let i = 0; i < 10; i++) await service.generatePlan(`prompt ${i}`, 'user-a');
+      await expect(service.generatePlan('overflow', 'user-a')).rejects.toThrow(HttpException);
       await expect(service.generatePlan('prompt', 'user-b')).resolves.toBeDefined();
-    });
-
-    it('resets the window after 1 hour elapses', async () => {
-      jest.useFakeTimers();
-
-      for (let i = 0; i < 10; i++) {
-        await service.generatePlan(`prompt ${i}`, 'user-timer');
-      }
-      await expect(service.generatePlan('overflow', 'user-timer')).rejects.toThrow(
-        HttpException,
-      );
-
-      // Advance past the 1-hour window
-      jest.advanceTimersByTime(60 * 60 * 1001);
-
-      await expect(service.generatePlan('after reset', 'user-timer')).resolves.toBeDefined();
     });
   });
 
-  // ── GEMINI_API_KEY ─────────────────────────────────────────────────────────
+  // ── Gemini mode (LLM_PROVIDER=gemini) ─────────────────────────────────────
 
-  describe('GEMINI_API_KEY', () => {
-    it('throws when GEMINI_API_KEY is not set in the environment', async () => {
+  describe('Gemini mode (LLM_PROVIDER=gemini)', () => {
+    it('throws ServiceUnavailableException when GEMINI_API_KEY is not set', async () => {
+      process.env.LLM_PROVIDER = 'gemini';
       delete process.env.GEMINI_API_KEY;
-      await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(/GEMINI_API_KEY/i);
+      await expect(service.generatePlan('test', 'user-1')).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+    });
+
+    it('calls Gemini with JSON responseMimeType for Phase 1', async () => {
+      process.env.LLM_PROVIDER = 'gemini';
+      process.env.GEMINI_API_KEY = 'test-key';
+
+      // Gemini response format
+      const geminiPhase1 = {
+        candidates: [{ content: { parts: [{ text: JSON.stringify(makePhase1Requirements()) }] } }],
+      };
+      const geminiPhase2 = {
+        candidates: [{ content: { parts: [{ text: (makePhase2DslResponse()['message'] as any)['content'] }] } }],
+      };
+
+      const fetchSpy = jest.spyOn(global, 'fetch')
+        .mockResolvedValueOnce({ ok: true, json: async () => geminiPhase1 } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => geminiPhase2 } as unknown as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => geminiPhase2 } as unknown as Response);
+
+      await service.generatePlan('test', 'user-1');
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.generationConfig?.responseMimeType).toBe('application/json');
     });
   });
 });

@@ -54,10 +54,16 @@ VOICE_CATALOG: dict[str, str] = {
     "bm_lewis":    "Lewis (Male, UK)",
     "bm_daniel":   "Daniel (Male, UK)",
     "bm_fable":    "Fable (Male, UK)",
+    # Hindi — Female
+    "hf_alpha":    "Alpha (Female, Hindi)",
+    "hf_beta":     "Beta (Female, Hindi)",
+    # Hindi — Male
+    "hm_omega":    "Omega (Male, Hindi)",
+    "hm_psi":      "Psi (Male, Hindi)",
 }
 
 # Supported language codes (Kokoro uses ISO 639-1 style).
-SUPPORTED_LANGUAGES = frozenset({"en-us", "en-gb"})
+SUPPORTED_LANGUAGES = frozenset({"en-us", "en-gb", "h"})
 
 
 def _pcm_to_wav(samples: np.ndarray, sample_rate: int) -> bytes:

@@ -41,6 +41,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'package:instructor/models/enums.dart';
+import 'package:instructor/services/audio_engine.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/phone_call_handler.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -60,8 +61,10 @@ import 'package:instructor/services/plan_execution_engine.dart';
 class InstructorAudioHandler extends BaseAudioHandler {
   InstructorAudioHandler({
     required PlanExecutionEngine engine,
+    required AudioEngine audioEngine,
     required PhoneCallHandler phoneCallHandler,
   })  : _engine = engine,
+        _audioEngine = audioEngine,
         _phoneCallHandler = phoneCallHandler {
     // Subscribe to execution state changes immediately so that the lock screen
     // always reflects the current plan state.
@@ -74,6 +77,7 @@ class InstructorAudioHandler extends BaseAudioHandler {
   }
 
   final PlanExecutionEngine _engine;
+  final AudioEngine _audioEngine;
   final PhoneCallHandler _phoneCallHandler;
   StreamSubscription<ExecutionState>? _stateSub;
 
@@ -104,9 +108,21 @@ class InstructorAudioHandler extends BaseAudioHandler {
   }
 
   /// Stops plan execution (maps to the ■ lock screen button).
+  ///
+  /// Stops the engine, halts all three [AudioPlayer] instances in parallel,
+  /// releases the [AudioSession], emits a final idle [PlaybackState], and
+  /// calls [super.stop()] to dismiss the media notification.
   @override
   Future<void> stop() async {
     await _engine.stop();
+    await _audioEngine.stopAll();
+    final session = await AudioSession.instance;
+    await session.setActive(false);
+    playbackState.add(PlaybackState(
+      processingState: AudioProcessingState.idle,
+      playing: false,
+    ));
+    await super.stop();
   }
 
   // ── Execution state → lock screen ─────────────────────────────────────────
@@ -124,20 +140,24 @@ class InstructorAudioHandler extends BaseAudioHandler {
 
     playbackState.add(PlaybackState(
       controls: [
-        MediaControl.skipToPrevious,
-        isPlaying ? MediaControl.pause : MediaControl.play,
-        MediaControl.skipToNext,
+        // Index 0: stop — must appear in compact notification (REQ-003).
         MediaControl.stop,
+        // Index 1: play/pause.
+        isPlaying ? MediaControl.pause : MediaControl.play,
+        // Index 2: skip-next.
+        MediaControl.skipToNext,
+        // Index 3: skip-previous — visible only in expanded notification.
+        MediaControl.skipToPrevious,
       ],
       systemActions: const {
-        MediaAction.skipToPrevious,
+        MediaAction.stop,
         MediaAction.pause,
         MediaAction.play,
         MediaAction.skipToNext,
-        MediaAction.stop,
+        MediaAction.skipToPrevious,
       },
-      // Compact notification on Android shows indices 0 (prev), 1 (play/pause),
-      // 2 (next) — the three most important controls.
+      // Compact notification shows stop (0), play/pause (1), skip-next (2).
+      // REQ-003: stop must be accessible without expanding the notification.
       androidCompactActionIndices: const [0, 1, 2],
       processingState: state.status == ExecutionStatus.completed
           ? AudioProcessingState.completed
@@ -192,6 +212,7 @@ class InstructorAudioHandler extends BaseAudioHandler {
 /// 3. Starts phone-call interruption listening via [PhoneCallHandlerImpl].
 Future<InstructorAudioHandler> initializeBackgroundService({
   required PlanExecutionEngine engine,
+  required AudioEngine audioEngine,
   required NotificationService notificationService,
 }) async {
   // Build the phone-call handler backed by audio_session interruptions.
@@ -206,6 +227,7 @@ Future<InstructorAudioHandler> initializeBackgroundService({
   final handler = await AudioService.init<InstructorAudioHandler>(
     builder: () => InstructorAudioHandler(
       engine: engine,
+      audioEngine: audioEngine,
       phoneCallHandler: phoneCallHandler,
     ),
     config: const AudioServiceConfig(

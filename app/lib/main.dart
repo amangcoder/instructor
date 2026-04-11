@@ -7,6 +7,7 @@ import 'package:instructor/services/background_service.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/data/starter_plans.dart';
 import 'package:instructor/repositories/plan_repository.dart';
+import 'package:instructor/services/audio_engine.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:instructor/services/tts_service.dart';
 
@@ -43,6 +44,7 @@ void main() async {
   final container = ProviderContainer();
 
   final engine = container.read(planExecutionEngineProvider);
+  final audioEngine = container.read(audioEngineProvider);
   final notificationService = container.read(notificationServiceProvider);
 
   // ── Step 3: Initialise audio_service and the iOS AVAudioSession. ──────────
@@ -55,6 +57,7 @@ void main() async {
   try {
     await initializeBackgroundService(
       engine: engine,
+      audioEngine: audioEngine,
       notificationService: notificationService,
     );
   } catch (e) {

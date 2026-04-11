@@ -2,7 +2,7 @@
  * Validates a generated Plan object from the LLM against the Flutter Plan model schema.
  */
 
-const VALID_STEP_TYPES = ['say', 'wait', 'play', 'notify', 'repeat'] as const;
+const VALID_STEP_TYPES = ['say', 'wait', 'play', 'notify', 'repeat', 'stopAudio'] as const;
 const VALID_CATEGORIES = ['fitness', 'meditation', 'study', 'routine', 'custom'] as const;
 // NOTE: Voice IDs are NOT validated here — any non-empty string is accepted.
 // Voices are validated downstream by the TTS provider at synthesis time.
@@ -94,6 +94,9 @@ export function validatePlan(raw: unknown): PlanValidationResult {
         if (!Array.isArray(s.steps)) {
           errors.push(`steps[${i}] (repeat): steps must be an array`);
         }
+        break;
+      case 'stopAudio':
+        // No additional fields required
         break;
     }
   });

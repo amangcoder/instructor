@@ -48,7 +48,9 @@ abstract class PlanRepository {
   ///
   /// For each plan, maps [defaultVoice] and every [SayStep.voiceId] through
   /// [voiceMap]. Voices not in the map are left unchanged.
-  Future<void> remapPlanVoices(Map<String, String> voiceMap);
+  ///
+  /// Returns the number of plans that were actually updated.
+  Future<int> remapPlanVoices(Map<String, String> voiceMap);
 }
 
 // ---------------------------------------------------------------------------
@@ -200,9 +202,10 @@ class DriftPlanRepository implements PlanRepository {
   // -------------------------------------------------------------------------
 
   @override
-  Future<void> remapPlanVoices(Map<String, String> voiceMap) async {
-    if (voiceMap.isEmpty) return;
+  Future<int> remapPlanVoices(Map<String, String> voiceMap) async {
+    if (voiceMap.isEmpty) return 0;
 
+    var updatedCount = 0;
     final allRows = await _db.select(_db.plansTable).get();
     for (final row in allRows) {
       final plan = _rowToPlan(row);
@@ -218,7 +221,9 @@ class DriftPlanRepository implements PlanRepository {
         steps: newSteps ?? plan.steps,
       );
       await updatePlan(row.id, updated);
+      updatedCount++;
     }
+    return updatedCount;
   }
 
   /// Recursively remaps voiceId in SaySteps and RepeatStep children.
