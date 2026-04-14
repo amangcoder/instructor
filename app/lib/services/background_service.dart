@@ -35,15 +35,49 @@
 library background_service;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/material.dart' show Color;
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:path_provider/path_provider.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/phone_call_handler.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Artwork cache
+// ────────────────────────────────────────────────────────────────────────────
+
+/// File URI of the app logo written to the device cache dir.
+///
+/// Set once by [_cacheArtworkAsset] during [initializeBackgroundService] so
+/// every [MediaItem] emitted by [InstructorAudioHandler] can reference it.
+/// If the copy fails the variable stays null and the OS falls back to its
+/// default music-note placeholder.
+Uri? _artworkUri;
+
+/// Copies `assets/images/logo.png` to the app's temporary directory so that
+/// Android's [BitmapFactory] and iOS's [MPMediaItemArtwork] can load it via a
+/// plain `file://` URI (the only scheme both platforms accept reliably).
+Future<void> _cacheArtworkAsset() async {
+  try {
+    final cacheDir = await getTemporaryDirectory();
+    final file = File('${cacheDir.path}/instructor_artwork.png');
+    if (!file.existsSync()) {
+      final data = await rootBundle.load('assets/images/logo.png');
+      await file.writeAsBytes(data.buffer.asUint8List());
+    }
+    _artworkUri = Uri.file(file.path);
+    debugPrint('InstructorAudioHandler: artwork cached → ${file.path}');
+  } catch (e) {
+    debugPrint('InstructorAudioHandler: artwork cache failed — $e');
+  }
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // AudioHandler
@@ -227,6 +261,12 @@ Future<InstructorAudioHandler> initializeBackgroundService({
     notificationService: notificationService,
   );
 
+  // Copy the app logo to the cache dir so MediaItem.artUri has a valid
+  // file:// path that both Android BitmapFactory and iOS MPMediaItemArtwork
+  // can load. Must be awaited before AudioService.init so that the first
+  // MediaItem emitted already has the artwork set.
+  await _cacheArtworkAsset();
+
   // Initialise audio_service with the Android foreground-service notification
   // configuration.  [androidStopForegroundOnPause: false] keeps the service
   // alive during WaitSteps so the OS cannot suspend the app.
@@ -238,6 +278,14 @@ Future<InstructorAudioHandler> initializeBackgroundService({
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.instructor.app.audio',
       androidNotificationChannelName: 'Instructor',
+      // Use the monochrome status-bar icon for a polished Android notification.
+      androidNotificationIcon: 'drawable/ic_stat_instructor',
+      // Brand the notification with the app's indigo-violet seed colour so the
+      // notification chrome matches the app's visual identity.
+      notificationColor: Color(0xFF5B6BE8),
+      // Preload the artwork bitmap before displaying the notification so there
+      // is no blank-art flash when a plan first starts.
+      preloadArtwork: true,
       // [androidStopForegroundOnPause: false] keeps the Android foreground
       // service alive even during wait steps (no audio actively playing) so
       // the OS cannot suspend the app between steps. This is the primary guard
@@ -325,5 +373,8 @@ MediaItem executionStateToMediaItem(ExecutionState state) {
     title: state.plan.name,
     artist: artistText,
     duration: state.plan.totalDuration,
+    // Show the app logo on the lock screen and in the notification shade
+    // instead of the system's generic music-note placeholder.
+    artUri: _artworkUri,
   );
 }

@@ -17,8 +17,10 @@ part 'notification_service.g.dart';
 
 /// High-importance channel used for step notifications and resume prompts.
 ///
-/// Channel id and name match the architecture spec exactly.
-const String kPlanNotificationsChannelId = 'plan_notifications';
+/// The `_v2` suffix forces Android to create a new channel after the gong
+/// notification sound was added — existing channel definitions are immutable
+/// and the OS ignores sound changes on already-created channels.
+const String kPlanNotificationsChannelId = 'plan_notifications_v2';
 const String kPlanNotificationsChannelName = 'Plan Notifications';
 
 /// Low-importance channel for the persistent Android foreground notification.
@@ -285,11 +287,13 @@ class FlutterNotificationService extends NotificationService {
     if (androidPlugin == null) return;
 
     // High-importance channel: step notifications and resume prompts.
+    // The gong sound file lives in android/app/src/main/res/raw/gong.mp3.
     await androidPlugin.createNotificationChannel(
       const AndroidNotificationChannel(
         kPlanNotificationsChannelId,
         kPlanNotificationsChannelName,
         importance: Importance.high,
+        sound: RawResourceAndroidNotificationSound('gong'),
         playSound: true,
         enableVibration: true,
         enableLights: true,
@@ -333,6 +337,7 @@ class FlutterNotificationService extends NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Plan step',
+      sound: RawResourceAndroidNotificationSound('gong'),
       playSound: true,
       enableVibration: true,
     );
@@ -341,6 +346,7 @@ class FlutterNotificationService extends NotificationService {
       presentAlert: true,
       presentBadge: false,
       presentSound: true,
+      sound: 'gong.mp3',
     );
 
     await _plugin.show(
@@ -360,6 +366,7 @@ class FlutterNotificationService extends NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'Resume plan',
+      sound: RawResourceAndroidNotificationSound('gong'),
       actions: <AndroidNotificationAction>[
         AndroidNotificationAction(
           kResumeActionId,
@@ -374,6 +381,7 @@ class FlutterNotificationService extends NotificationService {
       presentAlert: true,
       presentBadge: false,
       presentSound: true,
+      sound: 'gong.mp3',
       categoryIdentifier: _resumeCategoryId,
     );
 
