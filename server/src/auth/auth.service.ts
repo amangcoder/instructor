@@ -312,6 +312,13 @@ export class AuthService {
     return { photoUrl };
   }
 
+  async deleteAccount(userId: string): Promise<void> {
+    const user = await this.db.getUserById(userId);
+    if (!user) throw new UnauthorizedException('User not found');
+    await this.db.deleteUser(userId, user.email);
+    this.logger.log(`Account deleted: userId=${userId}`);
+  }
+
   async updateProfile(
     userId: string,
     data: { name?: string; username?: string; photoUrl?: string },

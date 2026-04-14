@@ -35,7 +35,7 @@ import { drizzle } from 'drizzle-orm/neon-http';
 import { and, asc, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { libraryPlans, otpRecords, plans, refreshTokens, ttsJobs, users } from './schema';
+import { deletionRequests, libraryPlans, otpRecords, plans, refreshTokens, ttsJobs, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 
 // ── Typed result shapes returned to callers ────────────────────────────────
@@ -541,6 +541,29 @@ export class DatabaseService {
     return this.mapPlanRecord(rows[0]);
   }
 
+  /**
+   * Delete a user account and all associated data.
+   * Order: refresh_tokens → plans (cascades tts_jobs) → otp_records → users.
+   */
+  async deleteUser(userId: string, email: string): Promise<void> {
+    if (this.noop) return;
+
+    await this.withRetry(() =>
+      this.db!.delete(refreshTokens).where(eq(refreshTokens.userId, userId)),
+    );
+    await this.withRetry(() =>
+      this.db!.delete(plans).where(eq(plans.userId, userId)),
+    );
+    await this.withRetry(() =>
+      this.db!.delete(otpRecords).where(eq(otpRecords.email, email)),
+    );
+    await this.withRetry(() =>
+      this.db!.delete(users).where(eq(users.id, userId)),
+    );
+
+    this.logger.log(`User deleted: userId=${userId}, email=${email}`);
+  }
+
   /** Delete a plan for the authenticated user. Cascade-deletes tts_jobs. */
   async deletePlan(planId: string, userId: string): Promise<void> {
     if (this.noop) return;
@@ -1023,6 +1046,25 @@ export class DatabaseService {
 
     await this.setTtsStatus(planId, finalStatus, total, completed);
     this.logger.log(`Plan ${planId} TTS finalized: ${finalStatus} (${completed}/${total})`);
+  }
+
+  // ── Deletion requests ──────────────────────────────────────────────────────
+
+  /** Persist a data-deletion request row. */
+  async insertDeletionRequest(params: {
+    id: string;
+    email: string;
+    scope: string;
+    reason: string | null;
+    requestedAt: Date;
+    createdAt: Date;
+  }): Promise<void> {
+    if (this.noop) return;
+
+    await this.withRetry(() =>
+      this.db!.insert(deletionRequests).values(params),
+    );
+    this.logger.log(`Deletion request logged: id=${params.id}, scope=${params.scope}`);
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────

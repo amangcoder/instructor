@@ -3,6 +3,7 @@ import {
   Post,
   Patch,
   Get,
+  Delete,
   Body,
   BadRequestException,
   HttpCode,
@@ -157,6 +158,22 @@ export class AuthController {
   async refresh(@Body() dto: RefreshTokenDto) {
     this.logger.log(`POST /auth/refresh`);
     return this.authService.refreshAccessToken(dto.refreshToken);
+  }
+
+  /**
+   * DELETE /api/auth/account
+   * Permanently deletes the authenticated user's account and all associated
+   * data (plans, refresh tokens, OTP records). Required by Google Play's
+   * data safety policy.
+   */
+  @Delete('account')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async deleteAccount(@Req() req: Request): Promise<{ message: string }> {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`DELETE /auth/account — userId=${user.sub}`);
+    await this.authService.deleteAccount(user.sub);
+    return { message: 'Account deleted' };
   }
 
   /**

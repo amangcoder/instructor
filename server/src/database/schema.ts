@@ -203,3 +203,24 @@ export const ttsJobs = pgTable(
 
 export type TtsJob = typeof ttsJobs.$inferSelect;
 export type NewTtsJob = typeof ttsJobs.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// deletion_requests
+//
+// Stores data-deletion requests submitted via the public website form.
+// Intentionally has NO foreign key to users — we never query the users table
+// during processing (email enumeration prevention). The admin reviews and
+// processes requests manually via the notification email.
+// ---------------------------------------------------------------------------
+
+export const deletionRequests = pgTable('deletion_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: varchar('email').notNull(),
+  scope: varchar('scope', { length: 50 }).notNull(),
+  reason: text('reason'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type DeletionRequest = typeof deletionRequests.$inferSelect;
+export type NewDeletionRequest = typeof deletionRequests.$inferInsert;

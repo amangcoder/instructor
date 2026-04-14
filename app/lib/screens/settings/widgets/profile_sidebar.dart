@@ -127,21 +127,21 @@ class _ProfileSidebarState extends ConsumerState<ProfileSidebar> {
               title: const Text('Help & Feedback'),
               onTap: () => _launchUrlSafe(
                 context,
-                Uri.parse('mailto:support@thecuratedstillness.com'),
+                Uri.parse('mailto:admin@layersiq.com'),
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.star_outline),
-              title: const Text('Rate Instructor'),
-              onTap: () => _launchUrlSafe(
-                context,
-                Uri.parse(
-                  Platform.isIOS
-                      ? 'https://apps.apple.com/app/instructor/id6744189217'
-                      : 'https://play.google.com/store/apps/details?id=com.thecuratedstillness.instructor',
-                ),
-              ),
-            ),
+            // ListTile(
+            //   leading: const Icon(Icons.star_outline),
+            //   title: const Text('Rate Instructor'),
+            //   onTap: () => _launchUrlSafe(
+            //     context,
+            //     Uri.parse(
+            //       Platform.isIOS
+            //           ? 'https://apps.apple.com/app/instructor/id6744189217'
+            //           : 'https://play.google.com/store/apps/details?id=com.thecuratedstillness.instructor',
+            //     ),
+            //   ),
+            // ),
             ListTile(
               leading: const Icon(Icons.privacy_tip_outlined),
               title: const Text('Privacy Policy'),

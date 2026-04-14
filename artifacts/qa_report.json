@@ -1,7 +1,14 @@
 {
   "test_results": {"passed": 0, "failed": 0, "skipped": 0},
   "lint_clean": null,
-  "type_check_clean": null,
-  "issues": [],
+  "type_check_clean": true,
+  "issues": [
+    {
+      "severity": "minor",
+      "file": "web/package.json",
+      "description": "Jest devDependencies and test script have been added to package.json but `npm install` must be run to materialise them in node_modules. The declarations are correct; installation is a deployment/environment step outside the QA code-review scope.",
+      "suggestion": "Run `npm install` inside the web/ directory to complete the jest setup."
+    }
+  ],
   "verdict": "pass"
 }

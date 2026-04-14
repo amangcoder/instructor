@@ -2,7 +2,7 @@ name: instructor
 description: A personal, push-only life conductor app. Create and run time-sequenced Plans with voice instructions, notifications, and ambient audio.
 publish_to: 'none'
 
-version: 1.0.1+2
+version: 1.0.4+5
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -108,7 +108,6 @@ flutter:
     - assets/audio/silence/
     - assets/images/onboarding/
     - assets/images/logo.png
-    - assets/images/logo.svg
 
 # ── Launcher icon generation (run: dart run flutter_launcher_icons) ────────
 flutter_launcher_icons:

@@ -57,10 +57,10 @@ echo "==> Building CDK TypeScript..."
 # Uses DATABASE_URL_DIRECT (no -pooler suffix) as required by drizzle-kit.
 # Migrations are idempotent — safe to re-run on an already-deployed schema.
 echo "==> Running database migrations..."
-(cd "${SERVER_DIR}" && npm run db:migrate)
+(cd "${SERVER_DIR}" && pnpm run db:migrate)
 
 echo "==> Verifying schema..."
-(cd "${SERVER_DIR}" && npm run db:verify) || echo "    ⚠  Schema verify failed — check output above before proceeding"
+(cd "${SERVER_DIR}" && pnpm run db:verify) || echo "    ⚠  Schema verify failed — check output above before proceeding"
 
 # ── 5. CDK Deploy ─────────────────────────────────────────────────────────────
 echo "==> Running CDK deploy..."
@@ -74,7 +74,7 @@ cd "${INFRA_DIR}" && npx cdk deploy \
 # Populates library_plans with the 5 starter plans (idempotent — skips existing).
 echo ""
 echo "==> Seeding library plans..."
-(cd "${SERVER_DIR}" && npm run seed:library-plans) || echo "    ⚠  Seed failed — run manually: cd server && npm run seed:library-plans"
+(cd "${SERVER_DIR}" && pnpm run seed:library-plans) || echo "    ⚠  Seed failed — run manually: cd server && pnpm run seed:library-plans"
 
 echo ""
 echo "==> Deploy complete."

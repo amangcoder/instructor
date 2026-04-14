@@ -102,4 +102,37 @@ export class SESEmailService {
       `OTP email sent to ${recipientEmail} — MessageId=${result.MessageId}`,
     );
   }
+
+  /**
+   * Send a plain-text admin notification email (e.g. deletion-request alerts).
+   *
+   * @param toEmail   Recipient address (typically ADMIN_EMAIL)
+   * @param subject   Email subject line
+   * @param body      Plain-text body
+   */
+  async sendAdminEmail(toEmail: string, subject: string, body: string): Promise<void> {
+    const command = new SendEmailCommand({
+      Source: this.fromEmail,
+      Destination: {
+        ToAddresses: [toEmail],
+      },
+      Message: {
+        Subject: {
+          Data: subject,
+          Charset: 'UTF-8',
+        },
+        Body: {
+          Text: {
+            Data: body,
+            Charset: 'UTF-8',
+          },
+        },
+      },
+    });
+
+    const result = await this.ses.send(command);
+    this.logger.log(
+      `Admin email sent to ${toEmail} — MessageId=${result.MessageId}`,
+    );
+  }
 }

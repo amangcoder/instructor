@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { TtsModule } from './tts/tts.module';
 import { PlansModule } from './plans/plans.module';
 import { LibraryModule } from './library/library.module';
+import { AdminModule } from './admin/admin.module';
 import { HealthController } from './health.controller';
 import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
@@ -27,6 +28,7 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
     TtsModule,
     PlansModule,
     LibraryModule,
+    AdminModule,
   ],
   controllers: [HealthController],
   providers: [
