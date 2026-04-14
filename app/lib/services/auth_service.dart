@@ -16,6 +16,7 @@ library auth_service;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,6 +38,9 @@ abstract final class _StorageKeys {
   static const String refreshToken = 'auth_refresh_token';
   static const String userId = 'auth_user_id';
   static const String userEmail = 'auth_user_email';
+  static const String userName = 'auth_user_name';
+  static const String userUsername = 'auth_user_username';
+  static const String userPhotoUrl = 'auth_user_photo_url';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +183,33 @@ abstract class AuthService {
   ///
   /// Defaults to [isAuthenticated] for test stubs.
   Future<bool> isLoggedIn() async => isAuthenticated;
+
+  /// Fetches the latest profile from the server and updates the cache.
+  ///
+  /// Returns the updated [AuthUser] or null on failure.
+  Future<AuthUser?> fetchProfile() async => null;
+
+  /// Updates the user's profile (name, username) on the server and cache.
+  /// All parameters are optional.
+  ///
+  /// Throws [AuthException] on API error (e.g. 409 username taken).
+  Future<AuthUser> updateProfile({
+    String? name,
+    String? username,
+  }) async {
+    throw const AuthException('Not implemented');
+  }
+
+  /// Uploads a profile photo to the server and updates the cached [photoUrl].
+  ///
+  /// [bytes] is the raw image data; [mimeType] should be 'image/jpeg', etc.
+  /// Throws [AuthException] on failure.
+  Future<void> uploadProfilePhoto({
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    throw const AuthException('Not implemented');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,13 +273,19 @@ class AuthServiceImpl implements AuthService {
     final data = await _post(url, {'email': email, 'otp': otp});
     final result = AuthResult.fromJson(data);
 
-    // Store tokens securely.
+    // Store tokens and profile securely.
     await Future.wait([
       _storage.write(key: _StorageKeys.accessToken, value: result.accessToken),
       _storage.write(
           key: _StorageKeys.refreshToken, value: result.refreshToken),
       _storage.write(key: _StorageKeys.userId, value: result.user.id),
       _storage.write(key: _StorageKeys.userEmail, value: result.user.email),
+      if (result.user.name != null)
+        _storage.write(key: _StorageKeys.userName, value: result.user.name),
+      if (result.user.username != null)
+        _storage.write(key: _StorageKeys.userUsername, value: result.user.username),
+      if (result.user.photoUrl != null)
+        _storage.write(key: _StorageKeys.userPhotoUrl, value: result.user.photoUrl),
     ]);
 
     // Update in-memory cache.
@@ -356,6 +393,9 @@ class AuthServiceImpl implements AuthService {
       _storage.delete(key: _StorageKeys.refreshToken),
       _storage.delete(key: _StorageKeys.userId),
       _storage.delete(key: _StorageKeys.userEmail),
+      _storage.delete(key: _StorageKeys.userName),
+      _storage.delete(key: _StorageKeys.userUsername),
+      _storage.delete(key: _StorageKeys.userPhotoUrl),
     ]);
 
     // Clear in-memory cache.
@@ -390,7 +430,16 @@ class AuthServiceImpl implements AuthService {
         await refreshToken();
         // Ensure in-memory cache is populated — refreshToken() only updates
         // the stream if _cachedUser is already non-null, so set it explicitly.
-        _cachedUser = AuthUser(id: id, email: email);
+        final name = await _storage.read(key: _StorageKeys.userName);
+        final username = await _storage.read(key: _StorageKeys.userUsername);
+        final photoUrl = await _storage.read(key: _StorageKeys.userPhotoUrl);
+        _cachedUser = AuthUser(
+          id: id,
+          email: email,
+          name: name,
+          username: username,
+          photoUrl: photoUrl,
+        );
         _isAuthenticated = true;
         return true;
       } catch (e) {
@@ -402,7 +451,16 @@ class AuthServiceImpl implements AuthService {
     }
 
     // Token is present and not yet expired — populate in-memory cache.
-    _cachedUser = AuthUser(id: id, email: email);
+    final name = await _storage.read(key: _StorageKeys.userName);
+    final username = await _storage.read(key: _StorageKeys.userUsername);
+    final photoUrl = await _storage.read(key: _StorageKeys.userPhotoUrl);
+    _cachedUser = AuthUser(
+      id: id,
+      email: email,
+      name: name,
+      username: username,
+      photoUrl: photoUrl,
+    );
     _isAuthenticated = true;
     return true;
   }
@@ -435,6 +493,130 @@ class AuthServiceImpl implements AuthService {
       debugPrint('AuthService._isTokenExpired: could not decode token ($e)');
       return false;
     }
+  }
+
+  // ── Profile ────────────────────────────────────────────────────────────
+
+  @override
+  Future<AuthUser?> fetchProfile() async {
+    final accessToken = await _storage.read(key: _StorageKeys.accessToken);
+    if (accessToken == null || accessToken.isEmpty) return null;
+
+    try {
+      final url = _buildUrl('/api/auth/me');
+      final response = await _httpClient
+          .get(url, headers: {
+            'Authorization': 'Bearer $accessToken',
+          })
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final json = jsonDecode(response.body) as Map<String, dynamic>;
+        final user = AuthUser.fromJson(json);
+        await _persistProfileFields(user);
+        _cachedUser = user;
+        return user;
+      }
+    } catch (e) {
+      debugPrint('AuthService.fetchProfile: failed ($e)');
+    }
+    return null;
+  }
+
+  @override
+  Future<AuthUser> updateProfile({
+    String? name,
+    String? username,
+  }) async {
+    final accessToken = await _storage.read(key: _StorageKeys.accessToken);
+    if (accessToken == null || accessToken.isEmpty) {
+      throw const AuthException('Not authenticated');
+    }
+
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (username != null) body['username'] = username;
+
+    final url = _buildUrl('/api/auth/profile');
+    final response = await _httpClient
+        .patch(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthException.fromResponse(response.statusCode, response.body);
+    }
+
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final updatedUser = AuthUser.fromJson(json);
+    await _persistProfileFields(updatedUser);
+    _cachedUser = updatedUser;
+    if (updatedUser.id.isNotEmpty) {
+      final token = await _storage.read(key: _StorageKeys.accessToken) ?? '';
+      _authStateController.add(Authenticated(user: updatedUser, accessToken: token));
+    }
+    return updatedUser;
+  }
+
+  @override
+  Future<void> uploadProfilePhoto({
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    final accessToken = await _storage.read(key: _StorageKeys.accessToken);
+    if (accessToken == null || accessToken.isEmpty) {
+      throw const AuthException('Not authenticated');
+    }
+
+    final uri = _buildUrl('/api/auth/profile/photo');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $accessToken'
+      ..files.add(http.MultipartFile.fromBytes(
+        'photo',
+        bytes,
+        filename: 'photo.${mimeType.split('/').last}',
+      ));
+
+    final streamed = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamed);
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthException.fromResponse(response.statusCode, response.body);
+    }
+
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    final photoUrl = json['photoUrl']?.toString();
+    if (photoUrl != null && photoUrl.isNotEmpty) {
+      await _storage.write(key: _StorageKeys.userPhotoUrl, value: photoUrl);
+      if (_cachedUser != null) {
+        _cachedUser = _cachedUser!.copyWith(photoUrl: photoUrl);
+        final token = await _storage.read(key: _StorageKeys.accessToken) ?? '';
+        _authStateController.add(Authenticated(user: _cachedUser!, accessToken: token));
+      }
+    }
+  }
+
+  Future<void> _persistProfileFields(AuthUser user) async {
+    await Future.wait([
+      if (user.name != null)
+        _storage.write(key: _StorageKeys.userName, value: user.name)
+      else
+        _storage.delete(key: _StorageKeys.userName),
+      if (user.username != null)
+        _storage.write(key: _StorageKeys.userUsername, value: user.username)
+      else
+        _storage.delete(key: _StorageKeys.userUsername),
+      if (user.photoUrl != null)
+        _storage.write(key: _StorageKeys.userPhotoUrl, value: user.photoUrl)
+      else
+        _storage.delete(key: _StorageKeys.userPhotoUrl),
+    ]);
   }
 
   // ── Private helpers ────────────────────────────────────────────────────

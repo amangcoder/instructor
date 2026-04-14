@@ -124,6 +124,20 @@ abstract class AudioEngine {
   /// for [SayStep]s.
   Duration? get currentVoiceDuration;
 
+  /// The current playback position within the voice audio file (at 1× speed).
+  ///
+  /// Used by [PlanExecutionEngine] when the user changes playback speed
+  /// mid-step to recompute how much audio content remains.
+  Duration? get currentVoicePosition;
+
+  /// Changes the playback speed of the voice channel while audio is playing.
+  ///
+  /// Safe to call at any time — [just_audio] applies speed changes to an
+  /// in-progress playback immediately without interrupting the stream.
+  ///
+  /// [speed] is clamped to [0.5, 2.0] before being applied.
+  Future<void> setVoiceSpeed(double speed);
+
   /// The current playback position of the ambient audio.
   ///
   /// Returns `null` when no ambient track is loaded.  Used by
@@ -416,7 +430,23 @@ class AudioEngineImpl implements AudioEngine {
   }) async {
     _assertNotDisposed();
 
-    _targetAmbientVolume = volume.clamp(0.0, 1.0);
+    final newVolume = volume.clamp(0.0, 1.0);
+
+    // Cancel any in-progress duck/restore fade before touching volume state.
+    _cancelFade();
+
+    // If the same track is already playing, just update the volume — do NOT
+    // call setAsset() again. setAsset() stops and reloads the player, which
+    // causes an audible gap every time a PlayStep is encountered inside a
+    // repeat block.
+    if (assetKey == _currentAmbientAssetKey && _ambientPlayer.playing) {
+      _targetAmbientVolume = newVolume;
+      _currentAmbientVolume = newVolume;
+      await _ambientPlayer.setVolume(newVolume);
+      return;
+    }
+
+    _targetAmbientVolume = newVolume;
     _currentAmbientVolume = _targetAmbientVolume;
     _currentAmbientAssetKey = assetKey;
 
@@ -509,6 +539,14 @@ class AudioEngineImpl implements AudioEngine {
     final d = _voicePlayer.duration;
     if (d == null || d == Duration.zero) return null;
     return d;
+  }
+
+  @override
+  Duration? get currentVoicePosition => _voicePlayer.playing ? _voicePlayer.position : null;
+
+  @override
+  Future<void> setVoiceSpeed(double speed) async {
+    await _voicePlayer.setSpeed(speed.clamp(0.5, 2.0));
   }
 
   @override

@@ -139,6 +139,7 @@ class PlanCard extends StatefulWidget {
     this.onDuplicate,
     this.onDelete,
     this.onActivate,
+    this.onPlayWithAiVoice,
   });
 
   final Plan plan;
@@ -157,6 +158,13 @@ class PlanCard extends StatefulWidget {
   /// "Activate AI Voice" button. The callback must throw (or complete with an
   /// error) to signal failure — the card then displays an inline error message.
   final Future<void> Function()? onActivate;
+
+  /// Called when the "Play with AI Voice" button is tapped (TTS is ready).
+  ///
+  /// When non-null, this is used instead of [onPlay] for the AI-voice action
+  /// so that callers can set the TTS playback mode to genai before navigating.
+  /// Falls back to [onPlay] when null.
+  final VoidCallback? onPlayWithAiVoice;
 
   @override
   State<PlanCard> createState() => _PlanCardState();
@@ -204,8 +212,16 @@ class _PlanCardState extends State<PlanCard> {
     final badgeFg = categoryBadgeForeground(widget.plan.category, colorScheme);
 
     final bool showTtsBadge = widget.plan.ttsStatus != 'none';
+    final ttsStatus = widget.plan.ttsStatus;
+    final bool isTtsLoading = _isActivating ||
+        ttsStatus == 'pending' ||
+        ttsStatus == 'processing';
+    final bool isTtsReady =
+        ttsStatus == 'completed' || ttsStatus == 'partial';
     final bool showActivateButton =
-        !widget.plan.isActive && widget.onActivate != null;
+        ttsStatus == 'none' && widget.onActivate != null;
+    final bool showTtsActionButton =
+        showActivateButton || isTtsLoading || isTtsReady;
 
     return Semantics(
       button: true,
@@ -305,8 +321,10 @@ class _PlanCardState extends State<PlanCard> {
               // ── Description / last used ────────────────────────────────
               Text(
                 widget.plan.description ??
-                    '${widget.plan.steps.length} steps · '
-                        '${formatRelativeTime(widget.plan.lastUsedAt)}',
+                    (widget.plan.steps.isEmpty
+                        ? formatRelativeTime(widget.plan.lastUsedAt)
+                        : '${widget.plan.steps.length} steps · '
+                            '${formatRelativeTime(widget.plan.lastUsedAt)}'),
                 style: TextStyle(
                   fontSize: 14,
                   color: colorScheme.onSurfaceVariant,
@@ -316,24 +334,30 @@ class _PlanCardState extends State<PlanCard> {
                 overflow: TextOverflow.ellipsis,
               ),
 
-              // ── Activate AI Voice button ───────────────────────────────
-              if (showActivateButton) ...[
+              // ── TTS action button ────────────────────────────────────
+              if (showTtsActionButton) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: Semantics(
                     button: true,
-                    label: _isActivating
-                        ? 'Activating AI Voice, please wait'
-                        : 'Activate AI Voice for ${widget.plan.name}',
+                    label: isTtsLoading
+                        ? 'Loading Instructor Voice, please wait'
+                        : isTtsReady
+                            ? 'Play with AI Voice'
+                            : 'Activate AI Voice for ${widget.plan.name}',
                     child: FilledButton.tonal(
-                      onPressed: _isActivating ? null : _handleActivate,
+                      onPressed: isTtsLoading
+                          ? null
+                          : isTtsReady
+                              ? (widget.onPlayWithAiVoice ?? widget.onPlay)
+                              : _handleActivate,
                       style: FilledButton.styleFrom(
                         minimumSize: const Size(0, 40),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 0),
                       ),
-                      child: _isActivating
+                      child: isTtsLoading
                           ? Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -346,17 +370,29 @@ class _PlanCardState extends State<PlanCard> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                const Text('Activating…'),
+                                const Text('Loading Instructor Voice'),
                               ],
                             )
-                          : const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.auto_awesome, size: 16),
-                                SizedBox(width: 6),
-                                Text('Activate AI Voice'),
-                              ],
-                            ),
+                          : isTtsReady
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.play_circle_outline,
+                                        size: 16,
+                                        color: colorScheme
+                                            .onSecondaryContainer),
+                                    const SizedBox(width: 6),
+                                    const Text('Play with AI Voice'),
+                                  ],
+                                )
+                              : const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.auto_awesome, size: 16),
+                                    SizedBox(width: 6),
+                                    Text('Activate AI Voice'),
+                                  ],
+                                ),
                     ),
                   ),
                 ),
@@ -382,8 +418,10 @@ class _PlanCardState extends State<PlanCard> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${formatPlanDuration(widget.plan.totalDuration)} SESSION'
-                        .toUpperCase(),
+                    widget.plan.totalDuration == Duration.zero
+                        ? 'NEW'
+                        : '${formatPlanDuration(widget.plan.totalDuration)} SESSION'
+                            .toUpperCase(),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,

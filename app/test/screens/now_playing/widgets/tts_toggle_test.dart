@@ -352,6 +352,94 @@ void main() {
       );
     });
 
+    // ── Locked state ──────────────────────────────────────────────────────────
+
+    testWidgets('isLocked disables the entire SegmentedButton', (tester) async {
+      await tester.pumpWidget(
+        _wrap(const TtsToggle(
+          ttsStatus: 'completed',
+          isActive: true,
+          isLocked: true,
+        )),
+      );
+
+      final btn = _getButton(tester);
+      expect(btn.onSelectionChanged, isNull);
+    });
+
+    testWidgets('isLocked prevents mode change when tapping AI Voice',
+        (tester) async {
+      late WidgetRef capturedRef;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    capturedRef = ref;
+                    return const TtsToggle(
+                      ttsStatus: 'completed',
+                      isActive: true,
+                      isLocked: true,
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        capturedRef.read(ttsPlaybackModeProvider),
+        TtsPlaybackMode.platform,
+      );
+
+      // Attempt to tap AI Voice — locked, so provider must not change.
+      await tester.tap(find.text('AI Voice'));
+      await tester.pump();
+
+      expect(
+        capturedRef.read(ttsPlaybackModeProvider),
+        TtsPlaybackMode.platform,
+      );
+    });
+
+    testWidgets('isLocked=false still allows mode change', (tester) async {
+      late WidgetRef capturedRef;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    capturedRef = ref;
+                    return const TtsToggle(
+                      ttsStatus: 'completed',
+                      isActive: true,
+                      isLocked: false,
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('AI Voice'));
+      await tester.pump();
+
+      expect(
+        capturedRef.read(ttsPlaybackModeProvider),
+        TtsPlaybackMode.genai,
+      );
+    });
+
     // ── Semantics ─────────────────────────────────────────────────────────────
 
     testWidgets('has a voice mode semantics label', (tester) async {
@@ -363,6 +451,23 @@ void main() {
         find.bySemanticsLabel('Voice mode'),
         findsOneWidget,
       );
+    });
+
+    testWidgets('shows locked semantics hint when isLocked is true',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _wrap(const TtsToggle(
+          ttsStatus: 'completed',
+          isActive: true,
+          isLocked: true,
+        )),
+      );
+
+      // The Semantics node labelled 'Voice mode' carries the hint.
+      final node = tester.getSemantics(find.bySemanticsLabel('Voice mode'));
+      expect(node.hint, contains('cannot be changed'));
+      handle.dispose();
     });
   });
 }

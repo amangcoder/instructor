@@ -20,6 +20,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { randomInt, createHmac, createHash, timingSafeEqual } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DatabaseService } from '../database/database.service';
 import { SESEmailService } from '../email/ses-email.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
@@ -40,24 +42,45 @@ export interface JwtPayload {
   email: string;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string | null;
+  username: string | null;
+  photoUrl: string | null;
+}
+
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;
-  user: { id: string; email: string };
+  user: UserProfile;
 }
 
 // ── Service ──────────────────────────────────────────────────────────────────
 
+/** Presigned URL TTL — 7 days (AWS SigV4 maximum). */
+const PHOTO_PRESIGN_TTL_SEC = 604_800;
+
+/** S3 key prefix for profile photos. */
+const AVATAR_PREFIX = 'avatars';
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly s3: S3Client | null;
+  private readonly bucket: string | null;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly ses: SESEmailService,
     private readonly rateLimit: UpstashRateLimitService,
     private readonly jwt: JwtService,
-  ) {}
+  ) {
+    this.bucket = process.env.AWS_S3_BUCKET ?? null;
+    this.s3 = this.bucket
+      ? new S3Client({ region: process.env.AWS_REGION ?? 'ap-south-1' })
+      : null;
+  }
 
   // ── OTP request ───────────────────────────────────────────────────────────
 
@@ -141,20 +164,30 @@ export class AuthService {
     let user = await this.db.getUserByEmail(normalizedEmail);
 
     if (!user) {
-      const newUser = {
-        id: uuidv4(),
-        email: normalizedEmail,
-        createdAt: new Date(),
-      };
-      await this.db.createUser(newUser);
-      user = newUser;
-      this.logger.log(`New user created: ${normalizedEmail} (id=${newUser.id})`);
+      const newUserId = uuidv4();
+      await this.db.createUser({ id: newUserId, email: normalizedEmail, createdAt: new Date() });
+      // Re-fetch so we have the full UserRecord shape (including nullable profile fields).
+      user = await this.db.getUserById(newUserId);
+      this.logger.log(`New user created: ${normalizedEmail} (id=${newUserId})`);
+    }
+
+    if (!user) {
+      throw new UnauthorizedException('Failed to create or retrieve user');
     }
 
     // Issue access token + refresh token.
     const tokens = await this.issueTokens(user.id, user.email);
     this.logger.log(`OTP verified for ${normalizedEmail}`);
-    return { ...tokens, user: { id: user.id, email: user.email } };
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name ?? null,
+        username: user.username ?? null,
+        photoUrl: user.photoUrl ?? null,
+      },
+    };
   }
 
   // ── Invite user ───────────────────────────────────────────────────────────
@@ -224,6 +257,91 @@ export class AuthService {
   async revokeAllRefreshTokens(userId: string): Promise<void> {
     await this.db.revokeAllRefreshTokens(userId);
     this.logger.log(`All refresh tokens revoked for user ${userId}`);
+  }
+
+  // ── Profile ───────────────────────────────────────────────────────────────
+
+  async getProfile(userId: string): Promise<UserProfile> {
+    const user = await this.db.getUserById(userId);
+    if (!user) throw new UnauthorizedException('User not found');
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name ?? null,
+      username: user.username ?? null,
+      photoUrl: await this.resolvePhotoUrl(user.photoUrl ?? null),
+    };
+  }
+
+  async uploadProfilePhoto(
+    userId: string,
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<{ photoUrl: string }> {
+    if (!this.s3 || !this.bucket) {
+      throw new HttpException(
+        'Photo upload is not available — S3 is not configured',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const ext = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+    const s3Key = `${AVATAR_PREFIX}/${userId}.${ext}`;
+
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: s3Key,
+        Body: buffer,
+        ContentType: mimeType,
+      }),
+    );
+
+    await this.db.updateUserProfile(userId, { photoUrl: s3Key });
+
+    const photoUrl = await getSignedUrl(
+      this.s3,
+      new GetObjectCommand({ Bucket: this.bucket, Key: s3Key }),
+      { expiresIn: PHOTO_PRESIGN_TTL_SEC },
+    );
+
+    this.logger.log(`Profile photo uploaded: userId=${userId}, key=${s3Key}`);
+    return { photoUrl };
+  }
+
+  async updateProfile(
+    userId: string,
+    data: { name?: string; username?: string; photoUrl?: string },
+  ): Promise<UserProfile> {
+    try {
+      await this.db.updateUserProfile(userId, data);
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'USERNAME_TAKEN') {
+        throw new HttpException('Username already taken', HttpStatus.CONFLICT);
+      }
+      throw err;
+    }
+    return this.getProfile(userId);
+  }
+
+  // ── Private: photo URL resolution ────────────────────────────────────────
+
+  /**
+   * If the stored value is an S3 key (starts with 'avatars/'), generate a
+   * presigned GET URL. Otherwise returns the value unchanged (null or plain URL).
+   */
+  private async resolvePhotoUrl(raw: string | null): Promise<string | null> {
+    if (!raw || !raw.startsWith(`${AVATAR_PREFIX}/`)) return raw;
+    if (!this.s3 || !this.bucket) return null;
+    try {
+      return await getSignedUrl(
+        this.s3,
+        new GetObjectCommand({ Bucket: this.bucket, Key: raw }),
+        { expiresIn: PHOTO_PRESIGN_TTL_SEC },
+      );
+    } catch {
+      return null;
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

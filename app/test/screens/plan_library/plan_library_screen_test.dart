@@ -68,7 +68,7 @@ class _FakePlanRepository implements PlanRepository {
       _plans.where((p) => p.id == id).firstOrNull;
 
   @override
-  Future<void> activatePlan(String id) async {}
+  Future<void> activatePlan(String id, {required String voice, required String locale, required String speechRate}) async {}
 
   @override
   Stream<List<Plan>> watchUserPlans({
@@ -226,7 +226,7 @@ class _FakePlanApiService implements PlanApiService {
   Future<void> deletePlan(String id) async {}
 
   @override
-  Future<void> activatePlan(String planId) async {}
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) async {}
 
   @override
   Future<TtsStatusInfo> getTtsStatus(String planId) async {

@@ -114,6 +114,12 @@ class $PlansTableTable extends PlansTable
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _libraryIdMeta =
+      const VerificationMeta('libraryId');
+  @override
+  late final GeneratedColumn<String> libraryId = GeneratedColumn<String>(
+      'library_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -129,7 +135,8 @@ class $PlansTableTable extends PlansTable
         isActive,
         ttsStatus,
         ttsTotal,
-        ttsCompleted
+        ttsCompleted,
+        libraryId
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -200,6 +207,10 @@ class $PlansTableTable extends PlansTable
           ttsCompleted.isAcceptableOrUnknown(
               data['tts_completed']!, _ttsCompletedMeta));
     }
+    if (data.containsKey('library_id')) {
+      context.handle(_libraryIdMeta,
+          libraryId.isAcceptableOrUnknown(data['library_id']!, _libraryIdMeta));
+    }
     return context;
   }
 
@@ -238,6 +249,8 @@ class $PlansTableTable extends PlansTable
           .read(DriftSqlType.int, data['${effectivePrefix}tts_total'])!,
       ttsCompleted: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}tts_completed'])!,
+      libraryId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}library_id']),
     );
   }
 
@@ -284,6 +297,12 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
 
   /// Number of TTS audio files successfully generated so far.
   final int ttsCompleted;
+
+  /// The library plan ID this plan was cloned from, if any.
+  ///
+  /// Set when the user adds a plan from the Discover tab. Used to prevent
+  /// duplicate additions: a library plan can only be added once.
+  final String? libraryId;
   const PlansTableData(
       {required this.id,
       required this.name,
@@ -298,7 +317,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       required this.isActive,
       required this.ttsStatus,
       required this.ttsTotal,
-      required this.ttsCompleted});
+      required this.ttsCompleted,
+      this.libraryId});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -326,6 +346,9 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
     map['tts_status'] = Variable<String>(ttsStatus);
     map['tts_total'] = Variable<int>(ttsTotal);
     map['tts_completed'] = Variable<int>(ttsCompleted);
+    if (!nullToAbsent || libraryId != null) {
+      map['library_id'] = Variable<String>(libraryId);
+    }
     return map;
   }
 
@@ -349,6 +372,9 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       ttsStatus: Value(ttsStatus),
       ttsTotal: Value(ttsTotal),
       ttsCompleted: Value(ttsCompleted),
+      libraryId: libraryId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(libraryId),
     );
   }
 
@@ -370,6 +396,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       ttsStatus: serializer.fromJson<String>(json['ttsStatus']),
       ttsTotal: serializer.fromJson<int>(json['ttsTotal']),
       ttsCompleted: serializer.fromJson<int>(json['ttsCompleted']),
+      libraryId: serializer.fromJson<String?>(json['libraryId']),
     );
   }
   @override
@@ -390,6 +417,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       'ttsStatus': serializer.toJson<String>(ttsStatus),
       'ttsTotal': serializer.toJson<int>(ttsTotal),
       'ttsCompleted': serializer.toJson<int>(ttsCompleted),
+      'libraryId': serializer.toJson<String?>(libraryId),
     };
   }
 
@@ -407,7 +435,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           bool? isActive,
           String? ttsStatus,
           int? ttsTotal,
-          int? ttsCompleted}) =>
+          int? ttsCompleted,
+          Value<String?> libraryId = const Value.absent()}) =>
       PlansTableData(
         id: id ?? this.id,
         name: name ?? this.name,
@@ -423,6 +452,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
         ttsStatus: ttsStatus ?? this.ttsStatus,
         ttsTotal: ttsTotal ?? this.ttsTotal,
         ttsCompleted: ttsCompleted ?? this.ttsCompleted,
+        libraryId: libraryId.present ? libraryId.value : this.libraryId,
       );
   PlansTableData copyWithCompanion(PlansTableCompanion data) {
     return PlansTableData(
@@ -446,6 +476,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       ttsCompleted: data.ttsCompleted.present
           ? data.ttsCompleted.value
           : this.ttsCompleted,
+      libraryId: data.libraryId.present ? data.libraryId.value : this.libraryId,
     );
   }
 
@@ -465,7 +496,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           ..write('isActive: $isActive, ')
           ..write('ttsStatus: $ttsStatus, ')
           ..write('ttsTotal: $ttsTotal, ')
-          ..write('ttsCompleted: $ttsCompleted')
+          ..write('ttsCompleted: $ttsCompleted, ')
+          ..write('libraryId: $libraryId')
           ..write(')'))
         .toString();
   }
@@ -485,7 +517,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       isActive,
       ttsStatus,
       ttsTotal,
-      ttsCompleted);
+      ttsCompleted,
+      libraryId);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -503,7 +536,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           other.isActive == this.isActive &&
           other.ttsStatus == this.ttsStatus &&
           other.ttsTotal == this.ttsTotal &&
-          other.ttsCompleted == this.ttsCompleted);
+          other.ttsCompleted == this.ttsCompleted &&
+          other.libraryId == this.libraryId);
 }
 
 class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
@@ -521,6 +555,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
   final Value<String> ttsStatus;
   final Value<int> ttsTotal;
   final Value<int> ttsCompleted;
+  final Value<String?> libraryId;
   final Value<int> rowid;
   const PlansTableCompanion({
     this.id = const Value.absent(),
@@ -537,6 +572,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     this.ttsStatus = const Value.absent(),
     this.ttsTotal = const Value.absent(),
     this.ttsCompleted = const Value.absent(),
+    this.libraryId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   PlansTableCompanion.insert({
@@ -554,6 +590,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     this.ttsStatus = const Value.absent(),
     this.ttsTotal = const Value.absent(),
     this.ttsCompleted = const Value.absent(),
+    this.libraryId = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         name = Value(name);
@@ -572,6 +609,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     Expression<String>? ttsStatus,
     Expression<int>? ttsTotal,
     Expression<int>? ttsCompleted,
+    Expression<String>? libraryId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -589,6 +627,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       if (ttsStatus != null) 'tts_status': ttsStatus,
       if (ttsTotal != null) 'tts_total': ttsTotal,
       if (ttsCompleted != null) 'tts_completed': ttsCompleted,
+      if (libraryId != null) 'library_id': libraryId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -608,6 +647,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       Value<String>? ttsStatus,
       Value<int>? ttsTotal,
       Value<int>? ttsCompleted,
+      Value<String?>? libraryId,
       Value<int>? rowid}) {
     return PlansTableCompanion(
       id: id ?? this.id,
@@ -624,6 +664,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       ttsStatus: ttsStatus ?? this.ttsStatus,
       ttsTotal: ttsTotal ?? this.ttsTotal,
       ttsCompleted: ttsCompleted ?? this.ttsCompleted,
+      libraryId: libraryId ?? this.libraryId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -675,6 +716,9 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     if (ttsCompleted.present) {
       map['tts_completed'] = Variable<int>(ttsCompleted.value);
     }
+    if (libraryId.present) {
+      map['library_id'] = Variable<String>(libraryId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -698,6 +742,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
           ..write('ttsStatus: $ttsStatus, ')
           ..write('ttsTotal: $ttsTotal, ')
           ..write('ttsCompleted: $ttsCompleted, ')
+          ..write('libraryId: $libraryId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1994,6 +2039,7 @@ typedef $$PlansTableTableCreateCompanionBuilder = PlansTableCompanion Function({
   Value<String> ttsStatus,
   Value<int> ttsTotal,
   Value<int> ttsCompleted,
+  Value<String?> libraryId,
   Value<int> rowid,
 });
 typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
@@ -2011,6 +2057,7 @@ typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
   Value<String> ttsStatus,
   Value<int> ttsTotal,
   Value<int> ttsCompleted,
+  Value<String?> libraryId,
   Value<int> rowid,
 });
 
@@ -2107,6 +2154,9 @@ class $$PlansTableTableFilterComposer
   ColumnFilters<int> get ttsCompleted => $composableBuilder(
       column: $table.ttsCompleted, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<String> get libraryId => $composableBuilder(
+      column: $table.libraryId, builder: (column) => ColumnFilters(column));
+
   Expression<bool> ttsCacheTableRefs(
       Expression<bool> Function($$TtsCacheTableTableFilterComposer f) f) {
     final $$TtsCacheTableTableFilterComposer composer = $composerBuilder(
@@ -2202,6 +2252,9 @@ class $$PlansTableTableOrderingComposer
   ColumnOrderings<int> get ttsCompleted => $composableBuilder(
       column: $table.ttsCompleted,
       builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get libraryId => $composableBuilder(
+      column: $table.libraryId, builder: (column) => ColumnOrderings(column));
 }
 
 class $$PlansTableTableAnnotationComposer
@@ -2254,6 +2307,9 @@ class $$PlansTableTableAnnotationComposer
 
   GeneratedColumn<int> get ttsCompleted => $composableBuilder(
       column: $table.ttsCompleted, builder: (column) => column);
+
+  GeneratedColumn<String> get libraryId =>
+      $composableBuilder(column: $table.libraryId, builder: (column) => column);
 
   Expression<T> ttsCacheTableRefs<T extends Object>(
       Expression<T> Function($$TtsCacheTableTableAnnotationComposer a) f) {
@@ -2338,6 +2394,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<String> ttsStatus = const Value.absent(),
             Value<int> ttsTotal = const Value.absent(),
             Value<int> ttsCompleted = const Value.absent(),
+            Value<String?> libraryId = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               PlansTableCompanion(
@@ -2355,6 +2412,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             ttsStatus: ttsStatus,
             ttsTotal: ttsTotal,
             ttsCompleted: ttsCompleted,
+            libraryId: libraryId,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -2372,6 +2430,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<String> ttsStatus = const Value.absent(),
             Value<int> ttsTotal = const Value.absent(),
             Value<int> ttsCompleted = const Value.absent(),
+            Value<String?> libraryId = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               PlansTableCompanion.insert(
@@ -2389,6 +2448,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             ttsStatus: ttsStatus,
             ttsTotal: ttsTotal,
             ttsCompleted: ttsCompleted,
+            libraryId: libraryId,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

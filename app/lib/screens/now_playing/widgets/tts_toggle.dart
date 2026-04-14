@@ -31,6 +31,7 @@ class TtsToggle extends ConsumerWidget {
     required this.ttsStatus,
     required this.isActive,
     this.isUnavailable = false,
+    this.isLocked = false,
   });
 
   /// The plan's server-side TTS generation status.
@@ -51,6 +52,13 @@ class TtsToggle extends ConsumerWidget {
   /// reads 'Unavailable' instead of 'AI Voice' so users can distinguish
   /// "not yet downloaded" from "cannot be used right now".
   final bool isUnavailable;
+
+  /// Whether the toggle is locked for the current step.
+  ///
+  /// When `true` (e.g. during a `say` or `count` step), the entire
+  /// [SegmentedButton] is disabled so the voice mode cannot be changed
+  /// mid-step.  The mode change takes effect on the next step instead.
+  final bool isLocked;
 
   // ── Status classification helpers ─────────────────────────────────────────
 
@@ -87,7 +95,9 @@ class TtsToggle extends ConsumerWidget {
 
     return Semantics(
       label: 'Voice mode',
-      hint: 'Select between on-device TTS and AI Voice',
+      hint: isLocked
+          ? 'Voice mode cannot be changed while speaking'
+          : 'Select between on-device TTS and AI Voice',
       // Let the child segments provide their own semantics.
       explicitChildNodes: true,
       child: SegmentedButton<TtsPlaybackMode>(
@@ -131,13 +141,15 @@ class TtsToggle extends ConsumerWidget {
           ),
         ],
         selected: {displayedMode},
-        onSelectionChanged: (modes) {
-          final selected = modes.first;
-          // Guard: ignore selection of genai when not available (shouldn't
-          // reach here when the segment is disabled, but defensive check).
-          if (selected == TtsPlaybackMode.genai && !isAiVoiceReady) return;
-          ref.read(ttsPlaybackModeProvider.notifier).state = selected;
-        },
+        onSelectionChanged: isLocked
+            ? null
+            : (modes) {
+                final selected = modes.first;
+                // Guard: ignore selection of genai when not available (shouldn't
+                // reach here when the segment is disabled, but defensive check).
+                if (selected == TtsPlaybackMode.genai && !isAiVoiceReady) return;
+                ref.read(ttsPlaybackModeProvider.notifier).state = selected;
+              },
       ),
     );
   }

@@ -85,7 +85,7 @@ class _FakePlanApiService implements PlanApiService {
   }
 
   @override
-  Future<void> activatePlan(String planId) async {
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) async {
     _maybeThrow('activatePlan:$planId');
   }
 
@@ -359,7 +359,7 @@ void main() {
       api.savePlanResult = 'act-1';
       await repo.createPlan(_makePlan(name: 'Activate Me'));
 
-      await repo.activatePlan('act-1');
+      await repo.activatePlan('act-1', voice: 'af_heart', locale: 'enIN', speechRate: '1.0');
       expect(api.calls, contains('activatePlan:act-1'));
     });
 
@@ -367,7 +367,7 @@ void main() {
       api.savePlanResult = 'act-2';
       await repo.createPlan(_makePlan(name: 'Inactive Plan', isActive: false));
 
-      await repo.activatePlan('act-2');
+      await repo.activatePlan('act-2', voice: 'af_heart', locale: 'enIN', speechRate: '1.0');
 
       final cached = await repo.getPlanById('act-2');
       expect(cached!.isActive, isTrue);
@@ -377,7 +377,7 @@ void main() {
       api.savePlanResult = 'act-3';
       await repo.createPlan(_makePlan(name: 'TTS None Plan', ttsStatus: 'none'));
 
-      await repo.activatePlan('act-3');
+      await repo.activatePlan('act-3', voice: 'af_heart', locale: 'enIN', speechRate: '1.0');
 
       final cached = await repo.getPlanById('act-3');
       expect(cached!.ttsStatus, 'pending');
@@ -390,7 +390,7 @@ void main() {
 
       api.nextError = const PlanApiException('500 server error');
       expect(
-        () => repo.activatePlan('act-fail'),
+        () => repo.activatePlan('act-fail', voice: 'af_heart', locale: 'enIN', speechRate: '1.0'),
         throwsA(isA<PlanApiException>()),
       );
 

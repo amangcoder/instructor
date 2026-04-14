@@ -83,7 +83,15 @@ abstract class PlanApiService {
   ///
   /// Activates a plan for studio-quality TTS pre-generation. The server sets
   /// `ttsStatus` to `pending` and begins background audio synthesis.
-  Future<void> activatePlan(String planId);
+  ///
+  /// [voice], [locale], and [speechRate] are sent so the server pre-generates
+  /// audio with cache keys matching the client's runtime requests.
+  Future<void> activatePlan(
+    String planId, {
+    required String voice,
+    required String locale,
+    required String speechRate,
+  });
 
   // ── Library ───────────────────────────────────────────────────────────────
 
@@ -240,13 +248,21 @@ class PlanApiServiceImpl implements PlanApiService {
   }
 
   @override
-  Future<void> activatePlan(String planId) async {
+  Future<void> activatePlan(
+    String planId, {
+    required String voice,
+    required String locale,
+    required String speechRate,
+  }) async {
     final uri = Uri.parse('${_client.backendBaseUrl}/api/plans/activate');
     try {
       await _client.postJson(uri, {
         'planId': planId,
         // 'studio' triggers server-side TTS pre-generation (GenAI voice).
         'voiceQuality': 'studio',
+        'voice': voice,
+        'locale': locale,
+        'speechRate': speechRate,
       });
     } on ApiException catch (e) {
       throw PlanApiException(
@@ -379,20 +395,39 @@ class PlanApiServiceImpl implements PlanApiService {
 
   // ── Private parsers ───────────────────────────────────────────────────────
 
-  /// Builds a [Plan] from a list-endpoint summary (no steps / planJson).
+  /// Builds a [Plan] from a list-endpoint summary.
   ///
-  /// The server list endpoint (`GET /api/plans/list`) omits `planJson` to
-  /// reduce response size. Missing fields default per the [Plan] model.
+  /// The server list endpoint (`GET /api/plans/list`) includes `planJson`
+  /// which contains the full plan structure (steps, description, category,
+  /// etc.). We parse it to populate those fields, then overlay server-managed
+  /// fields (id, isActive, ttsStatus, etc.) on top.
   Plan _parsePlanSummary(Map<String, dynamic> json) {
-    return Plan(
-      id: json['planId'] as String? ?? '',
-      name: json['name'] as String? ?? 'Untitled Plan',
-      isActive: json['isActive'] as bool? ?? false,
-      ttsStatus: json['ttsStatus'] as String? ?? 'none',
-      ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? 0,
-      ttsCompleted: (json['ttsCompleted'] as num?)?.toInt() ?? 0,
-      createdAt: _parseDateTime(json['createdAt']) ?? DateTime.now(),
-      updatedAt: _parseDateTime(json['updatedAt']) ?? DateTime.now(),
+    final planJsonStr = json['planJson'] as String?;
+    Plan base;
+
+    if (planJsonStr != null && planJsonStr.isNotEmpty) {
+      try {
+        final planJson = jsonDecode(planJsonStr) as Map<String, dynamic>;
+        base = Plan.fromJson(planJson);
+      } catch (e) {
+        debugPrint(
+            'PlanApiService._parsePlanSummary: failed to parse planJson — $e');
+        base = _minimalPlan(json);
+      }
+    } else {
+      base = _minimalPlan(json);
+    }
+
+    // Server-managed fields always override what the planJson blob contains.
+    return base.copyWith(
+      id: json['planId'] as String? ?? base.id,
+      isActive: json['isActive'] as bool? ?? base.isActive,
+      ttsStatus: json['ttsStatus'] as String? ?? base.ttsStatus,
+      ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? base.ttsTotal,
+      ttsCompleted:
+          (json['ttsCompleted'] as num?)?.toInt() ?? base.ttsCompleted,
+      createdAt: _parseDateTime(json['createdAt']) ?? base.createdAt,
+      updatedAt: _parseDateTime(json['updatedAt']) ?? base.updatedAt,
     );
   }
 

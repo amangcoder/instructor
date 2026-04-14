@@ -39,7 +39,15 @@ abstract class PlanRepository {
   /// For the local Drift implementation this flips [Plan.isActive] to true.
   /// The server-first [ApiPlanRepository] will additionally call the backend
   /// activation endpoint to trigger server-side GenAI TTS pre-generation.
-  Future<void> activatePlan(String id);
+  ///
+  /// [voice], [locale], and [speechRate] are forwarded to the server so that
+  /// pre-generated audio cache keys match the client's runtime requests.
+  Future<void> activatePlan(
+    String id, {
+    required String voice,
+    required String locale,
+    required String speechRate,
+  });
 
   /// Returns a reactive stream of the current user's Plans, sorted by
   /// [lastUsedAt] descending (most recently used first, nulls last), with
@@ -111,6 +119,7 @@ class DriftPlanRepository implements PlanRepository {
       ttsStatus: row.ttsStatus,
       ttsTotal: row.ttsTotal,
       ttsCompleted: row.ttsCompleted,
+      libraryId: row.libraryId,
     );
   }
 
@@ -133,6 +142,7 @@ class DriftPlanRepository implements PlanRepository {
       ttsStatus: Value(plan.ttsStatus),
       ttsTotal: Value(plan.ttsTotal),
       ttsCompleted: Value(plan.ttsCompleted),
+      libraryId: Value(plan.libraryId),
     );
   }
 
@@ -188,7 +198,14 @@ class DriftPlanRepository implements PlanRepository {
   }
 
   @override
-  Future<void> activatePlan(String id) async {
+  Future<void> activatePlan(
+    String id, {
+    required String voice,
+    required String locale,
+    required String speechRate,
+  }) async {
+    // DriftPlanRepository is local-only — voice/locale/speechRate are unused
+    // (no server-side pregen). Just flip the active flag.
     await (_db.update(_db.plansTable)
           ..where((t) => t.id.equals(id)))
         .write(const PlansTableCompanion(isActive: Value(true)));
@@ -366,6 +383,7 @@ class ApiPlanRepository implements PlanRepository {
       ttsStatus: row.ttsStatus,
       ttsTotal: row.ttsTotal,
       ttsCompleted: row.ttsCompleted,
+      libraryId: row.libraryId,
     );
   }
 
@@ -388,6 +406,7 @@ class ApiPlanRepository implements PlanRepository {
       ttsStatus: Value(plan.ttsStatus),
       ttsTotal: Value(plan.ttsTotal),
       ttsCompleted: Value(plan.ttsCompleted),
+      libraryId: Value(plan.libraryId),
     );
   }
 
@@ -454,9 +473,15 @@ class ApiPlanRepository implements PlanRepository {
   // -------------------------------------------------------------------------
 
   @override
-  Future<void> activatePlan(String id) async {
-    // 1. Trigger server-side TTS pre-generation.
-    await _api.activatePlan(id);
+  Future<void> activatePlan(
+    String id, {
+    required String voice,
+    required String locale,
+    required String speechRate,
+  }) async {
+    // 1. Trigger server-side TTS pre-generation with the user's settings
+    // so cache keys match runtime requests.
+    await _api.activatePlan(id, voice: voice, locale: locale, speechRate: speechRate);
 
     // 2. Optimistically update local cache: mark active, set status to pending.
     await (_db.update(_db.plansTable)..where((t) => t.id.equals(id))).write(

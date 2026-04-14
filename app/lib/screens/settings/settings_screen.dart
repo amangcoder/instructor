@@ -9,16 +9,31 @@ import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/theme/app_branding.dart';
 
+import 'package:instructor/widgets/profile_avatar_button.dart';
+
+import 'widgets/activity_stats_card.dart';
 import 'widgets/auth_section.dart';
 import 'widgets/battery_optimization_prompt.dart';
+import 'widgets/personalization_card.dart';
+import 'widgets/profile_header.dart';
+import 'widgets/profile_sidebar.dart';
+import 'widgets/shared_settings_widgets.dart';
 
-/// App settings screen.
+/// App settings screen — Profile-first layout.
 ///
-/// Sections:
-/// - **Voice** — default TTS voice selector (aoede / charon / etc.).
-/// - **Volume** — ambient and voice volume sliders (0.0–1.0).
-/// - **Notifications** — sound and vibration toggles.
+/// Structure (top to bottom):
+/// - **Profile Header** — user avatar, email, plan badge, upgrade button.
+/// - **My Activity** — live plan count, session and streak placeholders.
+/// - **For You** — activity level and goal personalisation chips.
+/// - **Account** — sign-in / sign-out (AuthSection).
+/// - **Preferences** — theme mode and default TTS voice selectors.
+/// - **Audio & Speech** — speech rate, ambient volume, voice volume sliders.
+/// - **Notifications** — notification sound and vibration toggles.
 /// - **Battery** (Android only) — OEM battery optimisation prompt.
+///
+/// The account_circle AppBar icon opens the [ProfileSidebar] EndDrawer from
+/// the right. A [Builder] widget is used so that [Scaffold.of(context)] resolves
+/// to the correct Scaffold ancestor inside [AppBranding.brandedAppBar].
 ///
 /// All values are read from [AppSettings] via stream providers and written back
 /// via [AppSettings.write] on every user interaction.
@@ -28,30 +43,43 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
+      endDrawer: const ProfileSidebar(),
       appBar: AppBranding.brandedAppBar(
         actions: [
-          IconButton(
-            icon: const Icon(Icons.account_circle),
-            onPressed: () {},
+          Builder(
+            builder: (builderContext) => ProfileAvatarButton(
+              onTap: () => Scaffold.of(builderContext).openEndDrawer(),
+            ),
           ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
         children: [
-          // ── Core Settings ──────────────────────────────────────────────
-          const _SectionHeader(title: 'Core Settings'),
-          _SettingsCard(
-            children: [
-              const AuthSection(),
-              const _ThemeModeSelector(),
-              const _VoiceSelector(),
-            ],
+          // ── Profile Header ────────────────────────────────────────────
+          const ProfileHeader(),
+
+          // ── My Activity ───────────────────────────────────────────────
+          const SectionHeader(title: 'My Activity'),
+          const ActivityStatsCard(),
+
+          // ── For You ───────────────────────────────────────────────────
+          const SectionHeader(title: 'For You'),
+          const PersonalizationCard(),
+
+          // ── Account ───────────────────────────────────────────────────
+          const SectionHeader(title: 'Account'),
+          SettingsCard(children: [const AuthSection()]),
+
+          // ── Preferences ───────────────────────────────────────────────
+          const SectionHeader(title: 'Preferences'),
+          SettingsCard(
+            children: [const _ThemeModeSelector(), const _VoiceSelector()],
           ),
 
           // ── Audio & Speech ────────────────────────────────────────────
-          const _SectionHeader(title: 'Audio & Speech'),
-          _SettingsCard(
+          const SectionHeader(title: 'Audio & Speech'),
+          SettingsCard(
             children: [
               const _SpeechRateSlider(),
               const _AmbientVolumeSlider(),
@@ -60,8 +88,8 @@ class SettingsScreen extends ConsumerWidget {
           ),
 
           // ── Notifications ─────────────────────────────────────────────
-          const _SectionHeader(title: 'Notifications'),
-          _SettingsCard(
+          const SectionHeader(title: 'Notifications'),
+          SettingsCard(
             children: [
               const _NotificationSoundSwitch(),
               const _VibrationSwitch(),
@@ -70,8 +98,8 @@ class SettingsScreen extends ConsumerWidget {
 
           // ── Battery (Android only) ────────────────────────────────────
           if (Platform.isAndroid) ...[
-            const _SectionHeader(title: 'Battery'),
-            _SettingsCard(
+            const SectionHeader(title: 'Battery'),
+            SettingsCard(
               children: [const BatteryOptimizationPrompt()],
             ),
           ],
@@ -92,54 +120,6 @@ class SettingsScreen extends ConsumerWidget {
 
           const SizedBox(height: 32),
         ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Stitch section header: xs font-bold uppercase tracking-[2px] text-primary.
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
-      child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 2,
-          color: Theme.of(context).colorScheme.primary,
-        ),
-      ),
-    );
-  }
-}
-
-/// Stitch settings group card: bg-surface-container-lowest rounded-2xl p-2.
-class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        children: children,
       ),
     );
   }

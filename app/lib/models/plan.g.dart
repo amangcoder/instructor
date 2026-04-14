@@ -29,6 +29,7 @@ _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
       ttsStatus: json['ttsStatus'] as String? ?? 'none',
       ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? 0,
       ttsCompleted: (json['ttsCompleted'] as num?)?.toInt() ?? 0,
+      libraryId: json['libraryId'] as String?,
     );
 
 Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
@@ -47,6 +48,7 @@ Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
       'ttsStatus': instance.ttsStatus,
       'ttsTotal': instance.ttsTotal,
       'ttsCompleted': instance.ttsCompleted,
+      'libraryId': instance.libraryId,
     };
 
 const _$PlanCategoryEnumMap = {

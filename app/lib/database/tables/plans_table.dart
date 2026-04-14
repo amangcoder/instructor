@@ -52,4 +52,10 @@ class PlansTable extends Table {
 
   /// Number of TTS audio files successfully generated so far.
   IntColumn get ttsCompleted => integer().withDefault(const Constant(0))();
+
+  /// The library plan ID this plan was cloned from, if any.
+  ///
+  /// Set when the user adds a plan from the Discover tab. Used to prevent
+  /// duplicate additions: a library plan can only be added once.
+  TextColumn get libraryId => text().nullable()();
 }

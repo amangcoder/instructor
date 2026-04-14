@@ -45,6 +45,13 @@ dependencies:
 
   # ── Device Info ──────────────────────────────────────────────────────────
   device_info_plus: ^10.1.2
+  package_info_plus: ^8.1.2
+
+  # ── External Links ───────────────────────────────────────────────────────
+  url_launcher: ^6.2.6
+
+  # ── Media / Image Picker ─────────────────────────────────────────────────
+  image_picker: ^1.1.2
 
   # ── Screen Brightness (auto-dim during NowPlaying) ───────────────────────
   screen_brightness: ^0.2.2+1

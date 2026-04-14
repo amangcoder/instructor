@@ -75,9 +75,34 @@ export class TtsPregenService {
       return;
     }
 
-    // Create job records in DB.
+    // Check S3 cache for every pair before creating jobs — skip any whose
+    // audio file is already present so we don't re-synthesise or dispatch
+    // unnecessary workers.
+    const cacheChecks = await Promise.all(
+      pairs.map(async (p) => {
+        const s3Key = `tts/${p.cacheKey}.wav`;
+        const cached = await this.checkS3Exists(s3Key);
+        return { pair: p, cached };
+      }),
+    );
+
+    const uncachedPairs = cacheChecks.filter((c) => !c.cached).map((c) => c.pair);
+
+    if (uncachedPairs.length === 0) {
+      this.logger.log(`startPregen — all ${pairs.length} TTS files already cached for planId=${planId}, marking complete`);
+      await this.db.setTtsStatus(planId, 'completed', 0, 0);
+      return;
+    }
+
+    if (uncachedPairs.length < pairs.length) {
+      this.logger.log(
+        `startPregen — ${pairs.length - uncachedPairs.length}/${pairs.length} already cached, creating ${uncachedPairs.length} jobs for planId=${planId}`,
+      );
+    }
+
+    // Create job records only for the uncached pairs.
     const jobRecords = await this.db.createTtsJobs(
-      pairs.map((p) => ({
+      uncachedPairs.map((p) => ({
         planId,
         cacheKey: p.cacheKey,
         text: p.text,

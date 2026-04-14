@@ -98,7 +98,7 @@ class _FakePlanApiService implements PlanApiService {
   }
 
   @override
-  Future<void> activatePlan(String planId) async {
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) async {
     calls.add('activatePlan:$planId');
     _maybeThrow();
   }
@@ -393,7 +393,7 @@ void main() {
     });
 
     test('activatePlan records call with planId', () async {
-      await fake.activatePlan('plan-99');
+      await fake.activatePlan('plan-99', voice: 'af_heart', locale: 'enIN', speechRate: '1.0');
       expect(fake.calls, contains('activatePlan:plan-99'));
     });
 
@@ -542,10 +542,13 @@ void main() {
         },
       );
       service = PlanApiServiceImpl(apiClient: stub);
-      await service.activatePlan('plan-activate-me');
+      await service.activatePlan('plan-activate-me', voice: 'af_heart', locale: 'enIN', speechRate: '1.0');
       expect(stub.capturedCalls.first.uri.path, '/api/plans/activate');
       expect(captured.first['planId'], 'plan-activate-me');
       expect(captured.first['voiceQuality'], 'studio');
+      expect(captured.first['voice'], 'af_heart');
+      expect(captured.first['locale'], 'enIN');
+      expect(captured.first['speechRate'], '1.0');
     });
 
     test('fetchLibraryPlans calls GET /api/library/plans with query params',
@@ -975,7 +978,7 @@ void main() {
         const ApiException('Server error', statusCode: 503),
       );
       try {
-        await service.activatePlan('plan-activate');
+        await service.activatePlan('plan-activate', voice: 'af_heart', locale: 'enIN', speechRate: '1.0');
         fail('expected PlanApiException');
       } on PlanApiException catch (e) {
         expect(e.userMessage, contains('Server error'));

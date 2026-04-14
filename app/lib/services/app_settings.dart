@@ -78,6 +78,20 @@ abstract final class AppSettingsKeys {
   /// Defaults to `'system'` when absent.
   static const String themeMode = 'theme_mode';
 
+  // ── Profile Personalization ────────────────────────────────────────────
+
+  /// User's activity level for personalized recommendations.
+  ///
+  /// Valid values: `'beginner'`, `'intermediate'`, or `'advanced'`.
+  /// Empty string when unset (default).
+  static const String profileActivityLevel = 'profile_activity_level';
+
+  /// Comma-separated list of user goal tags for personalized content.
+  ///
+  /// Example: `'yoga,meditation,workout'`.
+  /// Empty string when unset (default).
+  static const String profileGoals = 'profile_goals';
+
   // ── TTS Provider Settings ───────────────────────────────────────────────
 
   /// The selected TTS provider identifier (always 'kokoro').

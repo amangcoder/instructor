@@ -88,9 +88,16 @@ export class PlansController {
   ): Promise<{ success: boolean }> {
     const user = (req as any).user as JwtPayload;
     this.logger.log(
-      `POST /plans/activate — userId=${user.sub}, planId=${dto.planId}, voiceQuality=${dto.voiceQuality}`,
+      `POST /plans/activate — userId=${user.sub}, planId=${dto.planId}, voiceQuality=${dto.voiceQuality}, voice=${dto.voice}, locale=${dto.locale}, speechRate=${dto.speechRate}`,
     );
-    await this.plansService.activatePlan(user.sub, dto.planId, dto.voiceQuality);
+    await this.plansService.activatePlan(
+      user.sub,
+      dto.planId,
+      dto.voiceQuality,
+      dto.voice,
+      dto.locale,
+      dto.speechRate,
+    );
     return { success: true };
   }
 
@@ -107,6 +114,7 @@ export class PlansController {
     plans: Array<{
       planId: string;
       name: string;
+      planJson: string;
       isActive: boolean;
       ttsStatus: string;
       ttsCompleted: number;
@@ -123,6 +131,7 @@ export class PlansController {
       plans: result.plans.map((p) => ({
         planId: p.planId,
         name: p.name,
+        planJson: p.planJson,
         isActive: p.isActive,
         ttsStatus: p.ttsStatus,
         ttsCompleted: p.ttsCompleted,

@@ -1,21 +1,30 @@
 import {
   Controller,
   Post,
+  Patch,
+  Get,
   Body,
+  BadRequestException,
   HttpCode,
   HttpException,
   HttpStatus,
   Logger,
   Req,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Headers,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { OptionalAuthGuard } from './optional-auth.guard';
+import { JwtAuthGuard } from './jwt-auth.guard';
 import { JwtPayload } from './auth.service';
 import type { Request } from 'express';
 
@@ -24,6 +33,67 @@ export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
   constructor(private readonly authService: AuthService) {}
+
+  /**
+   * GET /api/auth/me
+   * Returns the authenticated user's profile.
+   */
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getMe(@Req() req: Request) {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`GET /auth/me — userId=${user.sub}`);
+    return this.authService.getProfile(user.sub);
+  }
+
+  /**
+   * POST /api/auth/profile/photo
+   * Accepts a multipart/form-data upload (field: 'photo').
+   * Uploads the image to S3 and returns a presigned URL (7-day TTL).
+   * Max file size: 5 MB. Allowed types: JPEG, PNG, WebP.
+   */
+  @Post('profile/photo')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        if (/^image\/(jpeg|png|webp)$/.test(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(new BadRequestException('Only JPEG, PNG, and WebP images are allowed'), false);
+        }
+      },
+    }),
+  )
+  @HttpCode(200)
+  async uploadProfilePhoto(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request,
+  ): Promise<{ photoUrl: string }> {
+    if (!file) throw new BadRequestException('No photo file provided (field name: photo)');
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`POST /auth/profile/photo — userId=${user.sub}, size=${file.size}B`);
+    return this.authService.uploadProfilePhoto(user.sub, file.buffer, file.mimetype);
+  }
+
+  /**
+   * PATCH /api/auth/profile
+   * Updates the authenticated user's profile (name, username, photoUrl).
+   * All fields are optional — only provided fields are updated.
+   */
+  @Patch('profile')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async updateProfile(
+    @Body() dto: UpdateProfileDto,
+    @Req() req: Request,
+  ) {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`PATCH /auth/profile — userId=${user.sub}`);
+    return this.authService.updateProfile(user.sub, dto);
+  }
 
   /**
    * POST /api/auth/invite

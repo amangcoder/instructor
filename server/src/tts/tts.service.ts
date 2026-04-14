@@ -184,7 +184,7 @@ export class TtsService {
     text: string,
     voice: string,
     locale?: string,
-    provider = 'gemini',
+    provider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro',
     speechRate = '1.0',
   ): string {
     // Object keys MUST be in alphabetical order so that JSON.stringify produces
@@ -334,7 +334,7 @@ export class TtsService {
     text: string,
     voice?: string,
     locale?: string,
-    provider = 'gemini',
+    provider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro',
     speechRate = '1.0',
   ): Promise<Buffer | null> {
     // ElevenLabs voice IDs are case-sensitive opaque strings — preserve casing.
@@ -357,7 +357,7 @@ export class TtsService {
     text: string,
     voice?: string,
     locale?: string,
-    provider = 'gemini',
+    provider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro',
     speechRate = '1.0',
   ): Promise<Buffer> {
     // Validate provider.

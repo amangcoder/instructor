@@ -175,7 +175,7 @@ class _FakePlanApiService implements PlanApiService {
   Future<Plan?> getLibraryPlanById(String id) async => null;
 
   @override
-  Future<void> activatePlan(String planId) async {}
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) async {}
 
   @override
   Future<TtsStatusInfo?> getTtsStatus(String planId) async => null;
@@ -1113,7 +1113,7 @@ class _CountingApi implements PlanApiService {
   Future<Plan?> getLibraryPlanById(String id) async => null;
 
   @override
-  Future<void> activatePlan(String planId) async {}
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) async {}
 
   @override
   Future<TtsStatusInfo?> getTtsStatus(String planId) async => null;

@@ -13,6 +13,7 @@ import 'package:instructor/models/tts_status_info.dart';
 import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/providers/library_providers.dart' as libProviders;
 import 'package:instructor/providers/plan_providers.dart';
+import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
@@ -22,6 +23,7 @@ import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:instructor/theme/app_branding.dart';
 import 'package:instructor/widgets/active_session_dialog.dart';
 import 'package:instructor/widgets/offline_banner.dart';
+import 'package:instructor/widgets/profile_avatar_button.dart';
 
 import 'widgets/category_filter.dart';
 import 'widgets/countdown_overlay.dart';
@@ -125,7 +127,6 @@ class _PlanLibraryScreenState extends ConsumerState<PlanLibraryScreen>
   Widget build(BuildContext context) {
     final tabIndex = ref.watch(libProviders.libraryTabIndexProvider);
     final isLoggedIn = ref.watch(isAuthenticatedProvider);
-    final colorScheme = Theme.of(context).colorScheme;
 
     // Propagates provider changes → controller (e.g. external deep-link).
     // Propagates provider changes → controller (e.g. external deep-link or
@@ -136,28 +137,9 @@ class _PlanLibraryScreenState extends ConsumerState<PlanLibraryScreen>
 
     return Scaffold(
       appBar: AppBranding.brandedAppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          tooltip: 'Menu',
-          onPressed: () {},
-        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
-            onPressed: () => context.push(AppRoutes.settings),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: colorScheme.surfaceContainer,
-              child: Icon(
-                Icons.person,
-                size: 18,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
+          ProfileAvatarButton(
+            onTap: () => context.push(AppRoutes.settings),
           ),
         ],
         bottom: TabBar(
@@ -302,16 +284,17 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
   /// IDs of library plans currently being fetched+saved (shows spinner).
   final Set<String> _loadingPlanIds = {};
 
-  /// IDs of library plans successfully added to My Plans in this session.
-  ///
-  /// Session-level tracking is sufficient: the server prevents true duplicates
-  /// when the same plan is re-added, and the UI correctly shows "Already added"
-  /// for the duration of this screen session.
-  final Set<String> _addedPlanIds = {};
-
   @override
   Widget build(BuildContext context) {
     final plansAsync = ref.watch(libProviders.libraryPlansProvider);
+    // Derive which library plans have already been added from the reactive
+    // user plan stream. This persists across navigation and app restarts.
+    final userPlansAsync = ref.watch(planListProvider());
+    final addedLibraryIds = userPlansAsync.valueOrNull
+            ?.where((p) => p.libraryId != null)
+            .map((p) => p.libraryId!)
+            .toSet() ??
+        {};
     final colorScheme = Theme.of(context).colorScheme;
 
     return Column(
@@ -346,7 +329,7 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
         // ── Library plan list ─────────────────────────────────────────────
         Expanded(
           child: plansAsync.when(
-            data: (plans) => _buildPlanList(context, plans),
+            data: (plans) => _buildPlanList(context, plans, addedLibraryIds),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => _ErrorState(
               message: error is PlanApiException
@@ -364,6 +347,7 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
   Widget _buildPlanList(
     BuildContext context,
     List<LibraryPlanSummary> plans,
+    Set<String> addedLibraryIds,
   ) {
     if (plans.isEmpty) {
       return const _DiscoverEmptyState();
@@ -380,7 +364,7 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
           padding: const EdgeInsets.only(bottom: 8),
           child: _LibraryPlanCard(
             plan: plan,
-            isAdded: _addedPlanIds.contains(plan.id),
+            isAdded: addedLibraryIds.contains(plan.id),
             isLoading: _loadingPlanIds.contains(plan.id),
             onAdd: () => _addToMyPlans(context, plan),
           ),
@@ -395,9 +379,14 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
     BuildContext context,
     LibraryPlanSummary summary,
   ) async {
-    // Guard: no-op if already added or in-flight.
-    if (_addedPlanIds.contains(summary.id) ||
-        _loadingPlanIds.contains(summary.id)) {
+    // Guard: redirect to login if not authenticated.
+    if (!ref.read(isAuthenticatedProvider)) {
+      context.go(AppRoutes.login);
+      return;
+    }
+
+    // Guard: no-op if already in-flight (isAdded is handled by the button state).
+    if (_loadingPlanIds.contains(summary.id)) {
       return;
     }
 
@@ -411,6 +400,8 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
       final fullPlan = await apiService.getLibraryPlanById(summary.id);
 
       // Strip server-managed fields so createPlan assigns a fresh server UUID.
+      // Set libraryId so the plan is recognised as a Discover clone, preventing
+      // duplicate additions across sessions.
       final now = DateTime.now();
       final planToSave = fullPlan.copyWith(
         id: '',
@@ -421,20 +412,23 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
         ttsStatus: 'none',
         ttsTotal: 0,
         ttsCompleted: 0,
+        libraryId: summary.id,
       );
       await repo.createPlan(planToSave);
 
       if (!mounted) return;
 
-      setState(() {
-        _loadingPlanIds.remove(summary.id);
-        _addedPlanIds.add(summary.id);
-      });
+      setState(() => _loadingPlanIds.remove(summary.id));
+      // addedLibraryIds is derived from planListProvider, which will update
+      // automatically via the Drift stream — no manual setState needed.
 
       // Show a success snackbar with a "View" action.
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
         SnackBar(
           content: Text('"${summary.name}" added to My Plans'),
+          duration: const Duration(seconds: 4),
           action: SnackBarAction(
             label: 'View',
             onPressed: () {
@@ -445,9 +439,6 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
           ),
         ),
       );
-
-      // Navigate back to the My Plans tab so the user can see the new plan.
-      ref.read(libProviders.libraryTabIndexProvider.notifier).state = 0;
     } catch (e) {
       if (!mounted) return;
       setState(() => _loadingPlanIds.remove(summary.id));
@@ -1095,6 +1086,11 @@ class _PlanList extends ConsumerWidget {
               plan: plan,
               onTap: () => context.push('/editor/${plan.id}'),
               onPlay: () => _onPlanTap(context, ref, plan),
+              onPlayWithAiVoice: () {
+                ref.read(ttsPlaybackModeProvider.notifier).state =
+                    TtsPlaybackMode.genai;
+                _onPlanTap(context, ref, plan);
+              },
               onEdit: isAuthenticated
                   ? () => context.push('/editor/${plan.id}')
                   : null,
@@ -1105,9 +1101,17 @@ class _PlanList extends ConsumerWidget {
                   ? () => _confirmDelete(context, ref, plan)
                   : null,
               onActivate: isAuthenticated
-                  ? () => ref
-                      .read(planApiServiceProvider)
-                      .activatePlan(plan.id)
+                  ? () async {
+                      final voice = ref.read(defaultVoiceSettingProvider).valueOrNull ?? kDefaultVoice;
+                      final locale = ref.read(ttsLocaleSettingProvider).valueOrNull ?? kDefaultTtsLocale;
+                      final speechRate = ref.read(speechRateSettingProvider).valueOrNull ?? kDefaultSpeechRate;
+                      await ref.read(planApiServiceProvider).activatePlan(
+                            plan.id,
+                            voice: voice.name,
+                            locale: locale.name,
+                            speechRate: speechRate.toString(),
+                          );
+                    }
                   : null,
             ),
           ),

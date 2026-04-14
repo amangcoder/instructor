@@ -32,6 +32,12 @@ const double kDefaultSpeechRate = 1.0;
 /// Default TTS locale / accent.
 const TtsLocale kDefaultTtsLocale = TtsLocale.enIN;
 
+/// Default activity level (empty = unset).
+const String kDefaultActivityLevel = '';
+
+/// Default goals list (empty = unset).
+const List<String> kDefaultGoals = [];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stream providers — one per user-facing setting
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,5 +160,31 @@ Stream<ThemeMode> themeModeSetting(Ref ref) {
       default:
         return ThemeMode.system;
     }
+  });
+}
+
+/// Reactive stream of the user's activity level preference.
+///
+/// Emits [kDefaultActivityLevel] (empty string) when the key is absent.
+/// Valid values: 'beginner', 'intermediate', 'advanced', or '' (unset).
+@riverpod
+Stream<String> activityLevelSetting(Ref ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.watch(AppSettingsKeys.profileActivityLevel).map((raw) {
+    if (raw == null) return kDefaultActivityLevel;
+    return raw;
+  });
+}
+
+/// Reactive stream of the user's goal preferences.
+///
+/// Emits [kDefaultGoals] (empty list) when the key is absent or empty.
+/// When present, parses comma-separated goal tags into a List<String>.
+@riverpod
+Stream<List<String>> profileGoalsSetting(Ref ref) {
+  final settings = ref.watch(appSettingsProvider);
+  return settings.watch(AppSettingsKeys.profileGoals).map((raw) {
+    if (raw == null || raw.isEmpty) return kDefaultGoals;
+    return raw.split(',').map((s) => s.trim()).toList();
   });
 }

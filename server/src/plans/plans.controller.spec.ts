@@ -38,6 +38,7 @@ function createMockPlansService() {
         {
           planId: 'plan-uuid-001',
           name: 'Morning Yoga',
+          planJson: '{"name":"Morning Yoga","steps":[]}',
           createdAt: new Date('2026-01-10T08:00:00.000Z'),
           updatedAt: new Date('2026-01-15T10:00:00.000Z'),
         },
@@ -289,6 +290,7 @@ describe('PlansController — GET /plans/list', () => {
         {
           planId: 'plan-uuid-001',
           name: 'Morning Yoga',
+          planJson: '{"name":"Morning Yoga","steps":[]}',
           createdAt: '2026-01-10T08:00:00.000Z',
           updatedAt: '2026-01-15T10:00:00.000Z',
         },

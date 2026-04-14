@@ -45,6 +45,12 @@ mixin _$Plan {
   /// Number of TTS audio segments that have been generated so far.
   int get ttsCompleted => throw _privateConstructorUsedError;
 
+  /// The library plan ID this plan was cloned from, if any.
+  ///
+  /// Set when the user adds a plan from the Discover tab. Used to prevent
+  /// duplicate additions across sessions.
+  String? get libraryId => throw _privateConstructorUsedError;
+
   /// Serializes this Plan to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
 
@@ -73,7 +79,8 @@ abstract class $PlanCopyWith<$Res> {
       bool isActive,
       String ttsStatus,
       int ttsTotal,
-      int ttsCompleted});
+      int ttsCompleted,
+      String? libraryId});
 }
 
 /// @nodoc
@@ -105,6 +112,7 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
     Object? ttsStatus = null,
     Object? ttsTotal = null,
     Object? ttsCompleted = null,
+    Object? libraryId = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -163,6 +171,10 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
           ? _value.ttsCompleted
           : ttsCompleted // ignore: cast_nullable_to_non_nullable
               as int,
+      libraryId: freezed == libraryId
+          ? _value.libraryId
+          : libraryId // ignore: cast_nullable_to_non_nullable
+              as String?,
     ) as $Val);
   }
 }
@@ -188,7 +200,8 @@ abstract class _$$PlanImplCopyWith<$Res> implements $PlanCopyWith<$Res> {
       bool isActive,
       String ttsStatus,
       int ttsTotal,
-      int ttsCompleted});
+      int ttsCompleted,
+      String? libraryId});
 }
 
 /// @nodoc
@@ -217,6 +230,7 @@ class __$$PlanImplCopyWithImpl<$Res>
     Object? ttsStatus = null,
     Object? ttsTotal = null,
     Object? ttsCompleted = null,
+    Object? libraryId = freezed,
   }) {
     return _then(_$PlanImpl(
       id: null == id
@@ -275,6 +289,10 @@ class __$$PlanImplCopyWithImpl<$Res>
           ? _value.ttsCompleted
           : ttsCompleted // ignore: cast_nullable_to_non_nullable
               as int,
+      libraryId: freezed == libraryId
+          ? _value.libraryId
+          : libraryId // ignore: cast_nullable_to_non_nullable
+              as String?,
     ));
   }
 }
@@ -296,7 +314,8 @@ class _$PlanImpl extends _Plan {
       this.isActive = false,
       this.ttsStatus = 'none',
       this.ttsTotal = 0,
-      this.ttsCompleted = 0})
+      this.ttsCompleted = 0,
+      this.libraryId})
       : assert(defaultVoice != '', 'defaultVoice must not be empty'),
         _tags = tags,
         _steps = steps,
@@ -364,9 +383,16 @@ class _$PlanImpl extends _Plan {
   @JsonKey()
   final int ttsCompleted;
 
+  /// The library plan ID this plan was cloned from, if any.
+  ///
+  /// Set when the user adds a plan from the Discover tab. Used to prevent
+  /// duplicate additions across sessions.
+  @override
+  final String? libraryId;
+
   @override
   String toString() {
-    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isActive: $isActive, ttsStatus: $ttsStatus, ttsTotal: $ttsTotal, ttsCompleted: $ttsCompleted)';
+    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isActive: $isActive, ttsStatus: $ttsStatus, ttsTotal: $ttsTotal, ttsCompleted: $ttsCompleted, libraryId: $libraryId)';
   }
 
   @override
@@ -397,7 +423,9 @@ class _$PlanImpl extends _Plan {
             (identical(other.ttsTotal, ttsTotal) ||
                 other.ttsTotal == ttsTotal) &&
             (identical(other.ttsCompleted, ttsCompleted) ||
-                other.ttsCompleted == ttsCompleted));
+                other.ttsCompleted == ttsCompleted) &&
+            (identical(other.libraryId, libraryId) ||
+                other.libraryId == libraryId));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -417,7 +445,8 @@ class _$PlanImpl extends _Plan {
       isActive,
       ttsStatus,
       ttsTotal,
-      ttsCompleted);
+      ttsCompleted,
+      libraryId);
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.
@@ -450,7 +479,8 @@ abstract class _Plan extends Plan {
       final bool isActive,
       final String ttsStatus,
       final int ttsTotal,
-      final int ttsCompleted}) = _$PlanImpl;
+      final int ttsCompleted,
+      final String? libraryId}) = _$PlanImpl;
   const _Plan._() : super._();
 
   factory _Plan.fromJson(Map<String, dynamic> json) = _$PlanImpl.fromJson;
@@ -493,6 +523,13 @@ abstract class _Plan extends Plan {
   /// Number of TTS audio segments that have been generated so far.
   @override
   int get ttsCompleted;
+
+  /// The library plan ID this plan was cloned from, if any.
+  ///
+  /// Set when the user adds a plan from the Discover tab. Used to prevent
+  /// duplicate additions across sessions.
+  @override
+  String? get libraryId;
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.

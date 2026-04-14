@@ -26,7 +26,7 @@ export class SynthesizeDto {
 
   /**
    * TTS provider to route to.
-   * Defaults to 'gemini' when not specified.
+   * Defaults to DEFAULT_TTS_PROVIDER env var (fallback: 'kokoro') when not specified.
    */
   @IsOptional()
   @IsString()

@@ -204,5 +204,52 @@ final themeModeSettingProvider = AutoDisposeStreamProvider<ThemeMode>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef ThemeModeSettingRef = AutoDisposeStreamProviderRef<ThemeMode>;
+String _$activityLevelSettingHash() =>
+    r'e516d89e9b9e0d23cfdc241088493c0e33b774f5';
+
+/// Reactive stream of the user's activity level preference.
+///
+/// Emits [kDefaultActivityLevel] (empty string) when the key is absent.
+/// Valid values: 'beginner', 'intermediate', 'advanced', or '' (unset).
+///
+/// Copied from [activityLevelSetting].
+@ProviderFor(activityLevelSetting)
+final activityLevelSettingProvider = AutoDisposeStreamProvider<String>.internal(
+  activityLevelSetting,
+  name: r'activityLevelSettingProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$activityLevelSettingHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef ActivityLevelSettingRef = AutoDisposeStreamProviderRef<String>;
+String _$profileGoalsSettingHash() =>
+    r'93205bbb949915b96684930701e929e3fe1b1764';
+
+/// Reactive stream of the user's goal preferences.
+///
+/// Emits [kDefaultGoals] (empty list) when the key is absent or empty.
+/// When present, parses comma-separated goal tags into a List<String>.
+///
+/// Copied from [profileGoalsSetting].
+@ProviderFor(profileGoalsSetting)
+final profileGoalsSettingProvider =
+    AutoDisposeStreamProvider<List<String>>.internal(
+  profileGoalsSetting,
+  name: r'profileGoalsSettingProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$profileGoalsSettingHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef ProfileGoalsSettingRef = AutoDisposeStreamProviderRef<List<String>>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

@@ -14,6 +14,7 @@ import {
 } from './prompts/phase1.prompt';
 import { PHASE2_SYSTEM_PROMPT, buildPhase2PhasePrompt } from './prompts/phase2.prompt';
 import { DatabaseService, type PlanRecord, type PlanSummaryRecord, type SavePlanResult } from '../database/database.service';
+import { TtsPregenService } from '../tts/tts-pregen.service';
 import { SavePlanDto } from './dto/save-plan.dto';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -37,7 +38,10 @@ function ollamaModel(): string { return process.env.OLLAMA_MODEL ?? 'gemma4:e4b'
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly ttsPregen: TtsPregenService,
+  ) {}
 
   async generatePlan(
     prompt: string,
@@ -150,11 +154,53 @@ export class PlansService {
 
   /**
    * Activate a plan for the authenticated user.
-   * For studio voice quality, sets ttsStatus='pending' to trigger pre-generation.
+   * For studio voice quality, triggers TTS pre-generation after activation.
    */
-  async activatePlan(userId: string, planId: string, voiceQuality: string): Promise<void> {
-    this.logger.log(`activatePlan — userId=${userId}, planId=${planId}, voiceQuality=${voiceQuality}`);
-    return this.db.activatePlan(planId, userId, voiceQuality);
+  async activatePlan(
+    userId: string,
+    planId: string,
+    voiceQuality: string,
+    voice?: string,
+    locale?: string,
+    speechRate?: string,
+  ): Promise<void> {
+    this.logger.log(`activatePlan — userId=${userId}, planId=${planId}, voiceQuality=${voiceQuality}, voice=${voice}, locale=${locale}, speechRate=${speechRate}`);
+    await this.db.activatePlan(planId, userId, voiceQuality);
+
+    if (voiceQuality === 'studio') {
+      try {
+        const plan = await this.db.getPlanById(planId, userId);
+        if (!plan) return;
+
+        // Use client-provided voice, falling back to plan default or 'af_heart'.
+        let effectiveVoice = voice ?? 'af_heart';
+        if (!voice) {
+          try {
+            const parsed = JSON.parse(plan.planJson);
+            if (parsed.defaultVoice) effectiveVoice = parsed.defaultVoice;
+          } catch { /* use fallback voice */ }
+        }
+
+        const effectiveLocale = locale ?? 'enIN';
+        const effectiveProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+        const effectiveSpeechRate = speechRate ?? '1.0';
+
+        await this.ttsPregen.startPregen(
+          planId,
+          plan.planJson,
+          effectiveVoice,
+          effectiveLocale,
+          effectiveProvider,
+          effectiveSpeechRate,
+        );
+      } catch (err) {
+        this.logger.error(
+          `TTS pre-generation failed for planId=${planId}: ${err instanceof Error ? err.message : err}`,
+        );
+        // Reset status so the UI doesn't show a spinner forever.
+        await this.db.setTtsStatus(planId, 'failed', 0, 0);
+      }
+    }
   }
 
   // ── Phase generation (with 1 retry per phase) ──────────────────────────────

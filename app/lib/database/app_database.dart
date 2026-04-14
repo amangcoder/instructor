@@ -44,7 +44,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -116,6 +116,13 @@ class AppDatabase extends _$AppDatabase {
             // Clear TTS cache — audio was generated with the old provider
             // (OpenAI) and old voice IDs, so it's no longer valid.
             await customStatement('DELETE FROM tts_cache');
+          }
+          if (from < 7) {
+            // v6 → v7: add library_id column to plans for duplicate detection.
+            // NULL for all existing plans (they were not cloned from the library).
+            await customStatement(
+              'ALTER TABLE plans ADD COLUMN library_id TEXT',
+            );
           }
           if (from < 6) {
             // ── Pre-migration plan capture (TASK-059) ──────────────────────

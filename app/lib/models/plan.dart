@@ -38,6 +38,12 @@ class Plan with _$Plan {
 
     /// Number of TTS audio segments that have been generated so far.
     @Default(0) int ttsCompleted,
+
+    /// The library plan ID this plan was cloned from, if any.
+    ///
+    /// Set when the user adds a plan from the Discover tab. Used to prevent
+    /// duplicate additions across sessions.
+    String? libraryId,
   }) = _Plan;
 
   factory Plan.fromJson(Map<String, dynamic> json) => _$PlanFromJson(json);

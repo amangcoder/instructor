@@ -34,6 +34,9 @@ import { sql } from 'drizzle-orm';
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: varchar('email').unique().notNull(),
+  name: varchar('name', { length: 100 }),
+  username: varchar('username', { length: 30 }).unique(),
+  photoUrl: text('photo_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 

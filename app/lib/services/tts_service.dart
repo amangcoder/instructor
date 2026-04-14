@@ -317,18 +317,22 @@ class TTSServiceImpl implements TTSService {
     );
     debugPrint('TTSService.renderTTS: hash=${hash.substring(0, 8)}…');
 
-    // ── Step 1: Check local cache (regardless of mode) ───────────────────────
+    // ── Step 1: Platform mode — return null immediately (bypass cache) ──────────
+    //
+    // When the user selects "Device", we must always use the platform TTS engine,
+    // even if a cached AI voice file exists on disk. Returning null signals the
+    // caller to route through the platform TTS path.
+    if (mode == TtsPlaybackMode.platform) {
+      debugPrint('TTSService: platform mode — returning null (caller handles TTS)');
+      return null;
+    }
+
+    // ── Step 2: Check local cache (GenAI mode only) ───────────────────────────
     debugPrint('TTSService.renderTTS: checking cache…');
     final cached = await _findCachedPath(hash);
     if (cached != null) {
       debugPrint('TTSService: cache hit for voice=$voiceId — returning cached path');
       return cached;
-    }
-
-    // ── Step 2: Platform mode — return null on cache miss ────────────────────
-    if (mode == TtsPlaybackMode.platform) {
-      debugPrint('TTSService: platform mode, cache miss — returning null (caller handles TTS)');
-      return null;
     }
 
     // ── Step 3: GenAI mode — call backend API with platform TTS fallback ─────

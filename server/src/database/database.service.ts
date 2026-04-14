@@ -43,6 +43,9 @@ import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 export interface UserRecord {
   id: string;
   email: string;
+  name: string | null;
+  username: string | null;
+  photoUrl: string | null;
   createdAt: Date;
 }
 
@@ -236,7 +239,7 @@ export class DatabaseService {
 
     if (rows.length === 0) return null;
     const row = rows[0];
-    return { id: row.id, email: row.email, createdAt: row.createdAt };
+    return { id: row.id, email: row.email, name: row.name ?? null, username: row.username ?? null, photoUrl: row.photoUrl ?? null, createdAt: row.createdAt };
   }
 
   /** Fetch a user by email address. Returns null if not found. */
@@ -249,7 +252,7 @@ export class DatabaseService {
 
     if (rows.length === 0) return null;
     const row = rows[0];
-    return { id: row.id, email: row.email, createdAt: row.createdAt };
+    return { id: row.id, email: row.email, name: row.name ?? null, username: row.username ?? null, photoUrl: row.photoUrl ?? null, createdAt: row.createdAt };
   }
 
   /**
@@ -276,6 +279,37 @@ export class DatabaseService {
       if ((err as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
         throw Object.assign(new Error('User already exists'), {
           code: 'USER_ALREADY_EXISTS',
+        });
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Update mutable profile fields for an existing user.
+   * Throws { code: 'USERNAME_TAKEN' } on unique constraint violation.
+   */
+  async updateUserProfile(
+    userId: string,
+    data: { name?: string | null; username?: string | null; photoUrl?: string | null },
+  ): Promise<void> {
+    if (this.noop) return;
+
+    const updates: Partial<typeof users.$inferInsert> = {};
+    if ('name' in data) updates.name = data.name ?? null;
+    if ('username' in data) updates.username = data.username ?? null;
+    if ('photoUrl' in data) updates.photoUrl = data.photoUrl ?? null;
+
+    if (Object.keys(updates).length === 0) return;
+
+    try {
+      await this.withRetry(() =>
+        this.db!.update(users).set(updates).where(eq(users.id, userId)),
+      );
+    } catch (err) {
+      if ((err as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
+        throw Object.assign(new Error('Username already taken'), {
+          code: 'USERNAME_TAKEN',
         });
       }
       throw err;

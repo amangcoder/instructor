@@ -84,7 +84,7 @@ export class TtsController {
     @Headers('authorization') authHeader: string | undefined,
     @Res() res: Response,
   ): Promise<void> {
-    const provider = dto.provider ?? 'gemini';
+    const provider = dto.provider ?? process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
     this.logger.log(
       `POST /synthesize — voice=${dto.voice}, locale=${dto.locale}, provider=${provider}, textLength=${dto.text?.length ?? 0}`,
     );

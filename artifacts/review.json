@@ -2,12 +2,47 @@
   "verdict": "approve",
   "issues": [
     {
+      "severity": "major",
+      "file": "app/lib/screens/settings/widgets/profile_sidebar.dart",
+      "line": 168,
+      "description": "FutureBuilder anti-pattern: PackageInfo.fromPlatform() was called directly inside build(), creating a new Future on every provider rebuild and causing the version footer to flash '…' repeatedly. Fixed by converting ProfileSidebar to ConsumerStatefulWidget and caching the Future in a late final field initialised at field-declaration time.",
+      "suggestion": "Converted ProfileSidebar to ConsumerStatefulWidget/_ProfileSidebarState; added `late final Future<PackageInfo> _packageInfoFuture = PackageInfo.fromPlatform();` field and passed it to FutureBuilder."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/screens/settings/widgets/personalization_card.dart",
+      "line": 197,
+      "description": "The 'Saved' confirmation Text inside AnimatedOpacity was invisible to TalkBack/VoiceOver because AnimatedOpacity has no live-region semantics. Screen-reader users received no feedback when preferences were persisted. Fixed by wrapping the Text in Semantics(liveRegion: true).",
+      "suggestion": "Wrapped the AnimatedOpacity child in `Semantics(liveRegion: true)` so TalkBack/VoiceOver announces 'Saved' when the widget becomes visible."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/screens/settings/widgets/activity_stats_card.dart",
+      "line": 72,
+      "description": "Each _StatTile rendered value and label as separate, unrelated Text widgets, causing screen readers to read them in isolation ('5', then 'Plans'). The Sessions microcopy also used fontSize 10 which is below WCAG AA minimum. Fixed by wrapping the tile Column in Semantics(label: '$value $label', excludeSemantics: true) and bumping the microcopy fontSize to 11.",
+      "suggestion": "Added Semantics wrapper with combined label around the _StatTile Column. Increased Sessions sublabel fontSize from 10 to 11."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/screens/settings/widgets/shared_settings_widgets.dart",
+      "line": 13,
+      "description": "SectionHeader called title.toUpperCase() before passing to Text, causing Samsung TalkBack to read section headers letter-by-letter instead of as words. Fixed by wrapping the Text in Semantics(label: title) so the accessible label uses natural case while the visual display remains uppercase.",
+      "suggestion": "Added `Semantics(label: title)` wrapper around the Text widget. Visual uppercase is preserved via title.toUpperCase() in the Text value."
+    },
+    {
       "severity": "nit",
-      "file": "server/src/lambda.ts",
-      "line": 291,
-      "description": "When a ttsPregen task arrives before any HTTP request has warmed this Lambda, bootstrap() is called and its return value is assigned to cachedHandler. The logic is correct — both cachedHandler and cachedApp are populated by a single bootstrap() call — but the dual-cache intent is implicit and may surprise a future reader.",
-      "suggestion": "Add a brief inline comment above the bootstrap() call inside the ttsPregen branch: '// bootstrap() populates both cachedHandler and cachedApp'."
+      "file": "app/lib/screens/settings/widgets/profile_sidebar.dart",
+      "line": 198,
+      "description": "The URL-launch failure SnackBar previously exposed the raw URL string (e.g. 'Could not open mailto:support@…') which is verbose and a minor information-disclosure risk for future sensitive URLs. Fixed to show a user-friendly message.",
+      "suggestion": "Replaced both error-path SnackBar messages with 'Could not open link. Please try again.' The raw exception is silently swallowed (catch (_)) — if server-side logging is added later, the exception should be forwarded there."
+    },
+    {
+      "severity": "nit",
+      "file": "app/lib/screens/settings/widgets/profile_sidebar.dart",
+      "line": 155,
+      "description": "REQ-019 states the sidebar login button should be removed to avoid three redundant login locations (Profile Header, ACCOUNT card, Sidebar). The implementation keeps the sidebar Login ListTile (matching AC-005/TASK-008). This is a product-level conflict requiring stakeholder alignment, not a code defect. No code change applied.",
+      "suggestion": "Coordinate with product to decide canonical behaviour. If REQ-019 takes precedence, remove the sidebar Login ListTile and replace with an informational note. If AC-005/TASK-008 take precedence, consider removing the ACCOUNT-section login prompt on the main screen to limit entry points to two."
     }
   ],
-  "summary": "Both critical regressions from Cycle 2 are resolved: TtsModule now registers TtsEnumerationService and TtsPregenService in its providers array (fixing the NestJS DI startup failure), and lambda.ts now exports TtsPregenWorkerTask and routes 'ttsPregen' tasks to TtsPregenService.processJobs() via the bootstrapped DI container (fixing the TypeScript compile error and the silent task-drop). Changes are minimal and correct — no unrelated code was touched."
+  "summary": "All five code-level issues resolved: FutureBuilder anti-pattern eliminated via ConsumerStatefulWidget refactor, 'Saved' live-region added for screen readers, _StatTile combined semantics and accessible font size applied, SectionHeader natural-case accessible label added, and SnackBar URL exposure removed. The remaining nit (REQ-019 login redundancy) is a product decision with no clear code resolution and is documented for stakeholder follow-up."
 }

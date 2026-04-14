@@ -9,8 +9,10 @@ import 'package:screen_brightness/screen_brightness.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/router.dart';
+import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:instructor/theme/step_colors.dart';
@@ -56,6 +58,68 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   // ── Completion handling ──────────────────────────────────────────────────────
 
   bool _completionHandled = false;
+
+  // ── Instruction full-text sheet ──────────────────────────────────────────
+  void _showFullInstruction(String text, String typeLabel) {
+    final colorScheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.5,
+          maxChildSize: 0.85,
+          minChildSize: 0.25,
+          builder: (_, scrollController) => Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+            child: Column(
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Expanded(
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    child: Text(
+                      text,
+                      style: GoogleFonts.manrope(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w500,
+                        height: 1.6,
+                        color: cs.onSurface,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  typeLabel,
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   // ── TTS auto-default ──────────────────────────────────────────────────────
   /// Set to `true` once we have automatically defaulted the playback mode to
@@ -577,11 +641,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                     // ── TTS Voice mode toggle ──────────────────────────
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                      child: Align(
-                        alignment: Alignment.centerRight,
+                      child: Center(
                         child: TtsToggle(
                           ttsStatus: effectiveTtsStatus,
                           isActive: state.plan.isActive,
+                          isLocked: stepType == StepType.say ||
+                              stepType == StepType.count,
                         ),
                       ),
                     ),
@@ -596,11 +661,15 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                         child: LayoutBuilder(
                           builder: (context, constraints) {
                             final availH = constraints.maxHeight;
-                            // Timer occupies ~45 % of available height, capped
-                            // at the design maximum of 288 px.
+                            // Original timer size — unchanged.
                             final timerSize = (availH * 0.45).clamp(160.0, 288.0);
                             // Vertical gaps scale with height (8–32 px).
                             final spacing = (availH * 0.04).clamp(8.0, 32.0);
+
+                            // Only offer expand when the text is long enough
+                            // that it would overflow 3 lines (~90 chars is a
+                            // safe heuristic for a typical phone width).
+                            final isLongText = currentStepText.length > 90;
 
                             return Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -618,19 +687,50 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
                                 SizedBox(height: spacing),
 
-                                // ── Current instruction (centered text) ────
-                                Text(
-                                  currentStepText,
-                                  style: GoogleFonts.manrope(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.5,
-                                    color: colorScheme.onSurface,
+                                // ── Current instruction ─────────────────────
+                                // Short texts: shown in full.
+                                // Long texts: 3 lines + "Show more" tap →
+                                // opens a bottom sheet with the full text.
+                                GestureDetector(
+                                  onTap: isLongText
+                                      ? () => _showFullInstruction(
+                                            currentStepText,
+                                            _stepTypeLabel(stepType),
+                                          )
+                                      : null,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        currentStepText,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: -0.2,
+                                          height: 1.45,
+                                          color: colorScheme.onSurface,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                        maxLines: isLongText ? 3 : null,
+                                        overflow: isLongText
+                                            ? TextOverflow.ellipsis
+                                            : null,
+                                      ),
+                                      if (isLongText) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Show more',
+                                          style: TextStyle(
+                                            color: colorScheme.primary,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                  textAlign: TextAlign.center,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
                                 ),
+
                                 const SizedBox(height: 8),
                                 Text(
                                   _stepTypeLabel(stepType),
@@ -773,9 +873,7 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ),
-          // Placeholder to keep header symmetric; overflow menu not yet
-          // implemented — hidden from accessibility tree to avoid a no-op.
-          const SizedBox(width: 48),
+          const _SpeedButton(),
         ],
       ),
     );
@@ -851,6 +949,66 @@ class _ControlsRow extends StatelessWidget {
           color: colorScheme.primary.withValues(alpha: 0.7),
         ),
       ],
+    );
+  }
+}
+
+/// Speed cycle button shown in the top-right corner of the Now Playing screen.
+///
+/// Tapping cycles through playback speed presets: 0.75×, 1×, 1.25×, 1.5×, 2×.
+/// The selected speed is persisted to [AppSettingsKeys.speechRate] and takes
+/// effect on the next say step. The button label updates reactively via
+/// [speechRateSettingProvider].
+class _SpeedButton extends ConsumerWidget {
+  const _SpeedButton();
+
+  static const _presets = [0.75, 1.0, 1.25, 1.5, 2.0];
+
+  String _label(double speed) {
+    if (speed == speed.truncateToDouble() && speed >= 1.0) {
+      return '${speed.toInt()}×';
+    }
+    return '$speed×';
+  }
+
+  void _cycleSpeed(WidgetRef ref, double current) {
+    final idx = _presets.indexWhere((p) => (p - current).abs() < 0.01);
+    final nextIdx = (idx < 0 || idx == _presets.length - 1) ? 0 : idx + 1;
+    final next = _presets[nextIdx];
+    final writeFuture = ref.read(appSettingsProvider).write(
+      AppSettingsKeys.speechRate,
+      next.toStringAsFixed(2),
+    );
+    unawaited(writeFuture);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final speed = ref.watch(speechRateSettingProvider).valueOrNull ?? 1.0;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Semantics(
+      button: true,
+      label: 'Playback speed: ${_label(speed)}. Tap to change.',
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: TextButton(
+          style: TextButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: const Size(48, 48),
+            foregroundColor: colorScheme.primary,
+          ),
+          onPressed: () => _cycleSpeed(ref, speed),
+          child: Text(
+            _label(speed),
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

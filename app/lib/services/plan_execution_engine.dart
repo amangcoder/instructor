@@ -383,12 +383,23 @@ class PlanExecutionEngineImpl
 
   // ── Say step tracking ─────────────────────────────────────────────────────
 
-  /// Actual duration of the currently playing voice audio file.
+  /// Actual duration of the currently playing voice audio file, adjusted for
+  /// playback speed.
+  ///
+  /// Equals `raw_file_duration / _currentSayStepSpeed` so that wall-clock
+  /// elapsed time can be compared directly to produce an accurate countdown.
   ///
   /// Set once [AudioEngine.currentVoiceDuration] becomes non-null after the
   /// voice player has loaded the file. Cleared when the step ends or when
   /// skip/stop is called.
   Duration? _currentSayStepActualDuration;
+
+  /// The playback speed at which the current Say step's audio is playing.
+  ///
+  /// Used to convert the raw file duration (at 1× speed) to the effective
+  /// wall-clock duration so the countdown timer stays in sync with the audio.
+  /// Reset to 1.0 by [_stopSayStepPlaybackTimer].
+  double _currentSayStepSpeed = 1.0;
 
   /// Timestamp when voice playback started for the current Say step.
   ///
@@ -406,6 +417,14 @@ class PlanExecutionEngineImpl
   /// Periodic timer that fires every 100 ms during Say step playback to emit
   /// [ExecutionState] updates and capture the actual voice file duration.
   Timer? _sayStepProgressTimer;
+
+  /// Subscription to speech-rate DB changes during Say step voice playback.
+  ///
+  /// Active only while a voice file is playing. When the user changes the
+  /// speed setting (via the Now Playing speed button or Settings), this fires
+  /// [_onSpeedChangedDuringPlayback] which updates the live audio player and
+  /// recomputes the countdown timer to stay in sync.
+  StreamSubscription<dynamic>? _speedWatchSubscription;
 
   // ── Preview speed ─────────────────────────────────────────────────────────
 
@@ -540,6 +559,13 @@ class PlanExecutionEngineImpl
     _cancelled = true;
     _status = ExecutionStatus.paused;
 
+    // Unblock a pending renderTTS race so the execution loop exits promptly
+    // instead of blocking until the HTTP call returns (which caused a 2-3 s
+    // delay on resume).
+    if (_stepCancelCompleter != null && !_stepCancelCompleter!.isCompleted) {
+      _stepCancelCompleter!.complete();
+    }
+
     // Unblock the WaitStep completer so the loop exits promptly.
     _waitCompleter?.complete();
     _waitCompleter = null;
@@ -637,6 +663,7 @@ class PlanExecutionEngineImpl
       _currentStepIndex++;
     }
     _waitStepElapsedMs = 0;
+    _stopSayStepPlaybackTimer();
 
     _emitState();
     await _persistState();
@@ -674,6 +701,7 @@ class PlanExecutionEngineImpl
 
     _currentStepIndex--;
     _waitStepElapsedMs = 0;
+    _stopSayStepPlaybackTimer();
 
     _emitState();
     await _persistState();
@@ -713,6 +741,7 @@ class PlanExecutionEngineImpl
     _flatSteps = [];
     _currentStepIndex = 0;
     _waitStepElapsedMs = 0;
+    _stopSayStepPlaybackTimer();
     _speedMultiplier = 1.0;
     _waitDeadline = null;
     _lastMidWaitPersistTime = null;
@@ -1034,12 +1063,6 @@ class PlanExecutionEngineImpl
       // timeout (up to 60 s).
       String? path;
       try {
-        // Start TTS rendering. If the step is cancelled while the network
-        // call is in-flight, we still wait for renderTTS to finish so that
-        // errors (SocketException, timeout, etc.) are surfaced and the
-        // fallback chain can run. Without this, cancellation would swallow
-        // the TTS error and skip the fallback entirely.
-        //
         // TTS mode toggle semantics: _ttsPlaybackMode() is read HERE, once
         // per step, at step-start time. If the user toggles the
         // NowPlayingTtsToggle while this step is executing, the change is
@@ -1049,27 +1072,39 @@ class PlanExecutionEngineImpl
         final ttsFuture =
             _ttsService.renderTTS(text, voiceId, _ttsPlaybackMode());
 
-        // Also listen for the cancel signal so we know if pause/stop/skip
-        // was requested, but do NOT let it short-circuit error handling.
-        var cancelled = false;
-        unawaited(
-          _stepCancelCompleter!.future.then((_) {
-            cancelled = true;
-          }),
-        );
+        // Race TTS rendering against the cancel signal so that pause/stop/skip
+        // unblock the loop immediately instead of waiting for the HTTP response
+        // (which could take seconds on a cache miss).
+        final ttsRaceCompleter = Completer<String?>();
+        unawaited(ttsFuture.then(
+          (result) {
+            if (!ttsRaceCompleter.isCompleted) {
+              ttsRaceCompleter.complete(result);
+            }
+          },
+          onError: (Object e, StackTrace st) {
+            if (!ttsRaceCompleter.isCompleted) {
+              ttsRaceCompleter.completeError(e, st);
+            }
+          },
+        ),);
+        unawaited(_stepCancelCompleter!.future.then((_) {
+          if (!ttsRaceCompleter.isCompleted) {
+            ttsRaceCompleter.complete(null);
+          }
+        },),);
 
         String? ttsResult;
         try {
           debugPrint('PlanExecutionEngine: [SAY] awaiting ttsFuture…');
-          ttsResult = await ttsFuture;
+          ttsResult = await ttsRaceCompleter.future;
           debugPrint('PlanExecutionEngine: [SAY] ttsFuture resolved OK');
         } catch (e) {
           debugPrint('PlanExecutionEngine: [SAY] ttsFuture threw ${e.runtimeType}: $e');
-          // debugger(message: 'ttsFuture THREW ${e.runtimeType} — cancelled=$_cancelled');
           rethrow;
         }
 
-        if (_cancelled || cancelled) return;
+        if (_cancelled) return;
         if (ttsResult == null) {
           // Platform mode returned null — use platform TTS fallback directly.
           _currentStepPhase = StepPhase.active;
@@ -1131,10 +1166,13 @@ class PlanExecutionEngineImpl
       debugPrint('PlanExecutionEngine: [SAY] playing voice — path=$path, speed=$speed');
       // debugger(message: 'BEFORE playVoice — path=$path, speed=$speed, cancelled=$_cancelled');
       try {
+        _startSayStepPlaybackTimer(speed: speed);
         await _audioEngine.playVoice(path, speed: speed);
+        _stopSayStepPlaybackTimer();
         debugPrint('PlanExecutionEngine: [SAY] playVoice completed');
         voicePlayedSuccessfully = true;
       } catch (e) {
+        _stopSayStepPlaybackTimer();
         debugPrint('PlanExecutionEngine: playVoice failed: $e');
         if (e is StoppedByUserException || _cancelled) {
           return;
@@ -1144,6 +1182,10 @@ class PlanExecutionEngineImpl
         voicePlayedSuccessfully = await _platformTtsFallback(text);
       }
     } finally {
+      // Stop the say-step progress timer on every exit path (normal
+      // completion, cancellation, error, fallback).
+      _stopSayStepPlaybackTimer();
+
       // Always clear the loading phase and notify the UI — without this the
       // Now Playing screen would stay stuck on the spinner if any code path
       // above returns early (e.g. _cancelled, fallback, error).
@@ -1185,7 +1227,14 @@ class PlanExecutionEngineImpl
           .getSingleOrNull();
       final speed = double.tryParse(rateRow?.value ?? '') ?? 1.0;
       debugPrint('PlanExecutionEngine: [FALLBACK] playing platform TTS file — path=$path, speed=$speed');
-      await _audioEngine.playVoice(path, speed: speed);
+      _startSayStepPlaybackTimer(speed: speed);
+      try {
+        await _audioEngine.playVoice(path, speed: speed);
+        _stopSayStepPlaybackTimer();
+      } catch (e) {
+        _stopSayStepPlaybackTimer();
+        rethrow;
+      }
       debugPrint('PlanExecutionEngine: [FALLBACK] platform TTS playback completed');
       return true;
     } catch (e) {
@@ -1222,6 +1271,128 @@ class PlanExecutionEngineImpl
       );
     }
     debugPrint('PlanExecutionEngine: [FALLBACK] done');
+  }
+
+  // ── Say step playback timer helpers ──────────────────────────────────────
+
+  /// Starts the periodic progress timer for Say step voice playback.
+  ///
+  /// [speed] is the playback rate passed to [AudioEngine.playVoice]. It is
+  /// used to convert the raw file duration (at 1×) to the effective wall-clock
+  /// duration so the countdown arc stays in sync with the audio at any speed.
+  ///
+  /// Captures [_sayStepPlaybackStartTime] and starts a 100 ms periodic timer
+  /// that emits [ExecutionState] updates so the UI countdown timer tracks
+  /// real playback progress.
+  ///
+  /// The actual voice file duration ([_currentSayStepActualDuration]) is
+  /// captured lazily on the first timer tick rather than immediately, because
+  /// [AudioEngine.currentVoiceDuration] is only available after `setFilePath`
+  /// completes inside [AudioEngine.playVoice] — which takes ~300 ms+ due to
+  /// ambient ducking before loading the file.
+  void _startSayStepPlaybackTimer({double speed = 1.0}) {
+    _currentSayStepSpeed = speed.clamp(0.5, 2.0);
+    _sayStepPlaybackStartTime = DateTime.now();
+    _currentSayStepActualDuration = null;
+
+    _sayStepProgressTimer?.cancel();
+    _sayStepProgressTimer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) {
+        // Capture the speed-adjusted voice file duration on the first tick
+        // where the raw duration becomes available. Dividing by speed converts
+        // the 1× file duration to the wall-clock time the audio actually takes,
+        // so elapsed wall-clock time tracks correctly against the countdown.
+        if (_currentSayStepActualDuration == null) {
+          final raw = _audioEngine.currentVoiceDuration;
+          if (raw != null) {
+            final adjustedMs =
+                (raw.inMilliseconds / _currentSayStepSpeed).round();
+            _currentSayStepActualDuration = Duration(milliseconds: adjustedMs);
+          }
+        }
+        _emitState();
+      },
+    );
+
+    // Subscribe to speech-rate changes so speed updates take effect in real
+    // time on the currently playing audio rather than only on the next step.
+    // Drift emits the current value immediately on subscription, so skip the
+    // first emission (which would always equal _currentSayStepSpeed).
+    var firstEmission = true;
+    _speedWatchSubscription?.cancel();
+    _speedWatchSubscription = (_db.select(_db.appSettingsTable)
+          ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
+        .watchSingleOrNull()
+        .listen((row) {
+      if (firstEmission) {
+        firstEmission = false;
+        return;
+      }
+      if (_cancelled) return;
+      final newSpeed = double.tryParse(row?.value ?? '') ?? 1.0;
+      if ((newSpeed - _currentSayStepSpeed).abs() < 0.01) return;
+      unawaited(_onSpeedChangedDuringPlayback(newSpeed));
+    });
+
+    _emitState();
+  }
+
+  /// Stops the Say step progress timer and clears playback tracking state.
+  void _stopSayStepPlaybackTimer() {
+    _sayStepProgressTimer?.cancel();
+    _sayStepProgressTimer = null;
+    _speedWatchSubscription?.cancel();
+    _speedWatchSubscription = null;
+    _sayStepPlaybackStartTime = null;
+    _sayStepElapsedBeforeCurrentPlayMs = 0;
+    _currentSayStepActualDuration = null;
+    _currentSayStepSpeed = 1.0;
+  }
+
+  /// Called when the user changes the speech-rate setting while a Say step
+  /// is actively playing voice audio.
+  ///
+  /// Updates the live audio player speed immediately (real-time effect) and
+  /// recomputes [_currentSayStepActualDuration] so the countdown timer stays
+  /// accurate at the new speed.
+  Future<void> _onSpeedChangedDuringPlayback(double newSpeed) async {
+    if (_cancelled) return;
+
+    // Apply the new speed to the live audio player immediately.
+    await _audioEngine.setVoiceSpeed(newSpeed);
+
+    // Recompute the countdown timer from the audio player's current position.
+    final position = _audioEngine.currentVoicePosition;
+    if (position != null && _currentSayStepActualDuration != null) {
+      // Freeze elapsed wall-clock time up to this moment.
+      var elapsedWcMs = _sayStepElapsedBeforeCurrentPlayMs;
+      if (_sayStepPlaybackStartTime != null) {
+        elapsedWcMs +=
+            DateTime.now().difference(_sayStepPlaybackStartTime!).inMilliseconds;
+      }
+
+      // Raw 1× file duration = speed-adjusted duration × old speed.
+      final rawDurationMs =
+          (_currentSayStepActualDuration!.inMilliseconds * _currentSayStepSpeed)
+              .round();
+
+      // Remaining audio content at 1× speed (position is always in 1× time).
+      final audioRemainingAt1xMs =
+          (rawDurationMs - position.inMilliseconds).clamp(0, rawDurationMs);
+
+      // Convert remaining 1× content to wall-clock time at the new speed.
+      final wallClockRemainingMs = audioRemainingAt1xMs / newSpeed;
+
+      // Reset elapsed tracking from now so the timer increments cleanly.
+      _sayStepElapsedBeforeCurrentPlayMs = elapsedWcMs;
+      _sayStepPlaybackStartTime = DateTime.now();
+      _currentSayStepActualDuration =
+          Duration(milliseconds: (elapsedWcMs + wallClockRemainingMs).round());
+    }
+
+    _currentSayStepSpeed = newSpeed;
+    _emitState();
   }
 
   Future<void> _executeNotifyStep({
@@ -1504,8 +1675,16 @@ class PlanExecutionEngineImpl
         if (_cancelled) break;
       }
 
-      // Update elapsed time for crash recovery and emit state.
-      _waitStepElapsedMs = numbersSpoken * intervalMs;
+      // Accumulate actual wall-clock time since the last checkpoint into
+      // _waitStepElapsedMs, then reset _waitStepStartTime. This avoids
+      // double-counting: _computeTimeRemaining adds _waitStepElapsedMs to the
+      // delta from _waitStepStartTime, so we must not set an absolute value
+      // here while _waitStepStartTime still points to the step start.
+      if (_waitStepStartTime != null) {
+        _waitStepElapsedMs +=
+            DateTime.now().difference(_waitStepStartTime!).inMilliseconds;
+        _waitStepStartTime = DateTime.now();
+      }
       _emitState();
 
       // Periodic persistence (same pattern as WaitStep).
@@ -1688,6 +1867,18 @@ class PlanExecutionEngineImpl
       return Duration(milliseconds: remainingMs);
     }
 
+    // Say step with active voice playback — compute from actual audio duration.
+    if (step is SayStep && _currentSayStepActualDuration != null) {
+      final totalMs = _currentSayStepActualDuration!.inMilliseconds;
+      var elapsed = _sayStepElapsedBeforeCurrentPlayMs;
+      if (_sayStepPlaybackStartTime != null) {
+        elapsed +=
+            DateTime.now().difference(_sayStepPlaybackStartTime!).inMilliseconds;
+      }
+      final remainingMs = (totalMs - elapsed).clamp(0, totalMs);
+      return Duration(milliseconds: remainingMs);
+    }
+
     return step.estimatedStepDuration;
   }
 
@@ -1696,7 +1887,15 @@ class PlanExecutionEngineImpl
   /// For timed steps ([WaitStep], [CountStep]) this is the total duration (not
   /// remaining time) so that [StepCountdownTimer] can compute a stable arc
   /// from `timeRemaining / currentStepDuration`.
-  Duration _computeStepDuration(PlanStep step) => step.estimatedStepDuration;
+  ///
+  /// For [SayStep]s with active voice playback, returns the actual audio file
+  /// duration so the countdown arc reflects real playback time.
+  Duration _computeStepDuration(PlanStep step) {
+    if (step is SayStep && _currentSayStepActualDuration != null) {
+      return _currentSayStepActualDuration!;
+    }
+    return step.estimatedStepDuration;
+  }
 
   /// Writes the current execution state to the [ExecutionStateTable].
   ///

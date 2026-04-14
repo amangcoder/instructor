@@ -1,0 +1,12 @@
+{
+  "name": "instructor",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --names kokoro,server --prefix-colors magenta,cyan --prefix '[{name}]' --kill-others 'cd kokoro-server && uvicorn main:app --host 127.0.0.1 --port 3070 --reload' 'cd server && pnpm run start:dev'",
+    "dev:server": "cd server && pnpm run start:dev",
+    "dev:kokoro": "cd kokoro-server && uvicorn main:app --host 127.0.0.1 --port 3070 --reload"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -16,10 +16,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:instructor/models/enums.dart';
+import 'package:instructor/models/plan.dart';
+import 'package:instructor/providers/auth_providers.dart';
+import 'package:instructor/providers/plan_providers.dart';
+import 'package:instructor/providers/settings_providers.dart';
+import 'package:instructor/providers/tts_providers.dart';
+import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/screens/settings/settings_screen.dart';
 import 'package:instructor/services/auth_service.dart';
-import 'package:instructor/providers/auth_providers.dart';
-import 'package:instructor/providers/tts_providers.dart';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -42,8 +47,15 @@ class _FakeAuthService implements AuthService {
       _isAuthenticated && _email != null ? AuthUser(id: 'u1', email: _email!) : null;
 
   @override
-  Stream<AuthState> get authStateStream =>
-      Stream.value(_isAuthenticated ? AuthenticatedState(user: getUser()!) : const UnauthenticatedState());
+  Stream<AuthState> get authStateStream => Stream.value(
+        _isAuthenticated
+            ? AuthenticatedState(user: getUser()!, accessToken: 'fake-access-token')
+            : const UnauthenticatedState(),
+      );
+
+  @override
+  Future<String?> getAccessToken() async =>
+      _isAuthenticated ? 'fake-access-token' : null;
 
   @override
   Future<void> requestOtp(String email) async {}
@@ -64,8 +76,69 @@ class _FakeAuthService implements AuthService {
 }
 
 // ---------------------------------------------------------------------------
+// Fake PlanRepository — returns empty streams, no database required.
+// ---------------------------------------------------------------------------
+
+class _FakePlanRepository implements PlanRepository {
+  @override
+  Stream<List<Plan>> watchUserPlans({
+    String? searchQuery,
+    PlanCategory? category,
+  }) =>
+      Stream.value(const []);
+
+  @override
+  Future<String> createPlan(Plan plan) async => plan.id;
+
+  @override
+  Future<void> updatePlan(String id, Plan plan) async {}
+
+  @override
+  Future<void> deletePlan(String id) async {}
+
+  @override
+  Future<Plan?> getPlanById(String id) async => null;
+
+  @override
+  Future<void> activatePlan(String id, {required String voice, required String locale, required String speechRate}) async {}
+
+  @override
+  Future<void> updateLastUsed(String id) async {}
+
+  @override
+  Future<int> remapPlanVoices(Map<String, String> voiceMap) async => 0;
+
+  @override
+  Future<void> refreshFromServer() async {}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Builds the full set of [Override]s required by [SettingsScreen].
+///
+/// Overrides auth, all SQLite-backed settings stream providers, the TTS voice
+/// providers, and the plan repository so no real database is needed in tests.
+List<Override> _buildOverrides(_FakeAuthService auth) {
+  return [
+    authServiceProvider.overrideWithValue(auth),
+    // Plan repository — no database
+    planRepositoryProvider.overrideWithValue(_FakePlanRepository()),
+    // Settings stream providers — emit safe defaults
+    themeModeSettingProvider.overrideWith((ref) => Stream.value(ThemeMode.system)),
+    speechRateSettingProvider.overrideWith((ref) => Stream.value(1.0)),
+    ambientVolumeSettingProvider.overrideWith((ref) => Stream.value(0.7)),
+    voiceVolumeSettingProvider.overrideWith((ref) => Stream.value(1.0)),
+    notificationSoundSettingProvider.overrideWith((ref) => Stream.value(true)),
+    vibrationSettingProvider.overrideWith((ref) => Stream.value(true)),
+    activityLevelSettingProvider.overrideWith((ref) => Stream.value('')),
+    profileGoalsSettingProvider.overrideWith((ref) => Stream.value(const [])),
+    // TTS providers
+    rawVoiceSettingProvider.overrideWith((ref) => Stream.value('af_heart')),
+    availableVoicesProvider.overrideWith((ref) async => const []),
+  ];
+}
 
 Widget _wrap(
   Widget widget, {
@@ -75,9 +148,7 @@ Widget _wrap(
   final fakeAuth = _FakeAuthService(authenticated: authenticated, email: userEmail);
 
   return ProviderScope(
-    overrides: [
-      authServiceProvider.overrideWithValue(fakeAuth),
-    ],
+    overrides: _buildOverrides(fakeAuth),
     child: MaterialApp(home: widget),
   );
 }
@@ -96,9 +167,7 @@ Widget _wrapWithRouter({
   );
 
   return ProviderScope(
-    overrides: [
-      authServiceProvider.overrideWithValue(fakeAuth),
-    ],
+    overrides: _buildOverrides(fakeAuth),
     child: MaterialApp.router(routerConfig: router),
   );
 }
@@ -116,46 +185,44 @@ void main() {
       expect(find.textContaining('user@example.com', findRichText: true), findsAtLeastNWidgets(1));
     });
 
-    testWidgets('shows Logout button when authenticated', (tester) async {
+    testWidgets('shows Log Out button when authenticated', (tester) async {
       await tester.pumpWidget(_wrap(const SettingsScreen()));
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(ElevatedButton, 'Logout'),
+        find.text('Log Out'),
         findsAtLeastNWidgets(1),
       );
     });
 
-    testWidgets('shows Login button when not authenticated', (tester) async {
+    testWidgets('shows Log In button when not authenticated', (tester) async {
       await tester.pumpWidget(_wrap(const SettingsScreen(), authenticated: false, userEmail: null));
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(ElevatedButton, 'Login'),
+        find.text('Log In'),
         findsAtLeastNWidgets(1),
       );
     });
 
-    testWidgets('does not show Logout when not authenticated', (tester) async {
+    testWidgets('does not show Log Out when not authenticated', (tester) async {
       await tester.pumpWidget(_wrap(const SettingsScreen(), authenticated: false, userEmail: null));
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(ElevatedButton, 'Logout'), findsNothing);
+      expect(find.widgetWithText(OutlinedButton, 'Log Out'), findsNothing);
     });
 
-    testWidgets('Logout button calls AuthService.logout', (tester) async {
+    testWidgets('Log Out button calls AuthService.logout', (tester) async {
       final fakeAuth = _FakeAuthService();
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [
-            authServiceProvider.overrideWithValue(fakeAuth),
-          ],
+          overrides: _buildOverrides(fakeAuth),
           child: const MaterialApp(home: SettingsScreen()),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Logout'));
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Log Out'));
       await tester.pumpAndSettle();
 
       expect(fakeAuth.logoutCount, 1);

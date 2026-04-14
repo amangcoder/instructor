@@ -124,7 +124,7 @@ class _FakePlanApiService implements PlanApiService {
       throw UnimplementedError('not used in audio download tests');
 
   @override
-  Future<void> activatePlan(String planId) =>
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) =>
       throw UnimplementedError('not used in audio download tests');
 
   @override
@@ -755,7 +755,7 @@ class _RefreshingFakePlanApiService implements PlanApiService {
   Future<void> deletePlan(String id) => throw UnimplementedError();
 
   @override
-  Future<void> activatePlan(String planId) => throw UnimplementedError();
+  Future<void> activatePlan(String planId, {required String voice, required String locale, required String speechRate}) => throw UnimplementedError();
 
   @override
   Future<List<LibraryPlanSummary>> fetchLibraryPlans({

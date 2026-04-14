@@ -9,15 +9,47 @@ class AuthUser {
   const AuthUser({
     required this.id,
     required this.email,
+    this.name,
+    this.username,
+    this.photoUrl,
   });
 
   final String id;
   final String email;
 
+  /// Display name set by the user (optional).
+  final String? name;
+
+  /// Unique username (alphanumeric + underscores, optional).
+  final String? username;
+
+  /// URL of the user's profile photo (optional).
+  final String? photoUrl;
+
+  /// Returns [name] if set, otherwise [username], otherwise [email].
+  String get displayName => name ?? username ?? email;
+
   factory AuthUser.fromJson(Map<String, dynamic> json) {
     return AuthUser(
       id: json['id']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
+      name: json['name']?.toString(),
+      username: json['username']?.toString(),
+      photoUrl: json['photoUrl']?.toString(),
+    );
+  }
+
+  AuthUser copyWith({
+    String? name,
+    String? username,
+    String? photoUrl,
+  }) {
+    return AuthUser(
+      id: id,
+      email: email,
+      name: name ?? this.name,
+      username: username ?? this.username,
+      photoUrl: photoUrl ?? this.photoUrl,
     );
   }
 }

@@ -63,7 +63,7 @@ export class TtsEnumerationService {
 
     for (const step of steps) {
       const s = step as Record<string, unknown>;
-      const type = (s['type'] as string | undefined)?.toLowerCase();
+      const type = (s['runtimeType'] as string | undefined)?.toLowerCase();
 
       if (type === 'say') {
         // SayStep: { type: 'say', text: string }
