@@ -7,7 +7,7 @@ part of 'plan.dart';
 // **************************************************************************
 
 _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
-      id: (json['id'] as num).toInt(),
+      id: json['id'] as String,
       name: json['name'] as String,
       description: json['description'] as String?,
       category: $enumDecodeNullable(_$PlanCategoryEnumMap, json['category']) ??
@@ -25,7 +25,10 @@ _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
       lastUsedAt: json['lastUsedAt'] == null
           ? null
           : DateTime.parse(json['lastUsedAt'] as String),
-      isUserCreated: json['isUserCreated'] as bool? ?? true,
+      isActive: json['isActive'] as bool? ?? false,
+      ttsStatus: json['ttsStatus'] as String? ?? 'none',
+      ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? 0,
+      ttsCompleted: (json['ttsCompleted'] as num?)?.toInt() ?? 0,
     );
 
 Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
@@ -40,7 +43,10 @@ Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
       'createdAt': instance.createdAt.toIso8601String(),
       'updatedAt': instance.updatedAt.toIso8601String(),
       'lastUsedAt': instance.lastUsedAt?.toIso8601String(),
-      'isUserCreated': instance.isUserCreated,
+      'isActive': instance.isActive,
+      'ttsStatus': instance.ttsStatus,
+      'ttsTotal': instance.ttsTotal,
+      'ttsCompleted': instance.ttsCompleted,
     };
 
 const _$PlanCategoryEnumMap = {

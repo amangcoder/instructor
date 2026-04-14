@@ -1,8 +1,21 @@
-import { Controller, Post, Get, Body, Req, UseGuards, Logger, HttpCode } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Delete,
+  Body,
+  Req,
+  Param,
+  UseGuards,
+  Logger,
+  HttpCode,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { PlansService } from './plans.service';
 import { GeneratePlanDto } from './dto/generate-plan.dto';
 import { SavePlanDto } from './dto/save-plan.dto';
+import { ActivatePlanDto } from './dto/activate-plan.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { JwtPayload } from '../auth/auth.service';
 
@@ -62,14 +75,47 @@ export class PlansController {
   }
 
   /**
+   * POST /api/plans/activate
+   * Activates a plan for the authenticated user, setting voice quality.
+   * For studio quality, triggers TTS pre-generation (ttsStatus → pending).
+   * SECURITY: planId ownership verified against JWT userId.
+   */
+  @Post('activate')
+  @HttpCode(200)
+  async activate(
+    @Req() req: Request,
+    @Body() dto: ActivatePlanDto,
+  ): Promise<{ success: boolean }> {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(
+      `POST /plans/activate — userId=${user.sub}, planId=${dto.planId}, voiceQuality=${dto.voiceQuality}`,
+    );
+    await this.plansService.activatePlan(user.sub, dto.planId, dto.voiceQuality);
+    return { success: true };
+  }
+
+  /**
    * GET /api/plans/list
    * Returns all plan summaries for the authenticated user.
    * Only returns plans owned by the JWT user (userId isolation enforced).
+   * Includes TTS status fields per REQ-030.
    */
   @Get('list')
   async list(
     @Req() req: Request,
-  ): Promise<{ plans: Array<{ planId: string; name: string; createdAt: string; updatedAt: string }> }> {
+  ): Promise<{
+    plans: Array<{
+      planId: string;
+      name: string;
+      isActive: boolean;
+      ttsStatus: string;
+      ttsCompleted: number;
+      ttsTotal: number;
+      voiceQuality: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  }> {
     const user = (req as any).user as JwtPayload;
     this.logger.log(`GET /plans/list — userId=${user.sub}`);
     const result = await this.plansService.listPlans(user.sub);
@@ -77,9 +123,61 @@ export class PlansController {
       plans: result.plans.map((p) => ({
         planId: p.planId,
         name: p.name,
+        isActive: p.isActive,
+        ttsStatus: p.ttsStatus,
+        ttsCompleted: p.ttsCompleted,
+        ttsTotal: p.ttsTotal,
+        voiceQuality: p.voiceQuality,
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       })),
     };
+  }
+
+  /**
+   * GET /api/plans/:id
+   * Returns a single plan by ID for the authenticated user (IDOR-safe).
+   */
+  @Get(':id')
+  async getById(
+    @Req() req: Request,
+    @Param('id') planId: string,
+  ) {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`GET /plans/${planId} — userId=${user.sub}`);
+    const plan = await this.plansService.getPlanById(user.sub, planId);
+    if (!plan) {
+      throw new NotFoundException(`Plan ${planId} not found`);
+    }
+    return {
+      planId: plan.planId,
+      name: plan.name,
+      planJson: plan.planJson,
+      isActive: plan.isActive,
+      ttsStatus: plan.ttsStatus,
+      ttsCompleted: plan.ttsCompleted,
+      ttsTotal: plan.ttsTotal,
+      voiceQuality: plan.voiceQuality,
+      sourceLibraryPlanId: plan.sourceLibraryPlanId,
+      createdAt: plan.createdAt.toISOString(),
+      updatedAt: plan.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * DELETE /api/plans/:id
+   * Deletes a plan for the authenticated user. Cascades to tts_jobs.
+   * SECURITY: userId check prevents deleting another user's plan.
+   */
+  @Delete(':id')
+  @HttpCode(200)
+  async deleteById(
+    @Req() req: Request,
+    @Param('id') planId: string,
+  ): Promise<{ success: boolean }> {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`DELETE /plans/${planId} — userId=${user.sub}`);
+    await this.plansService.deletePlan(user.sub, planId);
+    return { success: true };
   }
 }

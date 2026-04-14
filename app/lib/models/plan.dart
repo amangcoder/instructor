@@ -15,7 +15,7 @@ class Plan with _$Plan {
 
   @Assert("defaultVoice != ''", 'defaultVoice must not be empty')
   const factory Plan({
-    required int id,
+    required String id,
     required String name,
     String? description,
     @Default(PlanCategory.custom) PlanCategory category,
@@ -25,11 +25,19 @@ class Plan with _$Plan {
     required DateTime createdAt,
     required DateTime updatedAt,
     DateTime? lastUsedAt,
-    /// Whether this plan was created by the user.
+    /// Whether this plan currently has an active GenAI TTS generation job.
+    @Default(false) bool isActive,
+
+    /// The current TTS generation status for this plan.
     ///
-    /// Seeded starter plans have [isUserCreated]=false; every plan created
-    /// through the editor defaults to true.
-    @Default(true) bool isUserCreated,
+    /// One of: none | pending | processing | completed | partial | failed.
+    @Default('none') String ttsStatus,
+
+    /// Total number of TTS audio segments to generate for this plan.
+    @Default(0) int ttsTotal,
+
+    /// Number of TTS audio segments that have been generated so far.
+    @Default(0) int ttsCompleted,
   }) = _Plan;
 
   factory Plan.fromJson(Map<String, dynamic> json) => _$PlanFromJson(json);

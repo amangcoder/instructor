@@ -39,14 +39,13 @@ Plan _makePlan({
 }) {
   final now = DateTime.now();
   return Plan(
-    id: 0, // placeholder — replaced by auto-increment on insert
+    id: '', // empty → createPlan will assign a new UUID
     name: name,
     description: description,
     category: PlanCategory.custom,
     steps: steps,
     createdAt: now,
     updatedAt: now,
-    isUserCreated: true,
   );
 }
 
@@ -71,10 +70,11 @@ void main() {
   // ── New-plan save flow ────────────────────────────────────────────────────
 
   group('new plan save flow', () {
-    test('createPlan returns a positive ID', () async {
+    test('createPlan returns a non-empty String UUID', () async {
       final plan = _makePlan(name: 'Morning Routine');
       final id = await repo.createPlan(plan);
-      expect(id, isPositive);
+      expect(id, isA<String>());
+      expect(id, isNotEmpty);
     });
 
     test('newly created plan is retrievable by ID', () async {
@@ -85,13 +85,16 @@ void main() {
       expect(saved, isNotNull);
       expect(saved!.name, 'Test Plan');
       expect(saved.description, 'desc');
-      expect(saved.isUserCreated, isTrue);
+      expect(saved.id, id);
     });
 
     test('steps are persisted on createPlan', () async {
-      final steps = [
-        const SayStep(text: 'Hello world', durationSec: 5),
-        const TimerStep(durationSec: 30),
+      const steps = [
+        PlanStep.say(
+            id: 's1',
+            text: 'Hello world',
+            estimatedDuration: Duration(seconds: 5)),
+        PlanStep.wait(id: 't1', duration: Duration(seconds: 30)),
       ];
       final plan = _makePlan(name: 'Plan With Steps', steps: steps);
       final id = await repo.createPlan(plan);
@@ -100,7 +103,8 @@ void main() {
       expect(saved, isNotNull);
       expect(saved!.steps, hasLength(2));
       expect((saved.steps[0] as SayStep).text, 'Hello world');
-      expect((saved.steps[1] as TimerStep).durationSec, 30);
+      expect((saved.steps[1] as WaitStep).duration,
+          const Duration(seconds: 30));
     });
   });
 
@@ -122,19 +126,26 @@ void main() {
         'createPlan → updatePlan with modified steps → getPlanById '
         'confirms all modifications persisted correctly', () async {
       // Step 1: create with initial steps.
-      final initial = _makePlan(
-        name: 'Workout Plan',
-        steps: [const TimerStep(durationSec: 60)],
+      const initial = [
+        PlanStep.wait(id: 't1', duration: Duration(seconds: 60)),
+      ];
+      final id = await repo.createPlan(
+        _makePlan(name: 'Workout Plan', steps: initial),
       );
-      final id = await repo.createPlan(initial);
 
       // Step 2: modify steps and update.
       final saved = await repo.getPlanById(id);
       final modified = saved!.copyWith(
-        steps: [
-          const SayStep(text: 'Begin warmup', durationSec: 10),
-          const TimerStep(durationSec: 300),
-          const SayStep(text: 'Cool down', durationSec: 10),
+        steps: const [
+          PlanStep.say(
+              id: 's1',
+              text: 'Begin warmup',
+              estimatedDuration: Duration(seconds: 10)),
+          PlanStep.wait(id: 't2', duration: Duration(seconds: 300)),
+          PlanStep.say(
+              id: 's2',
+              text: 'Cool down',
+              estimatedDuration: Duration(seconds: 10)),
         ],
       );
       await repo.updatePlan(id, modified);
@@ -144,7 +155,8 @@ void main() {
       expect(result, isNotNull);
       expect(result!.steps, hasLength(3));
       expect((result.steps[0] as SayStep).text, 'Begin warmup');
-      expect((result.steps[1] as TimerStep).durationSec, 300);
+      expect((result.steps[1] as WaitStep).duration,
+          const Duration(seconds: 300));
       expect((result.steps[2] as SayStep).text, 'Cool down');
     });
 
@@ -153,7 +165,9 @@ void main() {
         _makePlan(
           name: 'Yoga Flow',
           description: 'Original description',
-          steps: [const TimerStep(durationSec: 20)],
+          steps: const [
+            PlanStep.wait(id: 't1', duration: Duration(seconds: 20)),
+          ],
         ),
       );
 
@@ -196,13 +210,59 @@ void main() {
       expect(list.any((p) => p.name == 'Plan X'), isTrue);
     });
 
-    test('user-created plan appears in watchUserPlans', () async {
+    test('created plan appears in watchUserPlans', () async {
       final id = await repo.createPlan(
         _makePlan(name: 'My Plan'),
       );
 
       final userPlans = await repo.watchUserPlans().first;
       expect(userPlans.any((p) => p.id == id), isTrue);
+    });
+  });
+
+  // ── TTS fields ────────────────────────────────────────────────────────────
+
+  group('TTS fields persistence', () {
+    test('isActive, ttsStatus, ttsTotal, ttsCompleted round-trip', () async {
+      final now = DateTime.now();
+      final plan = Plan(
+        id: '',
+        name: 'TTS Plan',
+        createdAt: now,
+        updatedAt: now,
+        isActive: true,
+        ttsStatus: 'processing',
+        ttsTotal: 20,
+        ttsCompleted: 5,
+      );
+      final id = await repo.createPlan(plan);
+
+      final saved = await repo.getPlanById(id);
+      expect(saved!.isActive, isTrue);
+      expect(saved.ttsStatus, 'processing');
+      expect(saved.ttsTotal, 20);
+      expect(saved.ttsCompleted, 5);
+    });
+
+    test('updatePlan persists updated TTS fields', () async {
+      final id = await repo.createPlan(_makePlan(name: 'Plan TTS'));
+      final plan = await repo.getPlanById(id);
+
+      await repo.updatePlan(
+        id,
+        plan!.copyWith(
+          isActive: true,
+          ttsStatus: 'completed',
+          ttsTotal: 8,
+          ttsCompleted: 8,
+        ),
+      );
+
+      final result = await repo.getPlanById(id);
+      expect(result!.isActive, isTrue);
+      expect(result.ttsStatus, 'completed');
+      expect(result.ttsTotal, 8);
+      expect(result.ttsCompleted, 8);
     });
   });
 }

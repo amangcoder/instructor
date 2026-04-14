@@ -6,6 +6,9 @@ import {
   Res,
   Headers,
   Query,
+  Param,
+  Req,
+  UseGuards,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -13,10 +16,12 @@ import type { Response } from 'express';
 import type { Request } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { TtsService } from './tts.service';
+import { TtsPregenService } from './tts-pregen.service';
 import { ProviderRegistryService } from './providers/provider-registry.service';
 import { SynthesizeDto } from './dto/synthesize.dto';
 import { JwtService } from '@nestjs/jwt';
-import { extractBearer } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { JwtPayload } from '../auth/auth.service';
 
 /** Maximum time (ms) allowed for a single synthesis request. */
 const SYNTHESIS_TIMEOUT_MS = 90_000;
@@ -34,6 +39,7 @@ export class TtsController {
 
   constructor(
     private readonly ttsService: TtsService,
+    private readonly ttsPregenService: TtsPregenService,
     private readonly providerRegistry: ProviderRegistryService,
     private readonly jwt: JwtService,
   ) {}
@@ -80,7 +86,7 @@ export class TtsController {
   ): Promise<void> {
     const provider = dto.provider ?? 'gemini';
     this.logger.log(
-      `POST /synthesize — voice=${dto.voice}, locale=${dto.locale}, provider=${provider}, text="${dto.text?.slice(0, 60)}…"`,
+      `POST /synthesize — voice=${dto.voice}, locale=${dto.locale}, provider=${provider}, textLength=${dto.text?.length ?? 0}`,
     );
 
     // ── Auth: JWT Bearer OR x-api-key ─────────────────────────────────────
@@ -161,6 +167,39 @@ export class TtsController {
       'Content-Length': audio.length.toString(),
     });
     res.send(audio);
+  }
+
+  /**
+   * GET /api/tts/status/:planId
+   * Returns TTS pre-generation status for a plan (REQ-011).
+   * Requires JWT authentication. IDOR: planId is validated server-side but
+   * since status is read-only and contains no sensitive data, we only require JWT.
+   */
+  @Get('status/:planId')
+  @UseGuards(JwtAuthGuard)
+  async getTtsStatus(
+    @Param('planId') planId: string,
+    @Req() _req: Request,
+  ) {
+    this.logger.log(`GET /tts/status/${planId}`);
+    return this.ttsPregenService.getStatus(planId);
+  }
+
+  /**
+   * GET /api/tts/audio-urls/:planId
+   * Returns pre-signed S3 audio URLs for all completed TTS jobs of a plan (REQ-012).
+   * Requires JWT authentication.
+   * Response: { urls: { [cacheKey]: presignedUrl } }
+   */
+  @Get('audio-urls/:planId')
+  @UseGuards(JwtAuthGuard)
+  async getAudioUrls(
+    @Param('planId') planId: string,
+    @Req() _req: Request,
+  ) {
+    this.logger.log(`GET /tts/audio-urls/${planId}`);
+    const urls = await this.ttsPregenService.getAudioUrls(planId);
+    return { urls };
   }
 
   // ── Auth helper ───────────────────────────────────────────────────────────

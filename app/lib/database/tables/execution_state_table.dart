@@ -13,8 +13,8 @@ class ExecutionStateTable extends Table {
 
   IntColumn get id => integer().autoIncrement()();
 
-  IntColumn get planId =>
-      integer().references(PlansTable, #id, onDelete: KeyAction.cascade)();
+  TextColumn get planId =>
+      text().references(PlansTable, #id, onDelete: KeyAction.cascade)();
 
   /// Index into the Plan's flattened step list.
   IntColumn get currentStepIndex => integer().withDefault(const Constant(0))();

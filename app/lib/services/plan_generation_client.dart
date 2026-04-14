@@ -147,7 +147,7 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
     );
 
     return Plan(
-      id: 0, // temporary — assigned on save
+      id: '', // temporary — assigned on save
       name: json['name']?.toString() ?? 'Untitled Plan',
       description: json['description']?.toString(),
       category: category,

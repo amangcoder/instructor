@@ -83,6 +83,26 @@ abstract final class AppSettingsKeys {
   /// The selected TTS provider identifier (always 'kokoro').
   static const String ttsProvider = 'tts_provider';
 
+  // ── Migration Flags ─────────────────────────────────────────────────────
+
+  /// Set to `'true'` once the v2 plan migration (int id → String UUID) has
+  /// been applied to the local SQLite database.
+  ///
+  /// Defaults to `'false'` when absent.
+  static const String plansMigratedV2 = 'plans_migrated_v2';
+
+  /// Temporary storage for pre-v6 user plans captured during the schema
+  /// migration before the plans table is dropped.
+  ///
+  /// Contains a JSON-encoded `List<Map<String, dynamic>>` where each entry
+  /// is a raw SQLite row from the old plans table. Populated by the Drift
+  /// [onUpgrade] callback and consumed (then cleared) by the
+  /// [_migratePlansToServer] helper in `main.dart`.
+  ///
+  /// The key is cleared (set to empty string) after a successful upload.
+  /// If the key is absent or empty, there are no plans pending migration.
+  static const String pendingMigrationPlans = '_pending_migration_plans';
+
   // ── Sync Metadata ───────────────────────────────────────────────────────
 
   /// ISO-8601 timestamp string of the last successful database sync to S3.
@@ -97,8 +117,8 @@ abstract final class AppSettingsKeys {
 
   /// SHA-256 hex digest of the last uploaded database file.
   ///
-  /// Used by [SyncService] to avoid redundant uploads when the file hasn't
-  /// changed since the last sync.
+  /// Used to avoid redundant uploads when the file hasn't changed since the
+  /// last sync.
   static const String lastSyncHash = 'last_sync_hash';
 }
 
@@ -195,6 +215,19 @@ class AppSettings {
   /// Marks starter plans as seeded.
   Future<void> setHasSeededStarterPlans() =>
       write(AppSettingsKeys.hasSeededStarterPlans, 'true');
+
+  /// Returns `true` when the v2 plan migration (int id → String UUID) has
+  /// already been applied to the local SQLite database.
+  ///
+  /// Defaults to `false` when the key is absent.
+  Future<bool> plansMigratedV2() async {
+    final val = await read(AppSettingsKeys.plansMigratedV2);
+    return val == 'true';
+  }
+
+  /// Marks the v2 plan migration as completed.
+  Future<void> setPlansMigratedV2() =>
+      write(AppSettingsKeys.plansMigratedV2, 'true');
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -34,7 +34,7 @@ class TtsCacheTable extends Table {
   IntColumn get fileSizeBytes => integer().withDefault(const Constant(0))();
 
   /// Optional reference back to the owning Plan for bulk cache eviction.
-  IntColumn get planId => integer()
+  TextColumn get planId => text()
       .nullable()
       .references(PlansTable, #id, onDelete: KeyAction.setNull)();
 

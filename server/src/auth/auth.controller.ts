@@ -47,13 +47,24 @@ export class AuthController {
   /**
    * POST /api/auth/request-otp
    * Sends a 6-digit OTP to the given email.
-   * Rate-limited: 3 requests per email per 5 minutes.
+   * Rate-limited: 3 requests per email per 5 minutes AND 10 per IP per hour.
    */
   @Post('request-otp')
   @HttpCode(200)
-  async requestOtp(@Body() dto: RequestOtpDto): Promise<{ message: string }> {
+  async requestOtp(
+    @Body() dto: RequestOtpDto,
+    @Req() req: Request,
+  ): Promise<{ message: string }> {
+    // Extract client IP from x-forwarded-for (populated by API Gateway/CloudFront).
+    // Fall back to socket remoteAddress for local development.
+    const ip =
+      ((req as any).headers['x-forwarded-for'] as string | undefined)
+        ?.split(',')[0]
+        ?.trim() ??
+      (req as any).socket?.remoteAddress ??
+      'unknown';
     this.logger.log(`POST /auth/request-otp — email=${dto.email}`);
-    return this.authService.requestOtp(dto.email);
+    return this.authService.requestOtp(dto.email, ip);
   }
 
   /**

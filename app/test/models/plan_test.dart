@@ -7,7 +7,7 @@ void main() {
   final now = DateTime(2025, 1, 1, 12);
 
   Plan makePlan({
-    int id = 1,
+    String id = 'plan-1',
     String name = 'Test Plan',
     String? description,
     PlanCategory category = PlanCategory.custom,
@@ -35,7 +35,7 @@ void main() {
   group('Plan model (REQ-005)', () {
     test('creates with required fields', () {
       final plan = makePlan();
-      expect(plan.id, equals(1));
+      expect(plan.id, equals('plan-1'));
       expect(plan.name, equals('Test Plan'));
       expect(plan.description, isNull);
       expect(plan.category, equals(PlanCategory.custom));
@@ -88,6 +88,102 @@ void main() {
       ];
       final plan = makePlan(steps: steps);
       expect(plan.steps, equals(steps));
+    });
+
+    // REQ-001: Plan.id is String
+    test('id is String type', () {
+      final plan = makePlan(id: 'uuid-abc-123');
+      expect(plan.id, isA<String>());
+      expect(plan.id, equals('uuid-abc-123'));
+    });
+  });
+
+  group('Plan TTS fields (REQ-002)', () {
+    test('isActive defaults to false', () {
+      final plan = makePlan();
+      expect(plan.isActive, isFalse);
+    });
+
+    test('ttsStatus defaults to none', () {
+      final plan = makePlan();
+      expect(plan.ttsStatus, equals('none'));
+    });
+
+    test('ttsTotal defaults to 0', () {
+      final plan = makePlan();
+      expect(plan.ttsTotal, equals(0));
+    });
+
+    test('ttsCompleted defaults to 0', () {
+      final plan = makePlan();
+      expect(plan.ttsCompleted, equals(0));
+    });
+
+    test('copyWith updates isActive', () {
+      final plan = makePlan();
+      final active = plan.copyWith(isActive: true);
+      expect(active.isActive, isTrue);
+    });
+
+    test('copyWith updates ttsStatus to all valid values', () {
+      final plan = makePlan();
+      for (final status in [
+        'none',
+        'pending',
+        'processing',
+        'completed',
+        'partial',
+        'failed',
+      ]) {
+        final updated = plan.copyWith(ttsStatus: status);
+        expect(updated.ttsStatus, equals(status));
+      }
+    });
+
+    test('copyWith updates ttsTotal and ttsCompleted', () {
+      final plan = makePlan();
+      final updated = plan.copyWith(ttsTotal: 10, ttsCompleted: 7);
+      expect(updated.ttsTotal, equals(10));
+      expect(updated.ttsCompleted, equals(7));
+    });
+
+    test('TTS fields round-trip through JSON', () {
+      const now = Duration.zero;
+      final plan = Plan(
+        id: 'plan-tts-1',
+        name: 'TTS Plan',
+        createdAt: DateTime(2025),
+        updatedAt: DateTime(2025),
+        isActive: true,
+        ttsStatus: 'processing',
+        ttsTotal: 20,
+        ttsCompleted: 5,
+      );
+      final json = plan.toJson();
+      expect(json['isActive'], isTrue);
+      expect(json['ttsStatus'], equals('processing'));
+      expect(json['ttsTotal'], equals(20));
+      expect(json['ttsCompleted'], equals(5));
+
+      final roundTripped = Plan.fromJson(json);
+      expect(roundTripped.isActive, isTrue);
+      expect(roundTripped.ttsStatus, equals('processing'));
+      expect(roundTripped.ttsTotal, equals(20));
+      expect(roundTripped.ttsCompleted, equals(5));
+    });
+
+    test('TTS fields parse with missing keys (use defaults)', () {
+      final json = {
+        'id': 'plan-defaults',
+        'name': 'Default TTS',
+        'createdAt': DateTime(2025).toIso8601String(),
+        'updatedAt': DateTime(2025).toIso8601String(),
+      };
+      final plan = Plan.fromJson(json);
+      expect(plan.isActive, isFalse);
+      expect(plan.ttsStatus, equals('none'));
+      expect(plan.ttsTotal, equals(0));
+      expect(plan.ttsCompleted, equals(0));
     });
   });
 
@@ -263,7 +359,7 @@ void main() {
   group('Plan JSON serialization', () {
     test('round-trips with all fields', () {
       final plan = makePlan(
-        id: 42,
+        id: 'plan-42',
         name: 'Morning Yoga',
         description: 'A calming 10 minute yoga session',
         category: PlanCategory.yoga,
@@ -296,7 +392,7 @@ void main() {
 
     test('round-trips with all six step types', () {
       final plan = makePlan(
-        id: 10,
+        id: 'plan-10',
         name: 'All Types Plan',
         steps: const [
           PlanStep.say(
@@ -324,7 +420,7 @@ void main() {
 
     test('round-trips with 3-level nested RepeatStep', () {
       final plan = makePlan(
-        id: 99,
+        id: 'plan-99',
         name: 'Triple Nested',
         steps: const [
           PlanStep.repeat(

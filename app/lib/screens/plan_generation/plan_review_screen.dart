@@ -8,7 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
-import 'package:instructor/repositories/plan_repository.dart';
+import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/router.dart';
 import 'plan_generation_screen.dart';
 import 'widgets/step_editor.dart';
@@ -35,7 +35,7 @@ class _PlanReviewScreenState extends ConsumerState<PlanReviewScreen> {
     super.initState();
     _plan = widget.payload?.plan ??
         Plan(
-          id: 0,
+          id: '',
           name: 'Untitled Plan',
           steps: const [],
           createdAt: DateTime.now(),

@@ -10,16 +10,14 @@ import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/providers/execution_providers.dart';
-import 'package:instructor/repositories/plan_repository.dart';
+import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
-import 'package:instructor/services/provider_catalog_manager.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/theme/app_branding.dart';
 import 'package:instructor/theme/gradient_button.dart';
 import 'package:instructor/widgets/active_session_dialog.dart';
-import 'package:instructor/widgets/voice_validation_dialog.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'widgets/plan_metadata_sheet.dart';
@@ -47,7 +45,7 @@ class PlanEditorScreen extends ConsumerStatefulWidget {
   const PlanEditorScreen({super.key, this.planId});
 
   /// When non-null the editor loads this Plan for editing.
-  final int? planId;
+  final String? planId;
 
   @override
   ConsumerState<PlanEditorScreen> createState() => _PlanEditorScreenState();
@@ -335,7 +333,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
 
     final now = DateTime.now();
     final plan = Plan(
-      id: widget.planId ?? 0,
+      id: widget.planId ?? '',
       name: _name.trim().isEmpty ? 'Preview' : _name.trim(),
       description: _description.trim().isEmpty ? null : _description.trim(),
       category: _category,
@@ -374,7 +372,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
 
     final now = DateTime.now();
     final plan = Plan(
-      id: widget.planId ?? 0,
+      id: widget.planId ?? '',
       name: _name.trim().isEmpty ? 'Plan' : _name.trim(),
       description: _description.trim().isEmpty ? null : _description.trim(),
       category: _category,
@@ -419,171 +417,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       _downloadTotal = 0;
       _downloadComplete = false;
     });
-    try {
-      final tts = ref.read(ttsServiceProvider);
-      final now = DateTime.now();
-      final plan = Plan(
-        id: widget.planId ?? 0,
-        name: _name.trim().isEmpty ? 'Download' : _name.trim(),
-        description:
-            _description.trim().isEmpty ? null : _description.trim(),
-        category: _category,
-        tags: List<String>.unmodifiable(_tags),
-        defaultVoice: _defaultVoice,
-        steps: List<PlanStep>.unmodifiable(_steps),
-        createdAt: _originalCreatedAt ?? now,
-        updatedAt: now,
-        lastUsedAt: _originalLastUsedAt,
-      );
-      await tts.preRenderPlan(
-        plan,
-        onProgress: (completed, total) {
-          if (mounted) {
-            setState(() {
-              _downloadedCount = completed;
-              _downloadTotal = total;
-            });
-          }
-        },
-      );
-      if (mounted) {
-        // Transition to checkmark state.
-        _downloadCompleteTimer?.cancel();
-        setState(() {
-          _isDownloading = false;
-          _downloadComplete = true;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('All voices downloaded ✓')),
-        );
-        // Revert to download icon after 2 seconds.
-        _downloadCompleteTimer = Timer(const Duration(seconds: 2), () {
-          if (mounted) setState(() => _downloadComplete = false);
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isDownloading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Voice download failed: $e')),
-        );
-      }
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Voice validation
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /// Collects all unique voice IDs referenced in the plan (default voice +
-  /// any per-step [SayStep.voiceId] overrides, recursing into RepeatSteps).
-  Set<String> _collectPlanVoiceIds(List<PlanStep> steps, String defaultVoice) {
-    final ids = <String>{defaultVoice};
-    void recurse(List<PlanStep> ss) {
-      for (final s in ss) {
-        switch (s) {
-          case SayStep(:final voiceId) when voiceId != null:
-            ids.add(voiceId);
-          case RepeatStep(:final children):
-            recurse(children);
-          default:
-            break;
-        }
-      }
-    }
-
-    recurse(steps);
-    return ids;
-  }
-
-  /// Validates all voices in the current plan against the current TTS provider.
-  ///
-  /// Shows [showVoiceValidationDialog] for the first invalid voice found.
-  /// - Returns `true` when all voices are valid (or the user resolved every
-  ///   mismatch by selecting a replacement voice and [_defaultVoice] has been
-  ///   updated accordingly).
-  /// - Returns `false` when the user cancels the dialog — the caller should
-  ///   abort the save entirely (plan not modified, synthesis skipped).
-  Future<bool> _validateVoicesBeforeSave() async {
-    if (!mounted) return true;
-
-    // Read the current provider from app settings.
-    final settings = ref.read(appSettingsProvider);
-    final rawProvider = await settings.read(AppSettingsKeys.ttsProvider);
-    final providerId =
-        (rawProvider?.isNotEmpty == true) ? rawProvider! : 'kokoro';
-
-    // Provider-label map for human-friendly dialog message.
-    const providerLabels = <String, String>{
-      'kokoro': 'Kokoro',
-      'gemini': 'Gemini',
-      'elevenlabs': 'ElevenLabs',
-    };
-    final providerLabel = providerLabels[providerId] ?? providerId;
-
-    final catalogManager = ref.read(providerCatalogManagerProvider);
-
-    // Collect all voice IDs referenced in this plan.
-    final voiceIds = _collectPlanVoiceIds(_steps, _defaultVoice);
-
-    for (final voiceId in voiceIds) {
-      final isValid =
-          await catalogManager.isVoiceValidForProvider(voiceId, providerId);
-      if (isValid) continue;
-
-      // Found an invalid voice — show the mismatch dialog.
-      if (!mounted) return false;
-      final selectedVoice = await showVoiceValidationDialog(
-        context,
-        voiceId: voiceId,
-        providerId: providerId,
-        providerLabel: providerLabel,
-      );
-
-      if (selectedVoice == null) {
-        // User cancelled — abort save, plan not modified.
-        return false;
-      }
-
-      // User selected a new voice — apply it.
-      // Replace the invalid voice: if it was the default voice, update that.
-      // Also update any step-level SayStep overrides that used the old voice.
-      setState(() {
-        if (_defaultVoice == voiceId) {
-          _defaultVoice = selectedVoice.id;
-        }
-        // Update per-step overrides that used the now-invalid voiceId.
-        _steps = _steps
-            .map((s) => _replaceVoiceInStep(s, voiceId, selectedVoice.id))
-            .toList();
-      });
-
-      // Re-validate remaining voices after the update (the replaced voice may
-      // have revealed another mismatch from a different step).
-      return _validateVoicesBeforeSave();
-    }
-
-    return true; // All voices valid.
-  }
-
-  /// Recursively replaces [oldVoiceId] with [newVoiceId] in [step] and any
-  /// nested [RepeatStep] children.
-  PlanStep _replaceVoiceInStep(
-    PlanStep step,
-    String oldVoiceId,
-    String newVoiceId,
-  ) {
-    switch (step) {
-      case SayStep(:final voiceId) when voiceId == oldVoiceId:
-        return (step as SayStep).copyWith(voiceId: newVoiceId);
-      case RepeatStep(:final children):
-        final updatedChildren = children
-            .map((c) => _replaceVoiceInStep(c, oldVoiceId, newVoiceId))
-            .toList();
-        return (step as RepeatStep).copyWith(children: updatedChildren);
-      default:
-        return step;
-    }
+    setState(() => _isDownloading = false);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -597,13 +431,6 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       if (!shouldOpen) return;
       return; // metadata sheet was opened; user must tap save again
     }
-
-    // Validate all voices in the plan against the current TTS provider.
-    // If any voice is incompatible, the user is prompted to select a
-    // replacement.  On cancel the save is aborted entirely (plan not modified,
-    // synthesis skipped).
-    final voicesValid = await _validateVoicesBeforeSave();
-    if (!voicesValid) return;
 
     // ── Debug logging: verify editor state before persisting ─────────────────
     debugPrint(
@@ -633,11 +460,10 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     setState(() => _isSaving = true);
     try {
       final repo = ref.read(planRepositoryProvider);
-      final tts = ref.read(ttsServiceProvider);
       final now = DateTime.now();
 
       final plan = Plan(
-        id: widget.planId ?? 0,
+        id: widget.planId ?? '',
         name: _name.trim(),
         description:
             _description.trim().isEmpty ? null : _description.trim(),
@@ -650,23 +476,10 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         lastUsedAt: _originalLastUsedAt,
       );
 
-      int savedId;
       if (widget.planId == null) {
-        savedId = await repo.createPlan(plan);
+        await repo.createPlan(plan);
       } else {
         await repo.updatePlan(widget.planId!, plan);
-        savedId = widget.planId!;
-      }
-
-      // Fire-and-forget: pre-render TTS for all say steps.
-      // preRenderPlan already skips cached steps and deduplicates in-flight
-      // requests, so this is safe even if _downloadVoices() just ran.
-      if (!_isDownloading) {
-        unawaited(
-          tts.preRenderPlan(plan.copyWith(id: savedId)).catchError((_) {
-            // Pre-render is best-effort; do not surface errors to the user.
-          }),
-        );
       }
 
       if (mounted) {

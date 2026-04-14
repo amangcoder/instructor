@@ -1,8 +1,8 @@
 /**
  * DatabaseService — Neon PostgreSQL-backed replacement for DynamoDBService.
  *
- * Drop-in replacement: all 14 public methods have identical signatures to
- * DynamoDBService so callers (AuthService, SyncService) need no changes.
+ * Drop-in replacement: all public methods have identical signatures to
+ * DynamoDBService so callers (AuthService) need no changes.
  *
  * Driver:
  *   @neondatabase/serverless neon() HTTP mode — single HTTPS request per query,
@@ -29,18 +29,16 @@
  *   NODE_ENV      — set to "production" to suppress Drizzle query logs
  */
 
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
-import { and, desc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { otpRecords, plans, refreshTokens, syncMetadata, users } from './schema';
+import { libraryPlans, otpRecords, plans, refreshTokens, ttsJobs, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 
 // ── Typed result shapes returned to callers ────────────────────────────────
-// These interfaces are intentionally identical to the DynamoDBService equivalents
-// so that AuthService, SyncService etc. require zero changes.
 
 export interface UserRecord {
   id: string;
@@ -73,17 +71,17 @@ export interface RefreshTokenRecord {
   sk: string;
 }
 
-export interface SyncMetadataRecord {
-  userId: string;
-  lastSyncAt: Date | null;
-  sizeBytes: number | null;
-}
-
 export interface PlanRecord {
   planId: string;
   userId: string;
   name: string;
   planJson: string;
+  isActive: boolean;
+  ttsStatus: string;
+  ttsTotal: number;
+  ttsCompleted: number;
+  voiceQuality: string;
+  sourceLibraryPlanId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,6 +89,12 @@ export interface PlanRecord {
 export interface PlanSummaryRecord {
   planId: string;
   name: string;
+  planJson: string;
+  isActive: boolean;
+  ttsStatus: string;
+  ttsTotal: number;
+  ttsCompleted: number;
+  voiceQuality: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -98,6 +102,56 @@ export interface PlanSummaryRecord {
 export interface SavePlanResult {
   planId: string;
   updatedAt: Date;
+}
+
+export interface LibraryPlanSummaryRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  tags: string;
+  defaultVoice: string;
+  locale: string;
+  stepCount: number;
+  sortOrder: number;
+}
+
+export interface LibraryPlanRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  tags: string;
+  defaultVoice: string;
+  planJson: string;
+  locale: string;
+  isPublished: boolean;
+  sortOrder: number;
+}
+
+export interface TtsJobRecord {
+  id: string;
+  planId: string;
+  cacheKey: string;
+  text: string;
+  voiceId: string;
+  locale: string;
+  provider: string;
+  speechRate: string;
+  s3Key: string | null;
+  status: string;
+  error: string | null;
+  attempts: number;
+  createdAt: Date;
+  completedAt: Date | null;
+}
+
+export interface TtsPregenStatusRecord {
+  status: string;
+  total: number;
+  completed: number;
+  failed: number;
+  ready: boolean;
 }
 
 // ── PostgreSQL error codes ─────────────────────────────────────────────────
@@ -157,11 +211,8 @@ export class DatabaseService {
    * Neon serverless suspends compute after ~5 min of inactivity. The first
    * query after suspension can fail (connection reset / timeout) while the
    * compute resumes. Retrying once after 1 s absorbs the startup delay.
-   *
-   * After the first retry the flag is latched so subsequent failures propagate
-   * immediately — we don't want unbounded retries in a hot path.
    */
-  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  async withRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (err) {
@@ -204,8 +255,7 @@ export class DatabaseService {
   /**
    * Create a new user record.
    * Catches PostgreSQL unique-constraint violation (code 23505) and re-throws
-   * as { code: 'USER_ALREADY_EXISTS' } — matching the DynamoDB
-   * ConditionalCheckFailedException handler pattern in AuthService.
+   * as { code: 'USER_ALREADY_EXISTS' }.
    */
   async createUser(user: {
     id: string;
@@ -223,7 +273,6 @@ export class DatabaseService {
         }),
       );
     } catch (err) {
-      // PostgreSQL unique constraint violation on users.email or users.id
       if ((err as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
         throw Object.assign(new Error('User already exists'), {
           code: 'USER_ALREADY_EXISTS',
@@ -235,12 +284,6 @@ export class DatabaseService {
 
   // ── OTP records ────────────────────────────────────────────────────────────
 
-  /**
-   * Store a new OTP record.
-   * Drizzle assigns a random UUID as the primary key (otp_records.id).
-   * That id is subsequently exposed as OtpRecord.sk so AuthService can
-   * pass it back to markOtpUsed() and incrementOtpAttempts().
-   */
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<void> {
     if (this.noop) return;
 
@@ -257,14 +300,8 @@ export class DatabaseService {
 
   /**
    * Return all active (unused, non-expired) OTPs for the given email.
-   *
-   * Filter: WHERE email = ? AND used = false AND expires_at > NOW()
-   *   — expires_at > NOW() is evaluated by PostgreSQL, not the application,
-   *     so it is always consistent with the database clock (TOCTOU-safe).
-   *
-   * CRITICAL: OtpRecord.sk is mapped from otp_records.id (the UUID primary
-   *   key). AuthService calls markOtpUsed(email, record.sk) and
-   *   incrementOtpAttempts(email, record.sk) using this value.
+   * Ordered ascending by expiresAt so records[records.length - 1] is the
+   * most-recently-created (longest TTL remaining) OTP.
    */
   async getActiveOtps(email: string): Promise<OtpRecord[]> {
     if (this.noop) return [];
@@ -280,26 +317,21 @@ export class DatabaseService {
             gt(otpRecords.expiresAt, sql`NOW()`),
           ),
         )
-        // Most-recently-expiring OTP last so records[records.length - 1] in
-        // AuthService.verifyOtp picks the latest one deterministically.
-        .orderBy(desc(otpRecords.expiresAt)),
+        // Ascending: most-recently-expiring OTP last, so records[records.length - 1]
+        // in AuthService.verifyOtp picks the OTP with the longest remaining TTL.
+        .orderBy(asc(otpRecords.expiresAt)),
     );
 
     return rows.map((row) => ({
-      sk: row.id,         // CRITICAL: sk ← otp_records.id
+      sk: row.id,
       email: row.email,
-      code: row.codeHash, // code ← otp_records.code_hash
+      code: row.codeHash,
       expiresAt: row.expiresAt,
       attempts: row.attempts,
       used: row.used,
     }));
   }
 
-  /**
-   * Mark a specific OTP record as used (single-use enforcement).
-   * The otpId parameter is the value that was returned in OtpRecord.sk
-   * (i.e. the otp_records.id UUID).
-   */
   async markOtpUsed(email: string, otpId: string): Promise<void> {
     if (this.noop) return;
 
@@ -311,11 +343,6 @@ export class DatabaseService {
     );
   }
 
-  /**
-   * Atomically increment the failed-attempt counter for an OTP record.
-   * Uses SQL `attempts + 1` expression (server-side) to avoid read-modify-write
-   * race conditions under concurrent verification attempts.
-   */
   async incrementOtpAttempts(email: string, otpId: string): Promise<void> {
     if (this.noop) return;
 
@@ -327,17 +354,6 @@ export class DatabaseService {
     );
   }
 
-  /**
-   * Invalidate all active OTPs for an email address.
-   * Called before issuing a new OTP to enforce the single-active-OTP invariant.
-   *
-   * TOCTOU fix: The DynamoDB implementation did Query → N parallel UpdateItem
-   * calls, which allowed a newly inserted OTP (arriving between the Query and
-   * the Updates) to escape invalidation. This single SQL UPDATE covers all
-   * matching rows atomically.
-   *
-   * SQL: UPDATE otp_records SET used = true WHERE email = ? AND used = false
-   */
   async invalidateOtpsForEmail(email: string): Promise<void> {
     if (this.noop) return;
 
@@ -351,7 +367,6 @@ export class DatabaseService {
 
   // ── Refresh tokens ─────────────────────────────────────────────────────────
 
-  /** Store a new refresh token (stored as a SHA-256 hash, never plaintext). */
   async createRefreshToken(
     userId: string,
     tokenHash: string,
@@ -369,7 +384,6 @@ export class DatabaseService {
     );
   }
 
-  /** Retrieve a refresh token by its hash. Returns null if not found. */
   async getRefreshToken(tokenHash: string): Promise<RefreshTokenRecord | null> {
     if (this.noop) return null;
 
@@ -394,17 +408,8 @@ export class DatabaseService {
 
   /**
    * Mark a specific refresh token as revoked.
-   *
-   * Filters by tokenHash only — tokenHash is a UNIQUE column so the WHERE
-   * clause always matches exactly one row. Filtering additionally by userId
-   * was the original design, but AuthService.revokeRefreshToken (single-device
-   * logout) called this method with an empty-string userId, causing the UPDATE
-   * to affect 0 rows and leaving the token active. Dropping the userId filter
-   * fixes single-device logout without requiring an extra round-trip to fetch
-   * the token first.
-   *
-   * The userId parameter is kept in the signature for call-site compatibility;
-   * it is intentionally unused in the WHERE clause.
+   * Filters by tokenHash only (UNIQUE column). The userId parameter is
+   * kept for call-site compatibility but intentionally unused in the WHERE clause.
    */
   async revokeRefreshToken(_userId: string, tokenHash: string): Promise<void> {
     if (this.noop) return;
@@ -419,18 +424,6 @@ export class DatabaseService {
     this.logger.log(`Refresh token revoked (tokenHash prefix=${tokenHash.slice(0, 8)}…)`);
   }
 
-  /**
-   * Revoke all refresh tokens for a user (logout-all / security reset).
-   *
-   * N+1 + TOCTOU fix: The DynamoDB implementation did a GSI Query to list all
-   * tokens for the user, then N parallel UpdateItem calls — one per token.
-   * A new token inserted between the Query and the Updates would survive
-   * revocation. This single SQL UPDATE atomically covers all active tokens
-   * in one round-trip with no N+1 overhead.
-   *
-   * SQL: UPDATE refresh_tokens SET revoked = true
-   *      WHERE user_id = ? AND revoked = false
-   */
   async revokeAllRefreshTokens(userId: string): Promise<void> {
     if (this.noop) return;
 
@@ -449,79 +442,14 @@ export class DatabaseService {
     this.logger.log(`All refresh tokens revoked for userId=${userId}`);
   }
 
-  // ── Sync metadata ──────────────────────────────────────────────────────────
-
-  /** Retrieve sync metadata for a user. Returns null if the user has never synced. */
-  async getSyncMetadata(userId: string): Promise<SyncMetadataRecord | null> {
-    if (this.noop) return null;
-
-    const rows = await this.withRetry(() =>
-      this.db!
-        .select()
-        .from(syncMetadata)
-        .where(eq(syncMetadata.userId, userId))
-        .limit(1),
-    );
-
-    if (rows.length === 0) return null;
-    const row = rows[0];
-    return {
-      userId: row.userId,
-      lastSyncAt: row.lastSyncAt ?? null,
-      sizeBytes: row.sizeBytes ?? null,
-    };
-  }
-
-  /**
-   * Upsert sync metadata after a confirmed upload.
-   * Uses INSERT … ON CONFLICT (user_id) DO UPDATE to handle both first-sync
-   * and subsequent syncs without a read-before-write.
-   */
-  async upsertSyncMetadata(
-    userId: string,
-    lastSyncAt: Date,
-    sizeBytes?: number,
-  ): Promise<void> {
-    if (this.noop) return;
-
-    await this.withRetry(() =>
-      this.db!
-        .insert(syncMetadata)
-        .values({
-          userId,
-          lastSyncAt,
-          sizeBytes: sizeBytes ?? null,
-        })
-        .onConflictDoUpdate({
-          target: syncMetadata.userId,
-          set: {
-            lastSyncAt,
-            sizeBytes: sizeBytes ?? null,
-          },
-        }),
-    );
-  }
-
   // ── Plans ──────────────────────────────────────────────────────────────────
 
-  /**
-   * Save (create or update) a plan for the authenticated user.
-   *
-   * - If planId is omitted: INSERT a new plan row and return the generated UUID.
-   * - If planId is provided: UPDATE the matching row WHERE id = planId AND user_id = userId.
-   *   Throws NotFoundException if no matching row exists (plan not owned by user or
-   *   doesn't exist), preventing IDOR — the caller can never modify another user's plan.
-   *
-   * SECURITY: userId is ALWAYS sourced from the JWT (req.user.sub) by the controller;
-   * the request body's userId field is explicitly ignored.
-   */
   async savePlan(
     userId: string,
     name: string,
     planJson: string,
     planId?: string,
   ): Promise<SavePlanResult> {
-    // Noop mode: return a deterministic fake result so the app boots without a DB.
     if (this.noop) {
       return { planId: planId ?? uuidv4(), updatedAt: new Date() };
     }
@@ -529,7 +457,6 @@ export class DatabaseService {
     const now = new Date();
 
     if (planId) {
-      // UPDATE existing plan — only if it belongs to this user (IDOR prevention).
       const rows = await this.withRetry(() =>
         this.db!
           .update(plans)
@@ -549,7 +476,6 @@ export class DatabaseService {
       return { planId: row.id, updatedAt: row.updatedAt };
     }
 
-    // INSERT new plan — DB assigns a random UUID via defaultRandom().
     const rows = await this.withRetry(() =>
       this.db!
         .insert(plans)
@@ -562,10 +488,175 @@ export class DatabaseService {
     return { planId: row.id, updatedAt: row.updatedAt };
   }
 
+  /** Fetch a single plan by ID for the authenticated user (IDOR-safe). */
+  async getPlanById(planId: string, userId: string): Promise<PlanRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(plans)
+        .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
+        .limit(1),
+    );
+
+    if (rows.length === 0) return null;
+    return this.mapPlanRecord(rows[0]);
+  }
+
+  /** Delete a plan for the authenticated user. Cascade-deletes tts_jobs. */
+  async deletePlan(planId: string, userId: string): Promise<void> {
+    if (this.noop) return;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .delete(plans)
+        .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
+        .returning({ id: plans.id }),
+    );
+
+    if (rows.length === 0) {
+      throw new NotFoundException(
+        `Plan ${planId} not found or does not belong to the authenticated user`,
+      );
+    }
+
+    this.logger.log(`Plan deleted: planId=${planId}, userId=${userId}`);
+  }
+
+  /** Copy a library plan into the user's plans. */
+  async copyLibraryPlanToUser(
+    libraryPlanId: string,
+    userId: string,
+    voiceQuality: string,
+  ): Promise<{ planId: string }> {
+    if (this.noop) return { planId: uuidv4() };
+
+    const libraryRows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(libraryPlans)
+        .where(eq(libraryPlans.id, libraryPlanId))
+        .limit(1),
+    );
+
+    if (libraryRows.length === 0) {
+      throw new NotFoundException(`Library plan ${libraryPlanId} not found`);
+    }
+
+    const lp = libraryRows[0];
+    const now = new Date();
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(plans)
+        .values({
+          userId,
+          name: lp.name,
+          planJson: lp.planJson,
+          sourceLibraryPlanId: libraryPlanId,
+          isActive: false,
+          ttsStatus: 'none',
+          ttsTotal: 0,
+          ttsCompleted: 0,
+          voiceQuality,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: plans.id }),
+    );
+
+    const planId = rows[0].id;
+    this.logger.log(`Library plan ${libraryPlanId} copied → planId=${planId}, userId=${userId}`);
+    return { planId };
+  }
+
   /**
-   * List all plan summaries for the authenticated user.
-   * Returns plan metadata only (no plan_json) ordered by most-recently-updated first.
-   * userId is always sourced from the JWT — callers MUST NOT pass userId from the request body.
+   * Activate a plan: deactivates all others for the user, sets this one active,
+   * and sets ttsStatus='pending' for studio voice quality.
+   */
+  async activatePlan(
+    planId: string,
+    userId: string,
+    voiceQuality: string,
+  ): Promise<void> {
+    if (this.noop) return;
+
+    const ownershipCheck = await this.withRetry(() =>
+      this.db!
+        .select({ id: plans.id })
+        .from(plans)
+        .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
+        .limit(1),
+    );
+
+    if (ownershipCheck.length === 0) {
+      throw new NotFoundException(
+        `Plan ${planId} not found or does not belong to the authenticated user`,
+      );
+    }
+
+    const now = new Date();
+
+    // Deactivate all plans for this user.
+    await this.withRetry(() =>
+      this.db!
+        .update(plans)
+        .set({ isActive: false, updatedAt: now })
+        .where(eq(plans.userId, userId)),
+    );
+
+    // Activate the target plan.
+    const ttsStatus = voiceQuality === 'studio' ? 'pending' : 'none';
+    await this.withRetry(() =>
+      this.db!
+        .update(plans)
+        .set({ isActive: true, voiceQuality, ttsStatus, updatedAt: now })
+        .where(eq(plans.id, planId)),
+    );
+
+    this.logger.log(`Plan activated: planId=${planId}, voiceQuality=${voiceQuality}`);
+  }
+
+  /** Update TTS pre-generation status fields on a plan. */
+  async setTtsStatus(
+    planId: string,
+    status: string,
+    total?: number,
+    completed?: number,
+  ): Promise<void> {
+    if (this.noop) return;
+
+    const updates: Partial<typeof plans.$inferInsert> = {
+      ttsStatus: status,
+      updatedAt: new Date(),
+    };
+    if (total !== undefined) updates.ttsTotal = total;
+    if (completed !== undefined) updates.ttsCompleted = completed;
+
+    await this.withRetry(() =>
+      this.db!.update(plans).set(updates).where(eq(plans.id, planId)),
+    );
+  }
+
+  /** Atomically increment ttsCompleted counter. */
+  async incrementTtsCompleted(planId: string): Promise<void> {
+    if (this.noop) return;
+
+    await this.withRetry(() =>
+      this.db!
+        .update(plans)
+        .set({
+          ttsCompleted: sql`${plans.ttsCompleted} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(plans.id, planId)),
+    );
+  }
+
+  /**
+   * List all plan summaries for the authenticated user (REQ-030).
+   * Returns full fields including ttsStatus, isActive, voiceQuality.
    */
   async listPlans(userId: string): Promise<PlanSummaryRecord[]> {
     if (this.noop) return [];
@@ -575,6 +666,12 @@ export class DatabaseService {
         .select({
           id: plans.id,
           name: plans.name,
+          planJson: plans.planJson,
+          isActive: plans.isActive,
+          ttsStatus: plans.ttsStatus,
+          ttsTotal: plans.ttsTotal,
+          ttsCompleted: plans.ttsCompleted,
+          voiceQuality: plans.voiceQuality,
           createdAt: plans.createdAt,
           updatedAt: plans.updatedAt,
         })
@@ -586,8 +683,337 @@ export class DatabaseService {
     return rows.map((row) => ({
       planId: row.id,
       name: row.name,
+      planJson: row.planJson,
+      isActive: row.isActive,
+      ttsStatus: row.ttsStatus,
+      ttsTotal: row.ttsTotal,
+      ttsCompleted: row.ttsCompleted,
+      voiceQuality: row.voiceQuality,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
+  }
+
+  // ── Library plans ──────────────────────────────────────────────────────────
+
+  async listLibraryPlans(
+    page: number,
+    category?: string,
+    search?: string,
+  ): Promise<{ plans: LibraryPlanSummaryRecord[]; total: number }> {
+    if (this.noop) return { plans: [], total: 0 };
+
+    const PAGE_SIZE = 20;
+    const offset = (page - 1) * PAGE_SIZE;
+
+    const conditions = [eq(libraryPlans.isPublished, true)];
+    if (category) conditions.push(eq(libraryPlans.category, category));
+    if (search) {
+      conditions.push(
+        or(
+          ilike(libraryPlans.name, `%${search}%`),
+          ilike(libraryPlans.description, `%${search}%`),
+        )!,
+      );
+    }
+
+    const whereClause = and(...conditions);
+
+    const [rows, countRows] = await Promise.all([
+      this.withRetry(() =>
+        this.db!
+          .select({
+            id: libraryPlans.id,
+            name: libraryPlans.name,
+            description: libraryPlans.description,
+            category: libraryPlans.category,
+            tags: libraryPlans.tags,
+            defaultVoice: libraryPlans.defaultVoice,
+            locale: libraryPlans.locale,
+            planJson: libraryPlans.planJson,
+            sortOrder: libraryPlans.sortOrder,
+          })
+          .from(libraryPlans)
+          .where(whereClause)
+          .orderBy(libraryPlans.sortOrder)
+          .limit(PAGE_SIZE)
+          .offset(offset),
+      ),
+      this.withRetry(() =>
+        this.db!
+          .select({ count: sql<number>`count(*)::int` })
+          .from(libraryPlans)
+          .where(whereClause),
+      ),
+    ]);
+
+    return {
+      plans: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        category: row.category,
+        tags: row.tags,
+        defaultVoice: row.defaultVoice,
+        locale: row.locale,
+        stepCount: this.countSteps(row.planJson),
+        sortOrder: row.sortOrder,
+      })),
+      total: countRows[0]?.count ?? 0,
+    };
+  }
+
+  async getLibraryPlanById(id: string): Promise<LibraryPlanRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(libraryPlans)
+        .where(eq(libraryPlans.id, id))
+        .limit(1),
+    );
+
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      category: row.category,
+      tags: row.tags,
+      defaultVoice: row.defaultVoice,
+      planJson: row.planJson,
+      locale: row.locale,
+      isPublished: row.isPublished,
+      sortOrder: row.sortOrder,
+    };
+  }
+
+  async createLibraryPlan(data: {
+    name: string;
+    description?: string;
+    category: string;
+    tags: string;
+    defaultVoice: string;
+    planJson: string;
+    locale: string;
+    isPublished: boolean;
+    sortOrder: number;
+  }): Promise<{ id: string }> {
+    if (this.noop) return { id: uuidv4() };
+
+    const now = new Date();
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(libraryPlans)
+        .values({ ...data, createdAt: now, updatedAt: now })
+        .returning({ id: libraryPlans.id }),
+    );
+
+    this.logger.log(`Library plan created: id=${rows[0].id}, name="${data.name}"`);
+    return { id: rows[0].id };
+  }
+
+  // ── TTS jobs ───────────────────────────────────────────────────────────────
+
+  async createTtsJobs(
+    jobs: {
+      planId: string;
+      cacheKey: string;
+      text: string;
+      voiceId: string;
+      locale: string;
+      provider: string;
+      speechRate: string;
+    }[],
+  ): Promise<{ id: string; cacheKey: string }[]> {
+    if (this.noop || jobs.length === 0) return [];
+
+    const now = new Date();
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(ttsJobs)
+        .values(jobs.map((j) => ({ ...j, status: 'pending', attempts: 0, createdAt: now })))
+        .returning({ id: ttsJobs.id, cacheKey: ttsJobs.cacheKey }),
+    );
+
+    return rows;
+  }
+
+  /** Fetch TTS jobs by their IDs. */
+  async getTtsJobsByIds(jobIds: string[]): Promise<TtsJobRecord[]> {
+    if (this.noop || jobIds.length === 0) return [];
+
+    // Use inArray equivalent via sql template for UUID array.
+    const placeholders = jobIds.map((_, i) => `$${i + 1}`).join(', ');
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(ttsJobs)
+        .where(sql`${ttsJobs.id} IN (${sql.join(jobIds.map((id) => sql`${id}::uuid`), sql`, `)})`),
+    );
+
+    return rows.map((row) => this.mapTtsJobRecord(row));
+  }
+
+  async updateTtsJobStatus(
+    jobId: string,
+    status: string,
+    s3Key?: string,
+    error?: string,
+  ): Promise<void> {
+    if (this.noop) return;
+
+    const updates: Partial<typeof ttsJobs.$inferInsert> & Record<string, unknown> = {
+      status,
+      attempts: sql`${ttsJobs.attempts} + 1` as any,
+    };
+    if (s3Key !== undefined) updates.s3Key = s3Key;
+    if (error !== undefined) updates.error = error;
+    if (status === 'completed') updates.completedAt = new Date();
+
+    await this.withRetry(() =>
+      this.db!
+        .update(ttsJobs)
+        .set(updates as any)
+        .where(eq(ttsJobs.id, jobId)),
+    );
+  }
+
+  /** Get TTS pre-generation status summary for a plan. */
+  async getPlanTtsStatus(planId: string): Promise<TtsPregenStatusRecord> {
+    if (this.noop) {
+      return { status: 'none', total: 0, completed: 0, failed: 0, ready: false };
+    }
+
+    const planRows = await this.withRetry(() =>
+      this.db!
+        .select({
+          ttsStatus: plans.ttsStatus,
+          ttsTotal: plans.ttsTotal,
+          ttsCompleted: plans.ttsCompleted,
+        })
+        .from(plans)
+        .where(eq(plans.id, planId))
+        .limit(1),
+    );
+
+    if (planRows.length === 0) {
+      return { status: 'none', total: 0, completed: 0, failed: 0, ready: false };
+    }
+
+    const plan = planRows[0];
+
+    const failedRows = await this.withRetry(() =>
+      this.db!
+        .select({ count: sql<number>`count(*)::int` })
+        .from(ttsJobs)
+        .where(and(eq(ttsJobs.planId, planId), eq(ttsJobs.status, 'failed'))),
+    );
+
+    const failed = failedRows[0]?.count ?? 0;
+    const ready = plan.ttsStatus === 'completed' || plan.ttsStatus === 'partial';
+
+    return {
+      status: plan.ttsStatus,
+      total: plan.ttsTotal,
+      completed: plan.ttsCompleted,
+      failed,
+      ready,
+    };
+  }
+
+  /** Get all completed TTS jobs for a plan (for audio URL generation). */
+  async getCompletedTtsJobs(planId: string): Promise<TtsJobRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(ttsJobs)
+        .where(and(eq(ttsJobs.planId, planId), eq(ttsJobs.status, 'completed'))),
+    );
+
+    return rows.map((row) => this.mapTtsJobRecord(row));
+  }
+
+  /**
+   * After all TTS jobs complete, compute and save final plan ttsStatus.
+   */
+  async finalizePlanTtsStatus(planId: string): Promise<void> {
+    if (this.noop) return;
+
+    const countRows = await this.withRetry(() =>
+      this.db!
+        .select({
+          total: sql<number>`count(*)::int`,
+          completed: sql<number>`sum(case when ${ttsJobs.status} = 'completed' then 1 else 0 end)::int`,
+          failed: sql<number>`sum(case when ${ttsJobs.status} = 'failed' then 1 else 0 end)::int`,
+        })
+        .from(ttsJobs)
+        .where(eq(ttsJobs.planId, planId)),
+    );
+
+    const { total, completed, failed } = countRows[0] ?? { total: 0, completed: 0, failed: 0 };
+
+    let finalStatus: string;
+    if (failed === 0) {
+      finalStatus = 'completed';
+    } else if (completed > 0) {
+      finalStatus = 'partial';
+    } else {
+      finalStatus = 'failed';
+    }
+
+    await this.setTtsStatus(planId, finalStatus, total, completed);
+    this.logger.log(`Plan ${planId} TTS finalized: ${finalStatus} (${completed}/${total})`);
+  }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  private mapPlanRecord(row: typeof plans.$inferSelect): PlanRecord {
+    return {
+      planId: row.id,
+      userId: row.userId,
+      name: row.name,
+      planJson: row.planJson,
+      isActive: row.isActive,
+      ttsStatus: row.ttsStatus,
+      ttsTotal: row.ttsTotal,
+      ttsCompleted: row.ttsCompleted,
+      voiceQuality: row.voiceQuality,
+      sourceLibraryPlanId: row.sourceLibraryPlanId ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private mapTtsJobRecord(row: typeof ttsJobs.$inferSelect): TtsJobRecord {
+    return {
+      id: row.id,
+      planId: row.planId,
+      cacheKey: row.cacheKey,
+      text: row.text,
+      voiceId: row.voiceId,
+      locale: row.locale,
+      provider: row.provider,
+      speechRate: row.speechRate,
+      s3Key: row.s3Key ?? null,
+      status: row.status,
+      error: row.error ?? null,
+      attempts: row.attempts,
+      createdAt: row.createdAt,
+      completedAt: row.completedAt ?? null,
+    };
+  }
+
+  private countSteps(planJson: string): number {
+    try {
+      const parsed = JSON.parse(planJson) as { steps?: unknown[] };
+      return Array.isArray(parsed.steps) ? parsed.steps.length : 0;
+    } catch {
+      return 0;
+    }
   }
 }

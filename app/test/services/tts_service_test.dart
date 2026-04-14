@@ -40,6 +40,7 @@ import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/models/auth_models.dart';
 import 'package:instructor/services/auth_service.dart';
@@ -53,25 +54,17 @@ import 'package:instructor/utils/hash_utils.dart';
 /// A fake [TTSService] whose state is fully observable without requiring
 /// real network access, platform plugins, or a database.
 class _FakeTTSService implements TTSService {
-  // Captured calls
-  final List<({String text, String voiceId})> renderTTSCalls = [];
-  final List<Plan> preRenderPlanCalls = [];
-  final List<int> clearCacheForPlanCalls = [];
+  // Captured calls — each entry records text, voiceId, and mode.
+  final List<({String text, String voiceId, TtsPlaybackMode mode})>
+      renderTTSCalls = [];
+  final List<String> clearCacheForPlanCalls = [];
   final List<({String textHash, String voiceId})> isCachedCalls = [];
   final List<String> renderWithPlatformTTSCalls = [];
-
-  /// Records every (completed, total) pair passed to the [onProgress] callback.
-  final List<({int completed, int total})> progressCallbacks = [];
 
   // Controllable state
   bool _isCachedResult = false;
   Exception? _renderError;
   final Map<String, String> _cacheMap = {};
-
-  /// When set, the fake will simulate [stepCount] progress callbacks when
-  /// [preRenderPlan] is called (useful for testing callers that depend on
-  /// progress reporting).
-  int simulatedStepCount = 0;
 
   // Fake setup helpers
   void setIsCachedResult({required bool value}) => _isCachedResult = value;
@@ -81,38 +74,26 @@ class _FakeTTSService implements TTSService {
     required String voiceId,
     required String filePath,
   }) {
-    _cacheMap[ttsCacheKey(provider: 'backend', voiceId: voiceId, text: text)] = filePath;
+    _cacheMap[ttsCacheKey(provider: 'backend', voiceId: voiceId, text: text)] =
+        filePath;
   }
 
   @override
-  Future<String> renderTTS({
-    required String text,
-    required String voiceId,
-  }) async {
-    renderTTSCalls.add((text: text, voiceId: voiceId));
+  Future<String?> renderTTS(
+      String text, String voiceId, TtsPlaybackMode mode) async {
+    renderTTSCalls.add((text: text, voiceId: voiceId, mode: mode));
     if (_renderError != null) throw _renderError!;
     final hash = ttsCacheKey(provider: 'backend', voiceId: voiceId, text: text);
-    return _cacheMap[hash] ?? '/fake/tts/$hash.wav';
+    // Simulate cache-first behaviour: return the cached entry if present.
+    if (_cacheMap.containsKey(hash)) return _cacheMap[hash];
+    // Platform mode: return null on cache miss (no API call).
+    if (mode == TtsPlaybackMode.platform) return null;
+    // GenAI mode: return a synthetic file path.
+    return '/fake/tts/$hash.wav';
   }
 
   @override
-  Future<void> preRenderPlan(
-    Plan plan, {
-    void Function(int completed, int total)? onProgress,
-  }) async {
-    preRenderPlanCalls.add(plan);
-    if (_renderError != null) throw _renderError!;
-    // Simulate progress callbacks if the caller has configured a step count.
-    if (onProgress != null && simulatedStepCount > 0) {
-      for (var i = 1; i <= simulatedStepCount; i++) {
-        progressCallbacks.add((completed: i, total: simulatedStepCount));
-        onProgress(i, simulatedStepCount);
-      }
-    }
-  }
-
-  @override
-  Future<void> clearCacheForPlan(int planId) async {
+  Future<void> clearCacheForPlan(String planId) async {
     clearCacheForPlanCalls.add(planId);
   }
 
@@ -307,37 +288,49 @@ void main() {
 
     // ── renderTTS ──────────────────────────────────────────────────────────
 
-    test('renderTTS records text and voiceId', () async {
-      await service.renderTTS(text: 'Hello', voiceId: 'nova');
+    test('renderTTS records text, voiceId, and mode', () async {
+      await service.renderTTS('Hello', 'nova', TtsPlaybackMode.genai);
       expect(service.renderTTSCalls, hasLength(1));
       expect(service.renderTTSCalls.first.text, 'Hello');
       expect(service.renderTTSCalls.first.voiceId, 'nova');
+      expect(service.renderTTSCalls.first.mode, TtsPlaybackMode.genai);
     });
 
-    test('renderTTS returns a non-empty file path', () async {
+    test('renderTTS genai mode returns a non-empty file path', () async {
       final path =
-          await service.renderTTS(text: 'Breath in', voiceId: 'shimmer');
+          await service.renderTTS('Breath in', 'shimmer', TtsPlaybackMode.genai);
       expect(path, isNotEmpty);
     });
 
-    test('renderTTS returns the cached path when a cache entry is set', () async {
+    test('renderTTS platform mode returns null on cache miss', () async {
+      final path =
+          await service.renderTTS('Hello', 'nova', TtsPlaybackMode.platform);
+      expect(path, isNull);
+    });
+
+    test('renderTTS returns cached path regardless of mode', () async {
       service.setCacheEntry(
         text: 'cached text',
         voiceId: 'nova',
         filePath: '/cached/path.mp3',
       );
-      final path =
-          await service.renderTTS(text: 'cached text', voiceId: 'nova');
-      expect(path, '/cached/path.mp3');
+      // Cache hit is returned even in platform mode.
+      final platformPath = await service.renderTTS(
+          'cached text', 'nova', TtsPlaybackMode.platform);
+      expect(platformPath, '/cached/path.mp3');
+      // And in genai mode.
+      final genaiPath = await service.renderTTS(
+          'cached text', 'nova', TtsPlaybackMode.genai);
+      expect(genaiPath, '/cached/path.mp3');
     });
 
     test(
-      'renderTTS for different voices returns different paths',
+      'renderTTS genai mode returns different paths for different voices',
       () async {
         final novaPath =
-            await service.renderTTS(text: 'Same text', voiceId: 'nova');
+            await service.renderTTS('Same text', 'nova', TtsPlaybackMode.genai);
         final onyxPath =
-            await service.renderTTS(text: 'Same text', voiceId: 'onyx');
+            await service.renderTTS('Same text', 'onyx', TtsPlaybackMode.genai);
         expect(novaPath, isNot(equals(onyxPath)));
       },
     );
@@ -347,107 +340,23 @@ void main() {
         const TtsApiException('API key missing', statusCode: 401),
       );
       await expectLater(
-        service.renderTTS(text: 'hello', voiceId: 'nova'),
+        service.renderTTS('hello', 'nova', TtsPlaybackMode.genai),
         throwsA(isA<TtsApiException>()),
       );
     });
 
-    // ── preRenderPlan ──────────────────────────────────────────────────────
-
-    test('preRenderPlan records the plan', () async {
-      final plan = _makePlan();
-      await service.preRenderPlan(plan);
-      expect(service.preRenderPlanCalls, [plan]);
-    });
-
-    test('preRenderPlan with multiple calls records all plans', () async {
-      final plan1 = _makePlan(id: 1);
-      final plan2 = _makePlan(id: 2, name: 'Plan 2');
-      await service.preRenderPlan(plan1);
-      await service.preRenderPlan(plan2);
-      expect(service.preRenderPlanCalls, hasLength(2));
-    });
-
-    test('preRenderPlan with no say steps completes without error', () async {
-      final plan = _makePlan(
-        steps: [
-          PlanStep.wait(id: 'w1', duration: const Duration(seconds: 5)),
-          PlanStep.notify(id: 'n1', title: 'Go!', body: 'Move'),
-        ],
-      );
-      await expectLater(service.preRenderPlan(plan), completes);
-    });
-
-    test('preRenderPlan accepts an optional onProgress callback', () async {
-      final plan = _makePlan();
-      // Should not throw even when a callback is provided.
-      await expectLater(
-        service.preRenderPlan(plan, onProgress: (_, __) {}),
-        completes,
-      );
-    });
-
-    test(
-      'preRenderPlan fires onProgress callbacks in order when simulated steps are set',
-      () async {
-        service.simulatedStepCount = 3;
-        final plan = _makePlan(
-          steps: [
-            _sayStep('Step one'),
-            _sayStep('Step two'),
-            _sayStep('Step three'),
-          ],
-        );
-
-        final received = <({int completed, int total})>[];
-        await service.preRenderPlan(
-          plan,
-          onProgress: (c, t) => received.add((completed: c, total: t)),
-        );
-
-        expect(received, hasLength(3));
-        expect(received[0], (completed: 1, total: 3));
-        expect(received[1], (completed: 2, total: 3));
-        expect(received[2], (completed: 3, total: 3));
-      },
-    );
-
-    test(
-      'preRenderPlan does not fire onProgress when no callback is provided',
-      () async {
-        service.simulatedStepCount = 2;
-        final plan = _makePlan(steps: [_sayStep('A'), _sayStep('B')]);
-        // No callback — should complete without error.
-        await expectLater(service.preRenderPlan(plan), completes);
-        // progressCallbacks list stays empty because no callback was passed.
-        expect(service.progressCallbacks, isEmpty);
-      },
-    );
-
-    test(
-      'preRenderPlan records progress callbacks in the fake',
-      () async {
-        service.simulatedStepCount = 2;
-        final plan = _makePlan(steps: [_sayStep('X'), _sayStep('Y')]);
-        await service.preRenderPlan(plan, onProgress: (c, t) {});
-        expect(service.progressCallbacks, hasLength(2));
-        expect(service.progressCallbacks.last.completed, 2);
-        expect(service.progressCallbacks.last.total, 2);
-      },
-    );
-
     // ── clearCacheForPlan ──────────────────────────────────────────────────
 
     test('clearCacheForPlan records the planId', () async {
-      await service.clearCacheForPlan(42);
-      expect(service.clearCacheForPlanCalls, [42]);
+      await service.clearCacheForPlan('plan-42');
+      expect(service.clearCacheForPlanCalls, ['plan-42']);
     });
 
     test('clearCacheForPlan for multiple plans records each id', () async {
-      await service.clearCacheForPlan(1);
-      await service.clearCacheForPlan(2);
-      await service.clearCacheForPlan(3);
-      expect(service.clearCacheForPlanCalls, [1, 2, 3]);
+      await service.clearCacheForPlan('plan-1');
+      await service.clearCacheForPlan('plan-2');
+      await service.clearCacheForPlan('plan-3');
+      expect(service.clearCacheForPlanCalls, ['plan-1', 'plan-2', 'plan-3']);
     });
 
     // ── isCached ──────────────────────────────────────────────────────────
@@ -625,6 +534,73 @@ void main() {
     );
   });
 
+  // ── TTSServiceImpl.renderTTS — platform mode (no DB rows needed) ──────────
+  //
+  // Platform mode with a cache miss never makes a network call — it simply
+  // returns null. We can test this path with an in-memory database that has
+  // no cache rows, without mocking HTTP at all.
+
+  group('TTSServiceImpl.renderTTS — platform mode', () {
+    late Directory tempDir;
+    late _FakePlatformTtsEngine fakeTtsEngine;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('tts_render_platform_test_');
+      fakeTtsEngine = _FakePlatformTtsEngine(tempDir: tempDir);
+    });
+
+    tearDown(() async {
+      await tempDir.delete(recursive: true);
+    });
+
+    TTSServiceImpl _makeService({PlatformTtsEngine? ttsEngine}) =>
+        TTSServiceImpl(
+          db: _NullAppDatabase(),
+          audioDirectory: tempDir.path,
+          authService: _StubAuthService(),
+          ttsEngine: ttsEngine ?? fakeTtsEngine,
+        );
+
+    test('returns null on cache miss in platform mode', () async {
+      final service = _makeService();
+      final result = await service.renderTTS(
+          'Hello world', 'nova', TtsPlaybackMode.platform);
+      expect(result, isNull);
+    });
+
+    test('does not call platform TTS engine in platform mode', () async {
+      final service = _makeService();
+      await service.renderTTS('Hello world', 'nova', TtsPlaybackMode.platform);
+      // synthesizeToFile must NOT be called — platform mode returns null
+      // immediately; the caller drives TTS itself.
+      expect(fakeTtsEngine.synthesizeCalls, isEmpty);
+    });
+
+    test('throws ArgumentError for empty text', () async {
+      final service = _makeService();
+      await expectLater(
+        service.renderTTS('', 'nova', TtsPlaybackMode.platform),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws ArgumentError for empty voiceId', () async {
+      final service = _makeService();
+      await expectLater(
+        service.renderTTS('Hello', '', TtsPlaybackMode.platform),
+        throwsArgumentError,
+      );
+    });
+
+    test('throws ArgumentError for whitespace-only text', () async {
+      final service = _makeService();
+      await expectLater(
+        service.renderTTS('   ', 'nova', TtsPlaybackMode.platform),
+        throwsArgumentError,
+      );
+    });
+  });
+
   // ── Exceptions ─────────────────────────────────────────────────────────────
 
   group('Exception types', () {
@@ -658,10 +634,6 @@ void main() {
   // ── Constants ──────────────────────────────────────────────────────────────
 
   group('TTSService constants', () {
-    test('kTtsMaxConcurrent is 5', () {
-      expect(kTtsMaxConcurrent, 5);
-    });
-
     test('kTtsApiTimeout is 60 seconds', () {
       expect(kTtsApiTimeout, const Duration(seconds: 60));
     });
@@ -709,47 +681,7 @@ void main() {
     });
   });
 
-  // ── Step collection contract (via preRenderPlan) ───────────────────────────
-
-  group('Step collection — recursive traversal contract', () {
-    test('preRenderPlan is called with the correct plan object', () async {
-      final service = _FakeTTSService();
-      final plan = _makePlan(
-        steps: [_sayStep('Hello'), _sayStep('Goodbye')],
-      );
-      await service.preRenderPlan(plan);
-      expect(service.preRenderPlanCalls, hasLength(1));
-      expect(service.preRenderPlanCalls.first, same(plan));
-    });
-
-    test(
-      'preRenderPlan with nested repeat blocks completes without error',
-      () async {
-        final service = _FakeTTSService();
-        final plan = _makePlan(
-          steps: [
-            _repeatStep([
-              _sayStep('Inner step 1'),
-              _repeatStep([_sayStep('Deep nested step')]),
-            ]),
-            _sayStep('Outer step'),
-          ],
-        );
-        await expectLater(service.preRenderPlan(plan), completes);
-      },
-    );
-
-    test('preRenderPlan with a plan of only wait steps completes', () async {
-      final service = _FakeTTSService();
-      final plan = _makePlan(
-        steps: [
-          PlanStep.wait(id: 'w1', duration: const Duration(seconds: 10)),
-          PlanStep.wait(id: 'w2', duration: const Duration(seconds: 5)),
-        ],
-      );
-      await expectLater(service.preRenderPlan(plan), completes);
-    });
-
+  group('Plan category enum', () {
     test('Plan category enum is stable across test runs', () {
       expect(PlanCategory.yoga.name, 'yoga');
       expect(PlanCategory.custom.name, 'custom');

@@ -11,13 +11,11 @@ library auth_providers;
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/models/auth_models.dart';
 import 'package:instructor/services/auth_service.dart';
-import 'package:instructor/services/provider_catalog_manager.dart';
 
 part 'auth_providers.g.dart';
 
@@ -50,33 +48,10 @@ class AuthStateNotifier extends _$AuthStateNotifier {
       final user = service.getUser(); // sync after isLoggedIn() call
       final token = await service.getAccessToken();
       if (user != null && token != null && token.isNotEmpty) {
-        // Non-blocking: warm up the provider catalog in the background so
-        // voice pickers have fresh data without delaying the auth redirect.
-        _scheduleCatalogFetch();
         return Authenticated(user: user, accessToken: token);
       }
     }
     return const Unauthenticated();
-  }
-
-  /// Triggers a non-blocking TTS provider catalog warm-up.
-  ///
-  /// Called after auth completes (on launch and after OTP login). Uses
-  /// [ProviderCatalogManager.getCachedCatalog] so that a network request is
-  /// only made when the SQLite cache is absent or older than 24 hours
-  /// (REQ-010 AC: no network call on launch when cache is fresh).
-  void _scheduleCatalogFetch() {
-    Future.microtask(() async {
-      try {
-        await ref
-            .read(providerCatalogManagerProvider)
-            .getCachedCatalog();
-      } catch (e) {
-        // Errors are already handled inside getCachedCatalog; this guard
-        // is an extra safety net so the notifier never throws from initState.
-        debugPrint('AuthStateNotifier: catalog warm-up failed — $e');
-      }
-    });
   }
 
   /// Called after a successful OTP verification.
@@ -87,9 +62,6 @@ class AuthStateNotifier extends _$AuthStateNotifier {
         accessToken: result.accessToken,
       ),
     );
-    // Also kick off a catalog refresh after fresh login so voice pickers have
-    // up-to-date data without the user needing to navigate away and back.
-    _scheduleCatalogFetch();
   }
 
   /// Called on explicit logout or when token refresh fails.

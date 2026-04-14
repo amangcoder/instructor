@@ -114,16 +114,20 @@ export class InstructorStack extends cdk.Stack {
             id: 'tts-cache-expiry',
             prefix: 'tts/',
             enabled: true,
+            // 30 days > 7-day pre-signed URL TTL; safe for Studio Voice downloads.
             expiration: Duration.days(30),
             noncurrentVersionExpiration: Duration.days(1),
             abortIncompleteMultipartUploadAfter: Duration.days(1),
           },
           {
-            id: 'backups-version-retention',
-            prefix: 'backups/',
+            // Pre-gen manifest files (REQ-038): tts-pregen-manifests/{planId}.json
+            // These are small JSON files; expire after 30 days to match audio TTL.
+            id: 'tts-pregen-manifests-expiry',
+            prefix: 'tts-pregen-manifests/',
             enabled: true,
-            noncurrentVersionExpiration: Duration.days(30),
-            noncurrentVersionsToRetain: 5,
+            expiration: Duration.days(30),
+            noncurrentVersionExpiration: Duration.days(1),
+            abortIncompleteMultipartUploadAfter: Duration.days(1),
           },
         ],
 
@@ -263,7 +267,16 @@ export class InstructorStack extends cdk.Stack {
     // running `cdk deploy` for the first time:
     //   aws secretsmanager put-secret-value \
     //     --secret-id instructor/<env>/app-secrets \
-    //     --secret-string '{"JWT_SECRET":"...","JWT_REFRESH_SECRET":"...","API_KEY":"...","OTP_SALT":"...","GEMINI_API_KEY":"..."}'
+    //     --secret-string '{
+    //       "JWT_SECRET":"...",
+    //       "JWT_REFRESH_SECRET":"...",
+    //       "API_KEY":"...",
+    //       "OTP_SALT":"...",
+    //       "GEMINI_API_KEY":"...",
+    //       "ADMIN_API_KEY":"..."   <-- NEW: used by POST /api/library/plans (admin-only)
+    //     }'
+    // ADMIN_API_KEY: generate with `openssl rand -hex 32` and store securely.
+    // This key gates library plan creation/updates — keep separate from API_KEY.
 
     // Both dev and prod share the same prod secret — single source of truth for credentials.
     const appSecretsName = 'instructor/prod/app-secrets';
@@ -326,30 +339,21 @@ export class InstructorStack extends cdk.Stack {
       }),
     );
 
-    // 9d. S3 — User backups: generate pre-signed PUT/GET URLs; read size for /sync/status.
-    //     Object-level actions are scoped to backups/* by the resource ARN — no extra condition.
+    // 9d. S3 — TTS pre-generation manifests: write manifest JSON on job completion (REQ-038).
+    //     Object-level actions scoped to tts-pregen-manifests/* by the resource ARN.
     lambdaRole.addToPolicy(
       new iam.PolicyStatement({
-        sid: 'S3SyncBackupsObjects',
+        sid: 'S3TtsPregenManifests',
         effect: iam.Effect.ALLOW,
-        actions: ['s3:GetObject', 's3:PutObject', 's3:GetObjectAttributes'],
-        resources: [this.bucket.arnForObjects('backups/*')],
+        actions: ['s3:GetObject', 's3:PutObject'],
+        resources: [this.bucket.arnForObjects('tts-pregen-manifests/*')],
       }),
     );
-    //     ListBucket scoped to backups/ prefix; prevents TTS key enumeration.
-    //     s3:prefix is only a valid condition key for ListBucket, so it must be
-    //     in a separate statement from the object-level actions above.
-    lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'S3SyncBackupsList',
-        effect: iam.Effect.ALLOW,
-        actions: ['s3:ListBucket'],
-        resources: [this.bucket.bucketArn],
-        conditions: {
-          StringLike: { 's3:prefix': ['backups/*'] },
-        },
-      }),
-    );
+    // NOTE: S3SyncBackupsObjects and S3SyncBackupsList permissions have been removed
+    // because the sync module (server/src/sync/) and its S3 backup feature are deleted
+    // in the server-first architecture migration. The backups/* S3 prefix is no longer
+    // used. The IAM user SyncBackupPolicy (for Docker/local dev) is retained for
+    // backward compatibility but can be cleaned up in a future maintenance pass.
 
     // 9e. SES — send OTP verification emails.
     //     Covers both the domain identity (layersiq.com) and any email-level

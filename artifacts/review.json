@@ -1,0 +1,13 @@
+{
+  "verdict": "approve",
+  "issues": [
+    {
+      "severity": "nit",
+      "file": "server/src/lambda.ts",
+      "line": 291,
+      "description": "When a ttsPregen task arrives before any HTTP request has warmed this Lambda, bootstrap() is called and its return value is assigned to cachedHandler. The logic is correct — both cachedHandler and cachedApp are populated by a single bootstrap() call — but the dual-cache intent is implicit and may surprise a future reader.",
+      "suggestion": "Add a brief inline comment above the bootstrap() call inside the ttsPregen branch: '// bootstrap() populates both cachedHandler and cachedApp'."
+    }
+  ],
+  "summary": "Both critical regressions from Cycle 2 are resolved: TtsModule now registers TtsEnumerationService and TtsPregenService in its providers array (fixing the NestJS DI startup failure), and lambda.ts now exports TtsPregenWorkerTask and routes 'ttsPregen' tasks to TtsPregenService.processJobs() via the bootstrapped DI container (fixing the TypeScript compile error and the silent task-drop). Changes are minimal and correct — no unrelated code was touched."
+}

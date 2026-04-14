@@ -5,8 +5,9 @@
  *   - users           — registered user accounts
  *   - otp_records     — email OTP codes (no FK to users: OTPs are created before user exists)
  *   - refresh_tokens  — JWT refresh tokens with revocation support
- *   - sync_metadata   — per-user backup sync state
  *   - plans           — user-created plans stored server-side for cross-device recovery
+ *   - library_plans   — curated global plan library (admin-managed)
+ *   - tts_jobs        — per-plan TTS pre-generation job tracking
  *
  * Index strategy:
  *   - otp_records: composite (email, used, expires_at) — equality on email+used, range on expires_at
@@ -15,7 +16,6 @@
  */
 
 import {
-  bigint,
   boolean,
   index,
   integer,
@@ -96,21 +96,36 @@ export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type NewRefreshToken = typeof refreshTokens.$inferInsert;
 
 // ---------------------------------------------------------------------------
-// sync_metadata
+// library_plans
+//
+// Stores the curated global plan library (admin-managed).
+// plan_json holds the full plan serialised as JSON TEXT.
 // ---------------------------------------------------------------------------
 
-export const syncMetadata = pgTable('sync_metadata', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .references(() => users.id)
-    .unique()
-    .notNull(),
-  lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
-  sizeBytes: bigint('size_bytes', { mode: 'number' }),
-});
+export const libraryPlans = pgTable(
+  'library_plans',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    description: text('description'),
+    category: text('category').notNull(),
+    tags: text('tags').notNull().default(''),
+    defaultVoice: text('default_voice').notNull(),
+    planJson: text('plan_json').notNull(),
+    locale: text('locale').notNull().default('enUS'),
+    isPublished: boolean('is_published').notNull().default(false),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_library_plans_category').on(table.category),
+    index('idx_library_plans_published').on(table.isPublished),
+  ],
+);
 
-export type SyncMetadata = typeof syncMetadata.$inferSelect;
-export type NewSyncMetadata = typeof syncMetadata.$inferInsert;
+export type LibraryPlan = typeof libraryPlans.$inferSelect;
+export type NewLibraryPlan = typeof libraryPlans.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // plans
@@ -129,6 +144,14 @@ export const plans = pgTable(
       .notNull(),
     name: text('name').notNull(),
     planJson: text('plan_json').notNull(),
+    // Library / activation fields
+    sourceLibraryPlanId: uuid('source_library_plan_id').references(() => libraryPlans.id),
+    isActive: boolean('is_active').notNull().default(false),
+    // TTS pre-generation tracking
+    ttsStatus: text('tts_status').notNull().default('none'), // none | pending | processing | completed | partial | failed
+    ttsTotal: integer('tts_total').notNull().default(0),
+    ttsCompleted: integer('tts_completed').notNull().default(0),
+    voiceQuality: text('voice_quality').notNull().default('standard'), // standard | studio
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -140,3 +163,40 @@ export const plans = pgTable(
 
 export type Plan = typeof plans.$inferSelect;
 export type NewPlan = typeof plans.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// tts_jobs
+//
+// Per-plan TTS pre-generation job tracking.
+// Each row represents one text-voice pair to synthesize.
+// Cascade-deletes when the parent plan is deleted.
+// ---------------------------------------------------------------------------
+
+export const ttsJobs = pgTable(
+  'tts_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planId: uuid('plan_id')
+      .references(() => plans.id, { onDelete: 'cascade' })
+      .notNull(),
+    cacheKey: varchar('cache_key', { length: 64 }).notNull(),
+    text: text('text').notNull(),
+    voiceId: text('voice_id').notNull(),
+    locale: text('locale').notNull(),
+    provider: text('provider').notNull(),
+    speechRate: text('speech_rate').notNull().default('1.0'),
+    s3Key: text('s3_key'),
+    status: text('status').notNull().default('pending'), // pending | processing | completed | failed
+    error: text('error'),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_tts_jobs_plan_id').on(table.planId),
+    index('idx_tts_jobs_plan_status').on(table.planId, table.status),
+  ],
+);
+
+export type TtsJob = typeof ttsJobs.$inferSelect;
+export type NewTtsJob = typeof ttsJobs.$inferInsert;

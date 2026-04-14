@@ -25,10 +25,6 @@
 ///   synthesises the audio to a local file and the result is cached in the
 ///   same table.
 ///
-/// ## Concurrency
-/// [preRenderPlan] processes say steps in chunks of [kTtsMaxConcurrent] (5) to
-/// respect API rate limits while still parallelising work.
-///
 /// ## Backend URL
 /// Configured at build time via `--dart-define=BACKEND_URL=<url>` (see [kBackendUrl]).
 library tts_service;
@@ -52,6 +48,7 @@ import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/services/api_logger.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/auth_service.dart';
@@ -198,39 +195,29 @@ final class FlutterTtsEngine implements PlatformTtsEngine {
 
 /// Abstract interface for TTS audio pre-rendering and caching.
 abstract class TTSService {
-  /// Returns the local file path to a cached TTS audio file.
+  /// Returns the local file path to a pre-rendered TTS audio file, or `null`
+  /// when [mode] is [TtsPlaybackMode.platform] and no cached file exists.
   ///
-  /// Checks the [TtsCacheTable] first. On a cache hit the cached path is
-  /// returned immediately. On a miss the backend TTS API is called; if the
-  /// network is unavailable a [SocketException] or [TimeoutException] triggers
-  /// the platform TTS fallback.
-  Future<String> renderTTS({
-    required String text,
-    required String voiceId,
-  });
-
-  /// Batch pre-renders all [SayStep]s in [plan] — including those nested
-  /// inside [RepeatStep] blocks — concurrently (≤ [kTtsMaxConcurrent] at a
-  /// time).
-  ///
-  /// [onProgress] is an optional callback invoked after every individual step
-  /// completes (whether success or failure).  The first argument is the number
-  /// of steps completed so far; the second is the total number of uncached
-  /// steps that need rendering.
-  ///
-  /// Failures for individual steps are logged and skipped; one bad step does
-  /// not abort the entire plan pre-render.
-  Future<void> preRenderPlan(
-    Plan plan, {
-    void Function(int completed, int total)? onProgress,
-  });
+  /// ### Fallback chain
+  /// 1. **Cache hit** — if a [TtsCacheTable] row with a valid on-disk file
+  ///    exists for [text]+[voiceId], the cached path is returned immediately
+  ///    regardless of [mode].
+  /// 2. **Platform mode** — if [mode] is [TtsPlaybackMode.platform] and there
+  ///    is no cached file, returns `null`. The caller is responsible for
+  ///    driving platform TTS directly (e.g. via [speakDirect]).
+  /// 3. **GenAI mode** — if [mode] is [TtsPlaybackMode.genai], calls the
+  ///    backend TTS API and returns the path to the downloaded audio file.
+  /// 4. **API failure fallback** — if the backend API is unreachable or
+  ///    returns an error, synthesises the audio via the on-device
+  ///    [PlatformTtsEngine] and returns that file path instead.
+  Future<String?> renderTTS(String text, String voiceId, TtsPlaybackMode mode);
 
   /// Removes all [TtsCacheTable] entries (and their audio files on disk) that
   /// are associated with [planId].
   ///
   /// Also scans for and removes any orphaned cache entries whose audio file no
   /// longer exists on disk (regardless of planId).
-  Future<void> clearCacheForPlan(int planId);
+  Future<void> clearCacheForPlan(String planId);
 
   /// Returns `true` when a valid cached audio file exists for [textHash] and
   /// [voiceId] — i.e. the DB row exists AND the file is present on disk.
@@ -262,12 +249,6 @@ abstract class TTSService {
 
 /// Backend TTS synthesis endpoint path.
 const String kBackendTtsPath = '/api/tts/synthesize';
-
-/// Maximum number of concurrent backend API calls during [TTSService.preRenderPlan].
-///
-/// Kept at 5 to provide meaningful parallelism for Plans with many say steps
-/// while avoiding backend overload.
-const int kTtsMaxConcurrent = 5;
 
 /// HTTP timeout for a single backend TTS API call.
 const Duration kTtsApiTimeout = Duration(seconds: 60);
@@ -306,10 +287,8 @@ class TTSServiceImpl implements TTSService {
   // ── Public API ─────────────────────────────────────────────────────────
 
   @override
-  Future<String> renderTTS({
-    required String text,
-    required String voiceId,
-  }) async {
+  Future<String?> renderTTS(
+      String text, String voiceId, TtsPlaybackMode mode) async {
     if (text.trim().isEmpty) {
       throw ArgumentError.value(text, 'text', 'must not be empty');
     }
@@ -317,16 +296,20 @@ class TTSServiceImpl implements TTSService {
       throw ArgumentError.value(voiceId, 'voiceId', 'must not be empty');
     }
 
-    debugPrint('TTSService.renderTTS: ENTER voice=$voiceId, text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}"');
-    final provider = await _readTtsProvider();
-    debugPrint('TTSService.renderTTS: provider=$provider');
+    debugPrint(
+      'TTSService.renderTTS: ENTER mode=$mode, voice=$voiceId, '
+      'text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}"',
+    );
+
     final storedLocale = await _currentLocale();
     final locale = _effectiveLocale(text, storedLocale);
-    debugPrint('TTSService.renderTTS: locale=$locale (stored=$storedLocale)');
     final speechRate = await _readSpeechRate();
-    debugPrint('TTSService.renderTTS: speechRate=$speechRate');
+
+    // Provider is determined server-side; use the default 'kokoro' value for
+    // the cache key to match the server-side key format.
+    const _kDefaultProvider = 'kokoro';
     final hash = fullParamCacheKey(
-      provider: provider,
+      provider: _kDefaultProvider,
       voice: voiceId,
       text: text,
       locale: locale.name,
@@ -334,40 +317,48 @@ class TTSServiceImpl implements TTSService {
     );
     debugPrint('TTSService.renderTTS: hash=${hash.substring(0, 8)}…');
 
-    // Fast path: check cache before any I/O.
+    // ── Step 1: Check local cache (regardless of mode) ───────────────────────
     debugPrint('TTSService.renderTTS: checking cache…');
     final cached = await _findCachedPath(hash);
-    debugPrint('TTSService.renderTTS: cache result=${cached != null ? "HIT" : "MISS"}, inflight keys=${_inflight.keys.map((k) => k.substring(0, 8)).toList()}');
     if (cached != null) {
-      debugPrint('TTSService: cache hit for voice=$voiceId');
+      debugPrint('TTSService: cache hit for voice=$voiceId — returning cached path');
       return cached;
     }
 
+    // ── Step 2: Platform mode — return null on cache miss ────────────────────
+    if (mode == TtsPlaybackMode.platform) {
+      debugPrint('TTSService: platform mode, cache miss — returning null (caller handles TTS)');
+      return null;
+    }
+
+    // ── Step 3: GenAI mode — call backend API with platform TTS fallback ─────
+    //
     // Deduplicate: if this exact request is already in-flight, await it.
     final existing = _inflight[hash];
     if (existing != null) {
-      debugPrint('TTSService: joining in-flight request for voice=$voiceId (hash=${hash.substring(0, 8)}…)');
-      // debugger(message: 'JOINING INFLIGHT — this future may never resolve if preRender already failed');
+      debugPrint(
+        'TTSService: joining in-flight request for voice=$voiceId '
+        '(hash=${hash.substring(0, 8)}…)',
+      );
       return existing;
     }
 
-    debugPrint('TTSService: cache miss — rendering via backend, voice=$voiceId');
-    // Use try/finally instead of .whenComplete() to ensure errors propagate
-    // cleanly through the async function's own stack frame.
-    final future = _renderAndSave(
+    debugPrint('TTSService: genai cache miss — rendering via backend, voice=$voiceId');
+
+    // Kick off the render + fallback chain, keeping the future in _inflight
+    // so that concurrent callers for the same text+voice share the result.
+    final future = _renderGenAiWithFallback(
       text: text,
       voiceId: voiceId,
       hash: hash,
-      provider: provider,
-      planId: null,
     );
     _inflight[hash] = future;
     try {
       final result = await future;
-      debugPrint('TTSService.renderTTS: _renderAndSave OK — $result');
+      debugPrint('TTSService.renderTTS: render OK — $result');
       return result;
     } catch (e) {
-      debugPrint('TTSService.renderTTS: _renderAndSave THREW ${e.runtimeType}: $e');
+      debugPrint('TTSService.renderTTS: render THREW ${e.runtimeType}: $e');
       rethrow;
     } finally {
       unawaited(_inflight.remove(hash));
@@ -375,78 +366,7 @@ class TTSServiceImpl implements TTSService {
   }
 
   @override
-  Future<void> preRenderPlan(
-    Plan plan, {
-    void Function(int completed, int total)? onProgress,
-  }) async {
-    // Collect all say steps recursively (including inside repeat blocks).
-    final allSaySteps = _collectSaySteps(plan.steps, plan.defaultVoice);
-
-    final provider = await _readTtsProvider();
-    final storedLocale = await _currentLocale();
-    final speechRate = await _readSpeechRate();
-
-    // Deduplicate by cache key to skip redundant API calls within one Plan.
-    final seen = <String>{};
-    final uniqueSteps = <({String text, String voiceId})>[];
-    for (final step in allSaySteps) {
-      final locale = _effectiveLocale(step.text, storedLocale);
-      final key = fullParamCacheKey(
-        provider: provider,
-        voice: step.voiceId,
-        text: step.text,
-        locale: locale.name,
-        speechRate: speechRate.toString(),
-      );
-      if (seen.add(key)) {
-        uniqueSteps.add(step);
-      }
-    }
-
-    if (uniqueSteps.isEmpty) return;
-
-    // Pre-pass: filter to only the steps that are not yet cached so we can
-    // report an accurate total to the caller before processing begins.
-    final uncachedSteps = <({String text, String voiceId})>[];
-    for (final step in uniqueSteps) {
-      final locale = _effectiveLocale(step.text, storedLocale);
-      final hash = fullParamCacheKey(
-        provider: provider,
-        voice: step.voiceId,
-        text: step.text,
-        locale: locale.name,
-        speechRate: speechRate.toString(),
-      );
-      final cached = await _findCachedPath(hash);
-      if (cached == null) {
-        uncachedSteps.add(step);
-      }
-    }
-
-    final total = uncachedSteps.length;
-    if (total == 0) return;
-
-    var completed = 0;
-
-    // Process in chunks to respect API rate limits.
-    // Steps within a chunk run in parallel; chunks run sequentially.
-    for (var i = 0; i < uncachedSteps.length; i += kTtsMaxConcurrent) {
-      final chunk = uncachedSteps.skip(i).take(kTtsMaxConcurrent).toList();
-      await Future.wait(
-        chunk.map((step) async {
-          final locale = _effectiveLocale(step.text, storedLocale);
-          await _preRenderStep(step, plan.id, provider, locale.name, speechRate.toString());
-          // Increment and report after every individual step (success or
-          // failure — _preRenderStep never throws).
-          completed++;
-          onProgress?.call(completed, total);
-        }),
-      );
-    }
-  }
-
-  @override
-  Future<void> clearCacheForPlan(int planId) async {
+  Future<void> clearCacheForPlan(String planId) async {
     // 1. Find entries associated with this plan.
     final planEntries = await (
       _db.select(_db.ttsCacheTable)
@@ -531,56 +451,50 @@ class TTSServiceImpl implements TTSService {
 
   // ── Private helpers ────────────────────────────────────────────────────
 
-  /// Pre-renders a single say step for [planId], swallowing errors so one
-  /// failed step does not abort the full [preRenderPlan] batch.
-  Future<void> _preRenderStep(
-    ({String text, String voiceId}) step,
-    int planId,
-    String provider,
-    String locale,
-    String speechRate,
-  ) async {
-    final hash = fullParamCacheKey(
-      provider: provider,
-      voice: step.voiceId,
-      text: step.text,
-      locale: locale,
-      speechRate: speechRate,
-    );
-    try {
-      final cached = await _findCachedPath(hash);
-      if (cached != null) return; // Already cached — nothing to do.
-
-      // Deduplicate: if this exact request is already in-flight, await it.
-      final existing = _inflight[hash];
-      if (existing != null) {
-        debugPrint('TTSService: joining in-flight request for voice=${step.voiceId}');
-        await existing;
-        return;
-      }
-
-      final future = _renderAndSave(
-        text: step.text,
-        voiceId: step.voiceId,
-        hash: hash,
-        provider: provider,
-        planId: planId,
-      ).whenComplete(() => _inflight.remove(hash));
-      _inflight[hash] = future;
-      await future;
-    } catch (e, st) {
-      final preview =
-          step.text.length > 40 ? '${step.text.substring(0, 40)}…' : step.text;
-      debugPrint(
-        'TTSService.preRenderPlan: failed to render "$preview" '
-        '(voice: ${step.voiceId}): $e\n$st',
-      );
-    }
-  }
-
   /// Maximum number of retries when the backend returns a transient error
   /// before falling back to platform TTS.
   static const int _kMaxApiRetries = 2;
+
+  /// Calls the backend TTS API and returns the audio file path.
+  ///
+  /// ### Fallback chain
+  /// - On network errors ([TtsFallbackException]) or API errors
+  ///   ([TtsApiException]), falls back to [renderWithPlatformTTS] so that
+  ///   the caller always receives a valid file path.
+  /// - If [renderWithPlatformTTS] also fails, the resulting
+  ///   [TtsFallbackException] is propagated to the caller.
+  Future<String> _renderGenAiWithFallback({
+    required String text,
+    required String voiceId,
+    required String hash,
+  }) async {
+    try {
+      return await _renderAndSave(
+        text: text,
+        voiceId: voiceId,
+        hash: hash,
+        planId: null,
+      );
+    } on TtsFallbackException catch (e) {
+      // Backend is offline or timed out — fall back to on-device TTS.
+      debugPrint(
+        'TTSService: backend unavailable ($e), falling back to platform TTS',
+      );
+      return renderWithPlatformTTS(text);
+    } on TtsApiException catch (e) {
+      // Backend returned an error — fall back to on-device TTS.
+      debugPrint(
+        'TTSService: backend API error ($e), falling back to platform TTS',
+      );
+      return renderWithPlatformTTS(text);
+    } catch (e) {
+      // Any other unexpected error — attempt platform TTS fallback.
+      debugPrint(
+        'TTSService: unexpected error ($e), falling back to platform TTS',
+      );
+      return renderWithPlatformTTS(text);
+    }
+  }
 
   /// Calls the backend TTS API, saves the audio file to [_audioDirectory],
   /// inserts a [TtsCacheTable] row, and returns the absolute file path.
@@ -593,8 +507,7 @@ class TTSServiceImpl implements TTSService {
     required String text,
     required String voiceId,
     required String hash,
-    required String provider,
-    required int? planId,
+    required String? planId,
   }) async {
     TtsApiException? lastApiError;
 
@@ -604,7 +517,6 @@ class TTSServiceImpl implements TTSService {
         final bytes = await _callBackendApi(
           text: text,
           voiceId: voiceId,
-          provider: provider,
         );
         debugPrint(
           'TTSService: received ${bytes.length} bytes from backend',
@@ -698,7 +610,6 @@ class TTSServiceImpl implements TTSService {
   Future<Uint8List> _callBackendApi({
     required String text,
     required String voiceId,
-    required String provider,
   }) async {
     assert(text.trim().isNotEmpty, 'text must not be empty');
     assert(voiceId.trim().isNotEmpty, 'voiceId must not be empty');
@@ -727,7 +638,7 @@ class TTSServiceImpl implements TTSService {
 
     debugPrint(
       'TTSService: calling backend TTS — '
-      'url=$serverUrl$kBackendTtsPath, voice=$voiceId, provider=$provider, '
+      'url=$serverUrl$kBackendTtsPath, voice=$voiceId, '
       'locale=${locale.name}',
     );
 
@@ -736,7 +647,6 @@ class TTSServiceImpl implements TTSService {
       'text': text,
       'voice': voiceId,
       'locale': locale.name,
-      'provider': provider,
     });
 
     var response = await _httpClient
@@ -790,18 +700,6 @@ class TTSServiceImpl implements TTSService {
           ..where((t) => t.key.equals(AppSettingsKeys.speechRate)))
         .getSingleOrNull();
     return double.tryParse(row?.value ?? '') ?? 1.0;
-  }
-
-  /// Reads the selected TTS provider from [AppSettingsTable].
-  ///
-  /// Returns `'kokoro'` when the key is absent or empty.
-  Future<String> _readTtsProvider() async {
-    final row = await (_db.select(_db.appSettingsTable)
-          ..where((t) => t.key.equals(AppSettingsKeys.ttsProvider)))
-        .getSingleOrNull();
-    final raw = row?.value;
-    if (raw == null || raw.trim().isEmpty) return 'kokoro';
-    return raw;
   }
 
   /// Reads the current [TtsLocale] from [AppSettingsTable].
@@ -871,7 +769,7 @@ class TTSServiceImpl implements TTSService {
     required String voiceId,
     required String filePath,
     required int fileSizeBytes,
-    required int? planId,
+    required String? planId,
   }) =>
       _db.into(_db.ttsCacheTable).insert(
         TtsCacheTableCompanion.insert(
@@ -883,39 +781,6 @@ class TTSServiceImpl implements TTSService {
         ),
         mode: InsertMode.insertOrIgnore,
       );
-
-  /// Recursively collects all [SayStep] entries in [steps], including those
-  /// nested inside [RepeatStep] blocks at any depth.
-  ///
-  /// [defaultVoice] is used when a [SayStep] does not specify its own voice.
-  List<({String text, String voiceId})> _collectSaySteps(
-    List<PlanStep> steps,
-    String defaultVoice,
-  ) {
-    final result = <({String text, String voiceId})>[];
-    for (final step in steps) {
-      switch (step) {
-        case SayStep(:final text, :final voiceId):
-          result.add((text: text, voiceId: voiceId ?? defaultVoice));
-        case RepeatStep(:final children):
-          // Recurse — RepeatStep can be nested at any depth.
-          result.addAll(_collectSaySteps(children, defaultVoice));
-        case CountStep(:final from, :final to):
-          // Pre-render each number in the count range using the plan voice.
-          final direction = from <= to ? 1 : -1;
-          var n = from;
-          while (true) {
-            result.add((text: n.toString(), voiceId: defaultVoice));
-            if (n == to) break;
-            n += direction;
-          }
-        case NotifyStep() || PlayStep() || WaitStep() || StopAudioStep():
-          // These step types produce no TTS audio.
-          break;
-      }
-    }
-    return result;
-  }
 
   /// Scans all [TtsCacheTable] rows and deletes any whose audio file is no
   /// longer present on disk.

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/widgets/tts_status_badge.dart';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Shared category helpers (used by PlanCard and CategoryFilter)
@@ -85,7 +86,7 @@ String formatRelativeTime(DateTime? dateTime) {
 }
 
 /// Returns a tonal container color appropriate for [category].
-Color _categoryBadgeColor(PlanCategory category, ColorScheme cs) {
+Color categoryBadgeColor(PlanCategory category, ColorScheme cs) {
   switch (category) {
     case PlanCategory.yoga:
     case PlanCategory.meditation:
@@ -100,7 +101,7 @@ Color _categoryBadgeColor(PlanCategory category, ColorScheme cs) {
   }
 }
 
-Color _categoryBadgeForeground(PlanCategory category, ColorScheme cs) {
+Color categoryBadgeForeground(PlanCategory category, ColorScheme cs) {
   switch (category) {
     case PlanCategory.yoga:
     case PlanCategory.meditation:
@@ -123,7 +124,12 @@ Color _categoryBadgeForeground(PlanCategory category, ColorScheme cs) {
 ///
 /// Stitch design: bg-surface-container-low p-6 rounded-xl, with icon badge,
 /// category tag, title, description, duration, and play button.
-class PlanCard extends StatelessWidget {
+///
+/// When [onActivate] is provided and [plan.isActive] is false, a prominent
+/// "Activate AI Voice" button is rendered between the description and the
+/// bottom row. The button shows a loading indicator while the activation
+/// request is in-flight and an inline error message on failure.
+class PlanCard extends StatefulWidget {
   const PlanCard({
     super.key,
     required this.plan,
@@ -132,31 +138,86 @@ class PlanCard extends StatelessWidget {
     this.onEdit,
     this.onDuplicate,
     this.onDelete,
+    this.onActivate,
   });
 
   final Plan plan;
+
   /// Called when the card body is tapped (navigate to detail/editor).
   final VoidCallback onTap;
+
   /// Called when the play button is tapped (start plan).
   final VoidCallback? onPlay;
   final VoidCallback? onEdit;
   final VoidCallback? onDuplicate;
   final VoidCallback? onDelete;
 
+  /// Async callback that triggers server-side TTS pre-generation for this
+  /// plan. When non-null and [plan.isActive] is false, the card renders an
+  /// "Activate AI Voice" button. The callback must throw (or complete with an
+  /// error) to signal failure — the card then displays an inline error message.
+  final Future<void> Function()? onActivate;
+
+  @override
+  State<PlanCard> createState() => _PlanCardState();
+}
+
+class _PlanCardState extends State<PlanCard> {
+  bool _isActivating = false;
+  String? _errorMessage;
+
+  // ── Activate handler ──────────────────────────────────────────────────────
+
+  Future<void> _handleActivate() async {
+    if (widget.onActivate == null) return;
+    setState(() {
+      _isActivating = true;
+      _errorMessage = null;
+    });
+    try {
+      await widget.onActivate!();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          // Strip the Dart "Exception: " prefix for a cleaner user message.
+          final raw = e.toString();
+          _errorMessage = raw.startsWith('Exception: ')
+              ? raw.substring('Exception: '.length)
+              : raw.isNotEmpty
+                  ? raw
+                  : 'Failed to activate AI voice. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isActivating = false);
+      }
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    var colorScheme = Theme.of(context).colorScheme;
-    var badgeColor = _categoryBadgeColor(plan.category, colorScheme);
-    var badgeFg = _categoryBadgeForeground(plan.category, colorScheme);
+    final colorScheme = Theme.of(context).colorScheme;
+    final badgeColor = categoryBadgeColor(widget.plan.category, colorScheme);
+    final badgeFg = categoryBadgeForeground(widget.plan.category, colorScheme);
+
+    final bool showTtsBadge = widget.plan.ttsStatus != 'none';
+    final bool showActivateButton =
+        !widget.plan.isActive && widget.onActivate != null;
 
     return Semantics(
       button: true,
-      label: '${plan.name}, ${planCategoryLabel(plan.category)}, '
-          '${formatPlanDuration(plan.totalDuration)}, '
-          '${formatRelativeTime(plan.lastUsedAt)}',
+      label: '${widget.plan.name}, ${planCategoryLabel(widget.plan.category)}, '
+          '${formatPlanDuration(widget.plan.totalDuration)}, '
+          '${formatRelativeTime(widget.plan.lastUsedAt)}',
+      explicitChildNodes: true,
       child: GestureDetector(
-        onTap: onTap,
-        onLongPress: (onEdit != null || onDuplicate != null || onDelete != null)
+        onTap: widget.onTap,
+        onLongPress: (widget.onEdit != null ||
+                widget.onDuplicate != null ||
+                widget.onDelete != null)
             ? () => _showContextMenu(context)
             : null,
         child: Container(
@@ -168,11 +229,11 @@ class PlanCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Top row: icon badge + category tag ──────────────────────
+              // ── Top row: icon badge + [TTS badge] + category tag ──────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // 48x48 icon badge
+                  // 48×48 icon badge
                   Container(
                     width: 48,
                     height: 48,
@@ -181,28 +242,46 @@ class PlanCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      planCategoryIcon(plan.category),
+                      planCategoryIcon(widget.plan.category),
                       color: badgeFg,
                       size: 24,
                     ),
                   ),
-                  // Category tag pill
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerLowest,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      planCategoryLabel(plan.category).toUpperCase(),
-                      style: TextStyle(
-                        color: badgeFg,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
+                  // Right side: optional TTS status + category tag
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showTtsBadge) ...[
+                        TtsStatusBadge(
+                          status: widget.plan.ttsStatus,
+                          completed: widget.plan.ttsCompleted,
+                          total: widget.plan.ttsTotal,
+                          onRetry: widget.plan.ttsStatus == 'failed' &&
+                                  widget.onActivate != null
+                              ? _handleActivate
+                              : null,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      // Category tag pill
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerLowest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          planCategoryLabel(widget.plan.category).toUpperCase(),
+                          style: TextStyle(
+                            color: badgeFg,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -211,7 +290,7 @@ class PlanCard extends StatelessWidget {
 
               // ── Title ──────────────────────────────────────────────────
               Text(
-                plan.name,
+                widget.plan.name,
                 style: GoogleFonts.manrope(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -225,8 +304,9 @@ class PlanCard extends StatelessWidget {
 
               // ── Description / last used ────────────────────────────────
               Text(
-                plan.description ??
-                    '${plan.steps.length} steps · ${formatRelativeTime(plan.lastUsedAt)}',
+                widget.plan.description ??
+                    '${widget.plan.steps.length} steps · '
+                        '${formatRelativeTime(widget.plan.lastUsedAt)}',
                 style: TextStyle(
                   fontSize: 14,
                   color: colorScheme.onSurfaceVariant,
@@ -236,6 +316,65 @@ class PlanCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
 
+              // ── Activate AI Voice button ───────────────────────────────
+              if (showActivateButton) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: Semantics(
+                    button: true,
+                    label: _isActivating
+                        ? 'Activating AI Voice, please wait'
+                        : 'Activate AI Voice for ${widget.plan.name}',
+                    child: FilledButton.tonal(
+                      onPressed: _isActivating ? null : _handleActivate,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 0),
+                      ),
+                      child: _isActivating
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Text('Activating…'),
+                              ],
+                            )
+                          : const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.auto_awesome, size: 16),
+                                SizedBox(width: 6),
+                                Text('Activate AI Voice'),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 4),
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+
               const SizedBox(height: 24),
 
               // ── Bottom row: duration + play button ─────────────────────
@@ -243,7 +382,7 @@ class PlanCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${formatPlanDuration(plan.totalDuration)} SESSION'
+                    '${formatPlanDuration(widget.plan.totalDuration)} SESSION'
                         .toUpperCase(),
                     style: TextStyle(
                       fontSize: 12,
@@ -253,27 +392,32 @@ class PlanCard extends StatelessWidget {
                     ),
                   ),
                   // Round play button
-                  GestureDetector(
-                    onTap: onPlay,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: colorScheme.primaryContainer,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: colorScheme.shadow.withValues(alpha: 0.08),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.play_arrow,
-                        color: colorScheme.onPrimaryContainer,
-                        size: 24,
-                        fill: 1.0,
+                  Semantics(
+                    button: true,
+                    label: 'Play ${widget.plan.name}',
+                    excludeSemantics: true,
+                    child: GestureDetector(
+                      onTap: widget.onPlay,
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primaryContainer,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: colorScheme.shadow.withValues(alpha: 0.08),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.play_arrow,
+                          color: colorScheme.onPrimaryContainer,
+                          size: 24,
+                          fill: 1.0,
+                        ),
                       ),
                     ),
                   ),
@@ -286,40 +430,43 @@ class PlanCard extends StatelessWidget {
     );
   }
 
+  // ── Context menu ──────────────────────────────────────────────────────────
+
   void _showContextMenu(BuildContext context) {
-    var colorScheme = Theme.of(context).colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (onEdit != null)
+            if (widget.onEdit != null)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Edit'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  onEdit!();
+                  widget.onEdit!();
                 },
               ),
-            if (onDuplicate != null)
+            if (widget.onDuplicate != null)
               ListTile(
                 leading: const Icon(Icons.copy_outlined),
                 title: const Text('Duplicate'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  onDuplicate!();
+                  widget.onDuplicate!();
                 },
               ),
-            if (onDelete != null)
+            if (widget.onDelete != null)
               ListTile(
-                leading: Icon(Icons.delete_outline, color: colorScheme.error),
+                leading:
+                    Icon(Icons.delete_outline, color: colorScheme.error),
                 title: Text('Delete',
                     style: TextStyle(color: colorScheme.error)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  onDelete!();
+                  widget.onDelete!();
                 },
               ),
           ],

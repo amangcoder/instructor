@@ -11,7 +11,11 @@ class PlansTable extends Table {
   @override
   String get tableName => 'plans';
 
-  IntColumn get id => integer().autoIncrement()();
+  @override
+  Set<Column> get primaryKey => {id};
+
+  /// Server-assigned UUID primary key.
+  TextColumn get id => text()();
 
   TextColumn get name => text().withLength(min: 1, max: 100)();
 
@@ -37,9 +41,15 @@ class PlansTable extends Table {
 
   DateTimeColumn get lastUsedAt => dateTime().nullable()();
 
-  /// Whether this plan was created by the user (true) or seeded as a starter
-  /// plan (false). Defaults to true so existing rows after migration are
-  /// treated as user-created.
-  BoolColumn get isUserCreated =>
-      boolean().withDefault(const Constant(true))();
+  /// Whether this plan has been activated for GenAI TTS generation.
+  BoolColumn get isActive => boolean().withDefault(const Constant(false))();
+
+  /// TTS generation status: 'none', 'pending', 'processing', 'completed', 'failed'.
+  TextColumn get ttsStatus => text().withDefault(const Constant('none'))();
+
+  /// Total number of TTS audio files to generate for this plan.
+  IntColumn get ttsTotal => integer().withDefault(const Constant(0))();
+
+  /// Number of TTS audio files successfully generated so far.
+  IntColumn get ttsCompleted => integer().withDefault(const Constant(0))();
 }

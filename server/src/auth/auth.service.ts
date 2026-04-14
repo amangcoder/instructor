@@ -61,19 +61,17 @@ export class AuthService {
 
   // ── OTP request ───────────────────────────────────────────────────────────
 
-  async requestOtp(email: string): Promise<{ message: string }> {
+  async requestOtp(email: string, ip?: string): Promise<{ message: string }> {
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Only allow pre-existing users (invited accounts) to authenticate.
-    const existingUser = await this.db.getUserByEmail(normalizedEmail);
-    if (!existingUser) {
-      throw new HttpException(
-        'This email is not authorized. Please contact the administrator.',
-        HttpStatus.FORBIDDEN,
-      );
+    // Per-IP rate limit: 10 OTP requests per IP per hour.
+    // This prevents spray attacks across many email addresses that bypass the
+    // per-email limit. Applied first so IP-banned callers don't hit the DB.
+    if (ip) {
+      await this.checkOtpRateLimitByIp(ip);
     }
 
-    // Enforce rate limit: 3 per 5 minutes per email (Upstash Redis-backed, atomic).
+    // Per-email rate limit: 3 per 5 minutes per email (Upstash Redis-backed, atomic).
     await this.checkOtpRateLimit(normalizedEmail);
 
     const code = this.generateOtp();
@@ -90,6 +88,9 @@ export class AuthService {
     // The email Lambda runs independently — no risk of dying with this request.
     await this.ses.dispatchOtpEmail(normalizedEmail, code);
 
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log(`[DEV] OTP for ${normalizedEmail}: ${code}`);
+    }
     this.logger.log(`OTP requested for ${normalizedEmail}`);
     return { message: 'OTP sent' };
   }
@@ -285,6 +286,23 @@ export class AuthService {
       this.logger.warn(`OTP rate limit hit for ${email}`);
       throw new HttpException(
         `Too many OTP requests. Try again in ${result.retryAfterSec} seconds.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async checkOtpRateLimitByIp(ip: string): Promise<void> {
+    const result = await this.rateLimit.consume(
+      'otp_ip',
+      ip,
+      10,   // 10 OTP requests per IP per hour
+      3600, // 1 hour window
+    );
+
+    if (!result.allowed) {
+      this.logger.warn(`OTP IP rate limit hit for ${ip}`);
+      throw new HttpException(
+        `Too many OTP requests from this IP. Try again in ${result.retryAfterSec} seconds.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }

@@ -7,7 +7,7 @@ import { UpstashRateLimiterModule } from './ratelimit/upstash-ratelimit.module';
 import { AuthModule } from './auth/auth.module';
 import { TtsModule } from './tts/tts.module';
 import { PlansModule } from './plans/plans.module';
-import { SyncModule } from './sync/sync.module';
+import { LibraryModule } from './library/library.module';
 import { HealthController } from './health.controller';
 import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
@@ -26,7 +26,7 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
     AuthModule,
     TtsModule,
     PlansModule,
-    SyncModule,
+    LibraryModule,
   ],
   controllers: [HealthController],
   providers: [

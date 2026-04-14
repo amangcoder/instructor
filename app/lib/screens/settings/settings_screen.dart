@@ -7,13 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/services/app_settings.dart';
-import 'package:instructor/services/voice_remap_service.dart';
 import 'package:instructor/theme/app_branding.dart';
-import 'package:instructor/widgets/voice_picker_sheet.dart';
 
 import 'widgets/auth_section.dart';
 import 'widgets/battery_optimization_prompt.dart';
-import 'widgets/sync_section.dart';
 
 /// App settings screen.
 ///
@@ -30,8 +27,6 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       appBar: AppBranding.brandedAppBar(
         actions: [
@@ -49,10 +44,7 @@ class SettingsScreen extends ConsumerWidget {
           _SettingsCard(
             children: [
               const AuthSection(),
-              const SyncSection(),
               const _ThemeModeSelector(),
-              const _TtsProviderSelector(),
-              const _LocaleSelector(),
               const _VoiceSelector(),
             ],
           ),
@@ -84,28 +76,6 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ],
 
-          // ── Logout button ─────────────────────────────────────────────
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () {},
-              style: TextButton.styleFrom(
-                backgroundColor: colorScheme.surfaceContainerLow,
-                foregroundColor: colorScheme.error,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                textStyle: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                ),
-              ),
-              child: const Text('Logout'),
-            ),
-          ),
-
           // ── Footer ────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 24),
@@ -113,7 +83,7 @@ class SettingsScreen extends ConsumerWidget {
               'Instructor for iOS & Android\nCrafted for The Curated Stillness',
               style: TextStyle(
                 fontSize: 11,
-                color: colorScheme.outlineVariant,
+                color: Theme.of(context).colorScheme.outlineVariant,
                 height: 1.5,
               ),
               textAlign: TextAlign.center,
@@ -218,194 +188,6 @@ class _ThemeModeSelector extends ConsumerWidget {
             ref.read(appSettingsProvider).write(AppSettingsKeys.themeMode, raw),
           );
         },
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TTS Provider section
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Provider selector that calls [VoiceRemapService] when the user switches TTS
-/// providers, shows a confirmation snackbar with the remap result, and offers
-/// a 'Change' action that opens the voice picker filtered to the new provider.
-class _TtsProviderSelector extends ConsumerStatefulWidget {
-  const _TtsProviderSelector();
-
-  @override
-  ConsumerState<_TtsProviderSelector> createState() =>
-      _TtsProviderSelectorState();
-}
-
-class _TtsProviderSelectorState extends ConsumerState<_TtsProviderSelector> {
-  /// True while [VoiceRemapService.remapVoicesForProvider] is in progress.
-  bool _isRemapping = false;
-
-  /// Triggers a cross-provider voice remap and shows a result snackbar.
-  ///
-  /// The dropdown is disabled ([_isRemapping] = true) during the async
-  /// operation to prevent concurrent remap calls.
-  Future<void> _onProviderChanged(String newProvider) async {
-    if (_isRemapping) return;
-
-    final oldProvider =
-        ref.read(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
-    if (newProvider == oldProvider) return;
-
-    setState(() => _isRemapping = true);
-
-    try {
-      final result = await ref.read(voiceRemapServiceProvider).remapVoicesForProvider(
-        oldProvider: oldProvider,
-        newProvider: newProvider,
-      );
-
-      if (!mounted) return;
-
-      // Capture the new voice ID before leaving the sync context.
-      final remappedVoiceId = result.newDefaultVoice;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.snackbarMessage),
-          duration: const Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'Change',
-            onPressed: () async {
-              if (!mounted) return;
-              // Open voice picker filtered to the new provider.
-              final selected = await showVoicePickerSheet(
-                context,
-                providerId: newProvider,
-                currentVoiceId: remappedVoiceId,
-              );
-              if (selected != null && mounted) {
-                unawaited(
-                  ref
-                      .read(appSettingsProvider)
-                      .write(AppSettingsKeys.defaultVoice, selected.id),
-                );
-              }
-            },
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to switch provider: $e')),
-      );
-    } finally {
-      if (mounted) setState(() => _isRemapping = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final providersAsync = ref.watch(ttsProvidersProvider);
-    final currentProvider =
-        ref.watch(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
-
-    return ListTile(
-      title: const Text('TTS Provider'),
-      subtitle: const Text('Service used to generate voice audio'),
-      trailing: _isRemapping
-          ? const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : providersAsync.when(
-              data: (response) {
-                final providers = response.providers;
-                if (providers.isEmpty) return const Text('—');
-                final validId = providers.any((p) => p.id == currentProvider)
-                    ? currentProvider
-                    : providers.first.id;
-                return ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 130),
-                  child: DropdownButton<String>(
-                    value: validId,
-                    underline: const SizedBox.shrink(),
-                    isExpanded: true,
-                    items: providers
-                        .map(
-                          (p) => DropdownMenuItem(
-                            value: p.id,
-                            child: Text(
-                              p.label,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (newProvider) {
-                      if (newProvider == null) return;
-                      unawaited(_onProviderChanged(newProvider));
-                    },
-                  ),
-                );
-              },
-              loading: () => const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              error: (_, __) => const Text('—'),
-            ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Locale section (dynamic — fetched from API based on selected provider)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _LocaleSelector extends ConsumerWidget {
-  const _LocaleSelector();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localesAsync = ref.watch(availableLocalesProvider);
-    final currentLocaleStr =
-        ref.watch(rawTtsLocaleSettingProvider).valueOrNull ?? 'en-IN';
-
-    return ListTile(
-      title: const Text('TTS Accent'),
-      subtitle: const Text('Language/accent used for voice instructions'),
-      trailing: localesAsync.when(
-        data: (locales) {
-          if (locales.isEmpty) return const Text('—');
-          // Ensure current value is in list.
-          final validId = locales.any((l) => l.id == currentLocaleStr)
-              ? currentLocaleStr
-              : locales.first.id;
-          return DropdownButton<String>(
-            value: validId,
-            underline: const SizedBox.shrink(),
-            items: locales
-                .map(
-                  (l) => DropdownMenuItem(
-                    value: l.id,
-                    child: Text(l.label),
-                  ),
-                )
-                .toList(),
-            onChanged: (newLocale) {
-              if (newLocale == null) return;
-              ref
-                  .read(appSettingsProvider)
-                  .write(AppSettingsKeys.ttsLocale, newLocale);
-            },
-          );
-        },
-        loading: () => const SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        error: (_, __) => const Text('—'),
       ),
     );
   }

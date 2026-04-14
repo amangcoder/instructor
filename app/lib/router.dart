@@ -158,9 +158,8 @@ GoRouter router(Ref ref) {
               GoRoute(
                 path: AppRoutes.editorEdit,
                 builder: (BuildContext context, GoRouterState state) {
-                  final raw = state.pathParameters['planId'];
-                  final planId = raw != null ? int.tryParse(raw) : null;
-                  if (planId == null) {
+                  final planId = state.pathParameters['planId'];
+                  if (planId == null || planId.isEmpty) {
                     return Scaffold(
                       appBar: AppBar(title: const Text('Invalid Plan')),
                       body: const Center(child: Text('Plan not found.')),

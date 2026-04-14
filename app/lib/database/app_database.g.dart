@@ -11,13 +11,9 @@ class $PlansTableTable extends PlansTable
   $PlansTableTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _idMeta = const VerificationMeta('id');
   @override
-  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
       'id', aliasedName, false,
-      hasAutoIncrement: true,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultConstraints:
-          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+      type: DriftSqlType.string, requiredDuringInsert: true);
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   @override
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
@@ -84,16 +80,40 @@ class $PlansTableTable extends PlansTable
   late final GeneratedColumn<DateTime> lastUsedAt = GeneratedColumn<DateTime>(
       'last_used_at', aliasedName, true,
       type: DriftSqlType.dateTime, requiredDuringInsert: false);
-  static const VerificationMeta _isUserCreatedMeta =
-      const VerificationMeta('isUserCreated');
+  static const VerificationMeta _isActiveMeta =
+      const VerificationMeta('isActive');
   @override
-  late final GeneratedColumn<bool> isUserCreated = GeneratedColumn<bool>(
-      'is_user_created', aliasedName, false,
+  late final GeneratedColumn<bool> isActive = GeneratedColumn<bool>(
+      'is_active', aliasedName, false,
       type: DriftSqlType.bool,
       requiredDuringInsert: false,
-      defaultConstraints: GeneratedColumn.constraintIsAlways(
-          'CHECK ("is_user_created" IN (0, 1))'),
-      defaultValue: const Constant(true));
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_active" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _ttsStatusMeta =
+      const VerificationMeta('ttsStatus');
+  @override
+  late final GeneratedColumn<String> ttsStatus = GeneratedColumn<String>(
+      'tts_status', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('none'));
+  static const VerificationMeta _ttsTotalMeta =
+      const VerificationMeta('ttsTotal');
+  @override
+  late final GeneratedColumn<int> ttsTotal = GeneratedColumn<int>(
+      'tts_total', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
+  static const VerificationMeta _ttsCompletedMeta =
+      const VerificationMeta('ttsCompleted');
+  @override
+  late final GeneratedColumn<int> ttsCompleted = GeneratedColumn<int>(
+      'tts_completed', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0));
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -106,7 +126,10 @@ class $PlansTableTable extends PlansTable
         createdAt,
         updatedAt,
         lastUsedAt,
-        isUserCreated
+        isActive,
+        ttsStatus,
+        ttsTotal,
+        ttsCompleted
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -120,6 +143,8 @@ class $PlansTableTable extends PlansTable
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
     }
     if (data.containsKey('name')) {
       context.handle(
@@ -157,11 +182,23 @@ class $PlansTableTable extends PlansTable
           lastUsedAt.isAcceptableOrUnknown(
               data['last_used_at']!, _lastUsedAtMeta));
     }
-    if (data.containsKey('is_user_created')) {
+    if (data.containsKey('is_active')) {
+      context.handle(_isActiveMeta,
+          isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta));
+    }
+    if (data.containsKey('tts_status')) {
+      context.handle(_ttsStatusMeta,
+          ttsStatus.isAcceptableOrUnknown(data['tts_status']!, _ttsStatusMeta));
+    }
+    if (data.containsKey('tts_total')) {
+      context.handle(_ttsTotalMeta,
+          ttsTotal.isAcceptableOrUnknown(data['tts_total']!, _ttsTotalMeta));
+    }
+    if (data.containsKey('tts_completed')) {
       context.handle(
-          _isUserCreatedMeta,
-          isUserCreated.isAcceptableOrUnknown(
-              data['is_user_created']!, _isUserCreatedMeta));
+          _ttsCompletedMeta,
+          ttsCompleted.isAcceptableOrUnknown(
+              data['tts_completed']!, _ttsCompletedMeta));
     }
     return context;
   }
@@ -173,7 +210,7 @@ class $PlansTableTable extends PlansTable
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return PlansTableData(
       id: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
       name: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
       description: attachedDatabase.typeMapping
@@ -193,8 +230,14 @@ class $PlansTableTable extends PlansTable
           .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
       lastUsedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}last_used_at']),
-      isUserCreated: attachedDatabase.typeMapping
-          .read(DriftSqlType.bool, data['${effectivePrefix}is_user_created'])!,
+      isActive: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_active'])!,
+      ttsStatus: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}tts_status'])!,
+      ttsTotal: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}tts_total'])!,
+      ttsCompleted: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}tts_completed'])!,
     );
   }
 
@@ -210,7 +253,8 @@ class $PlansTableTable extends PlansTable
 }
 
 class PlansTableData extends DataClass implements Insertable<PlansTableData> {
-  final int id;
+  /// Server-assigned UUID primary key.
+  final String id;
   final String name;
   final String? description;
 
@@ -229,10 +273,17 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
   final DateTime updatedAt;
   final DateTime? lastUsedAt;
 
-  /// Whether this plan was created by the user (true) or seeded as a starter
-  /// plan (false). Defaults to true so existing rows after migration are
-  /// treated as user-created.
-  final bool isUserCreated;
+  /// Whether this plan has been activated for GenAI TTS generation.
+  final bool isActive;
+
+  /// TTS generation status: 'none', 'pending', 'processing', 'completed', 'failed'.
+  final String ttsStatus;
+
+  /// Total number of TTS audio files to generate for this plan.
+  final int ttsTotal;
+
+  /// Number of TTS audio files successfully generated so far.
+  final int ttsCompleted;
   const PlansTableData(
       {required this.id,
       required this.name,
@@ -244,11 +295,14 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       required this.createdAt,
       required this.updatedAt,
       this.lastUsedAt,
-      required this.isUserCreated});
+      required this.isActive,
+      required this.ttsStatus,
+      required this.ttsTotal,
+      required this.ttsCompleted});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
-    map['id'] = Variable<int>(id);
+    map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
     if (!nullToAbsent || description != null) {
       map['description'] = Variable<String>(description);
@@ -268,7 +322,10 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
     if (!nullToAbsent || lastUsedAt != null) {
       map['last_used_at'] = Variable<DateTime>(lastUsedAt);
     }
-    map['is_user_created'] = Variable<bool>(isUserCreated);
+    map['is_active'] = Variable<bool>(isActive);
+    map['tts_status'] = Variable<String>(ttsStatus);
+    map['tts_total'] = Variable<int>(ttsTotal);
+    map['tts_completed'] = Variable<int>(ttsCompleted);
     return map;
   }
 
@@ -288,7 +345,10 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       lastUsedAt: lastUsedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastUsedAt),
-      isUserCreated: Value(isUserCreated),
+      isActive: Value(isActive),
+      ttsStatus: Value(ttsStatus),
+      ttsTotal: Value(ttsTotal),
+      ttsCompleted: Value(ttsCompleted),
     );
   }
 
@@ -296,7 +356,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       {ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return PlansTableData(
-      id: serializer.fromJson<int>(json['id']),
+      id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       description: serializer.fromJson<String?>(json['description']),
       category: serializer.fromJson<String>(json['category']),
@@ -306,14 +366,17 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       lastUsedAt: serializer.fromJson<DateTime?>(json['lastUsedAt']),
-      isUserCreated: serializer.fromJson<bool>(json['isUserCreated']),
+      isActive: serializer.fromJson<bool>(json['isActive']),
+      ttsStatus: serializer.fromJson<String>(json['ttsStatus']),
+      ttsTotal: serializer.fromJson<int>(json['ttsTotal']),
+      ttsCompleted: serializer.fromJson<int>(json['ttsCompleted']),
     );
   }
   @override
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
-      'id': serializer.toJson<int>(id),
+      'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'description': serializer.toJson<String?>(description),
       'category': serializer.toJson<String>(category),
@@ -323,12 +386,15 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'lastUsedAt': serializer.toJson<DateTime?>(lastUsedAt),
-      'isUserCreated': serializer.toJson<bool>(isUserCreated),
+      'isActive': serializer.toJson<bool>(isActive),
+      'ttsStatus': serializer.toJson<String>(ttsStatus),
+      'ttsTotal': serializer.toJson<int>(ttsTotal),
+      'ttsCompleted': serializer.toJson<int>(ttsCompleted),
     };
   }
 
   PlansTableData copyWith(
-          {int? id,
+          {String? id,
           String? name,
           Value<String?> description = const Value.absent(),
           String? category,
@@ -338,7 +404,10 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           DateTime? createdAt,
           DateTime? updatedAt,
           Value<DateTime?> lastUsedAt = const Value.absent(),
-          bool? isUserCreated}) =>
+          bool? isActive,
+          String? ttsStatus,
+          int? ttsTotal,
+          int? ttsCompleted}) =>
       PlansTableData(
         id: id ?? this.id,
         name: name ?? this.name,
@@ -350,7 +419,10 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         lastUsedAt: lastUsedAt.present ? lastUsedAt.value : this.lastUsedAt,
-        isUserCreated: isUserCreated ?? this.isUserCreated,
+        isActive: isActive ?? this.isActive,
+        ttsStatus: ttsStatus ?? this.ttsStatus,
+        ttsTotal: ttsTotal ?? this.ttsTotal,
+        ttsCompleted: ttsCompleted ?? this.ttsCompleted,
       );
   PlansTableData copyWithCompanion(PlansTableCompanion data) {
     return PlansTableData(
@@ -368,9 +440,12 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       lastUsedAt:
           data.lastUsedAt.present ? data.lastUsedAt.value : this.lastUsedAt,
-      isUserCreated: data.isUserCreated.present
-          ? data.isUserCreated.value
-          : this.isUserCreated,
+      isActive: data.isActive.present ? data.isActive.value : this.isActive,
+      ttsStatus: data.ttsStatus.present ? data.ttsStatus.value : this.ttsStatus,
+      ttsTotal: data.ttsTotal.present ? data.ttsTotal.value : this.ttsTotal,
+      ttsCompleted: data.ttsCompleted.present
+          ? data.ttsCompleted.value
+          : this.ttsCompleted,
     );
   }
 
@@ -387,14 +462,30 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('lastUsedAt: $lastUsedAt, ')
-          ..write('isUserCreated: $isUserCreated')
+          ..write('isActive: $isActive, ')
+          ..write('ttsStatus: $ttsStatus, ')
+          ..write('ttsTotal: $ttsTotal, ')
+          ..write('ttsCompleted: $ttsCompleted')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, description, category, tags,
-      defaultVoice, steps, createdAt, updatedAt, lastUsedAt, isUserCreated);
+  int get hashCode => Object.hash(
+      id,
+      name,
+      description,
+      category,
+      tags,
+      defaultVoice,
+      steps,
+      createdAt,
+      updatedAt,
+      lastUsedAt,
+      isActive,
+      ttsStatus,
+      ttsTotal,
+      ttsCompleted);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -409,11 +500,14 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.lastUsedAt == this.lastUsedAt &&
-          other.isUserCreated == this.isUserCreated);
+          other.isActive == this.isActive &&
+          other.ttsStatus == this.ttsStatus &&
+          other.ttsTotal == this.ttsTotal &&
+          other.ttsCompleted == this.ttsCompleted);
 }
 
 class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
-  final Value<int> id;
+  final Value<String> id;
   final Value<String> name;
   final Value<String?> description;
   final Value<String> category;
@@ -423,7 +517,11 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<DateTime?> lastUsedAt;
-  final Value<bool> isUserCreated;
+  final Value<bool> isActive;
+  final Value<String> ttsStatus;
+  final Value<int> ttsTotal;
+  final Value<int> ttsCompleted;
+  final Value<int> rowid;
   const PlansTableCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
@@ -435,10 +533,14 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.lastUsedAt = const Value.absent(),
-    this.isUserCreated = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.ttsStatus = const Value.absent(),
+    this.ttsTotal = const Value.absent(),
+    this.ttsCompleted = const Value.absent(),
+    this.rowid = const Value.absent(),
   });
   PlansTableCompanion.insert({
-    this.id = const Value.absent(),
+    required String id,
     required String name,
     this.description = const Value.absent(),
     this.category = const Value.absent(),
@@ -448,10 +550,15 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.lastUsedAt = const Value.absent(),
-    this.isUserCreated = const Value.absent(),
-  }) : name = Value(name);
+    this.isActive = const Value.absent(),
+    this.ttsStatus = const Value.absent(),
+    this.ttsTotal = const Value.absent(),
+    this.ttsCompleted = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        name = Value(name);
   static Insertable<PlansTableData> custom({
-    Expression<int>? id,
+    Expression<String>? id,
     Expression<String>? name,
     Expression<String>? description,
     Expression<String>? category,
@@ -461,7 +568,11 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<DateTime>? lastUsedAt,
-    Expression<bool>? isUserCreated,
+    Expression<bool>? isActive,
+    Expression<String>? ttsStatus,
+    Expression<int>? ttsTotal,
+    Expression<int>? ttsCompleted,
+    Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -474,12 +585,16 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (lastUsedAt != null) 'last_used_at': lastUsedAt,
-      if (isUserCreated != null) 'is_user_created': isUserCreated,
+      if (isActive != null) 'is_active': isActive,
+      if (ttsStatus != null) 'tts_status': ttsStatus,
+      if (ttsTotal != null) 'tts_total': ttsTotal,
+      if (ttsCompleted != null) 'tts_completed': ttsCompleted,
+      if (rowid != null) 'rowid': rowid,
     });
   }
 
   PlansTableCompanion copyWith(
-      {Value<int>? id,
+      {Value<String>? id,
       Value<String>? name,
       Value<String?>? description,
       Value<String>? category,
@@ -489,7 +604,11 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       Value<DateTime>? createdAt,
       Value<DateTime>? updatedAt,
       Value<DateTime?>? lastUsedAt,
-      Value<bool>? isUserCreated}) {
+      Value<bool>? isActive,
+      Value<String>? ttsStatus,
+      Value<int>? ttsTotal,
+      Value<int>? ttsCompleted,
+      Value<int>? rowid}) {
     return PlansTableCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
@@ -501,7 +620,11 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       lastUsedAt: lastUsedAt ?? this.lastUsedAt,
-      isUserCreated: isUserCreated ?? this.isUserCreated,
+      isActive: isActive ?? this.isActive,
+      ttsStatus: ttsStatus ?? this.ttsStatus,
+      ttsTotal: ttsTotal ?? this.ttsTotal,
+      ttsCompleted: ttsCompleted ?? this.ttsCompleted,
+      rowid: rowid ?? this.rowid,
     );
   }
 
@@ -509,7 +632,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     if (id.present) {
-      map['id'] = Variable<int>(id.value);
+      map['id'] = Variable<String>(id.value);
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
@@ -540,8 +663,20 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
     if (lastUsedAt.present) {
       map['last_used_at'] = Variable<DateTime>(lastUsedAt.value);
     }
-    if (isUserCreated.present) {
-      map['is_user_created'] = Variable<bool>(isUserCreated.value);
+    if (isActive.present) {
+      map['is_active'] = Variable<bool>(isActive.value);
+    }
+    if (ttsStatus.present) {
+      map['tts_status'] = Variable<String>(ttsStatus.value);
+    }
+    if (ttsTotal.present) {
+      map['tts_total'] = Variable<int>(ttsTotal.value);
+    }
+    if (ttsCompleted.present) {
+      map['tts_completed'] = Variable<int>(ttsCompleted.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
     }
     return map;
   }
@@ -559,7 +694,11 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('lastUsedAt: $lastUsedAt, ')
-          ..write('isUserCreated: $isUserCreated')
+          ..write('isActive: $isActive, ')
+          ..write('ttsStatus: $ttsStatus, ')
+          ..write('ttsTotal: $ttsTotal, ')
+          ..write('ttsCompleted: $ttsCompleted, ')
+          ..write('rowid: $rowid')
           ..write(')'))
         .toString();
   }
@@ -610,9 +749,9 @@ class $TtsCacheTableTable extends TtsCacheTable
       defaultValue: const Constant(0));
   static const VerificationMeta _planIdMeta = const VerificationMeta('planId');
   @override
-  late final GeneratedColumn<int> planId = GeneratedColumn<int>(
+  late final GeneratedColumn<String> planId = GeneratedColumn<String>(
       'plan_id', aliasedName, true,
-      type: DriftSqlType.int,
+      type: DriftSqlType.string,
       requiredDuringInsert: false,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES plans (id) ON DELETE SET NULL'));
@@ -727,7 +866,7 @@ class $TtsCacheTableTable extends TtsCacheTable
       fileSizeBytes: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}file_size_bytes'])!,
       planId: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}plan_id']),
+          .read(DriftSqlType.string, data['${effectivePrefix}plan_id']),
       provider: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}provider'])!,
       speechRate: attachedDatabase.typeMapping
@@ -762,7 +901,7 @@ class TtsCacheTableData extends DataClass
   final int fileSizeBytes;
 
   /// Optional reference back to the owning Plan for bulk cache eviction.
-  final int? planId;
+  final String? planId;
 
   /// TTS provider that generated this audio (e.g. 'gemini', 'kokoro').
   ///
@@ -793,7 +932,7 @@ class TtsCacheTableData extends DataClass
     map['file_path'] = Variable<String>(filePath);
     map['file_size_bytes'] = Variable<int>(fileSizeBytes);
     if (!nullToAbsent || planId != null) {
-      map['plan_id'] = Variable<int>(planId);
+      map['plan_id'] = Variable<String>(planId);
     }
     map['provider'] = Variable<String>(provider);
     map['speech_rate'] = Variable<String>(speechRate);
@@ -825,7 +964,7 @@ class TtsCacheTableData extends DataClass
       voiceId: serializer.fromJson<String>(json['voiceId']),
       filePath: serializer.fromJson<String>(json['filePath']),
       fileSizeBytes: serializer.fromJson<int>(json['fileSizeBytes']),
-      planId: serializer.fromJson<int?>(json['planId']),
+      planId: serializer.fromJson<String?>(json['planId']),
       provider: serializer.fromJson<String>(json['provider']),
       speechRate: serializer.fromJson<String>(json['speechRate']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
@@ -840,7 +979,7 @@ class TtsCacheTableData extends DataClass
       'voiceId': serializer.toJson<String>(voiceId),
       'filePath': serializer.toJson<String>(filePath),
       'fileSizeBytes': serializer.toJson<int>(fileSizeBytes),
-      'planId': serializer.toJson<int?>(planId),
+      'planId': serializer.toJson<String?>(planId),
       'provider': serializer.toJson<String>(provider),
       'speechRate': serializer.toJson<String>(speechRate),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -853,7 +992,7 @@ class TtsCacheTableData extends DataClass
           String? voiceId,
           String? filePath,
           int? fileSizeBytes,
-          Value<int?> planId = const Value.absent(),
+          Value<String?> planId = const Value.absent(),
           String? provider,
           String? speechRate,
           DateTime? createdAt}) =>
@@ -925,7 +1064,7 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
   final Value<String> voiceId;
   final Value<String> filePath;
   final Value<int> fileSizeBytes;
-  final Value<int?> planId;
+  final Value<String?> planId;
   final Value<String> provider;
   final Value<String> speechRate;
   final Value<DateTime> createdAt;
@@ -959,7 +1098,7 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
     Expression<String>? voiceId,
     Expression<String>? filePath,
     Expression<int>? fileSizeBytes,
-    Expression<int>? planId,
+    Expression<String>? planId,
     Expression<String>? provider,
     Expression<String>? speechRate,
     Expression<DateTime>? createdAt,
@@ -983,7 +1122,7 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
       Value<String>? voiceId,
       Value<String>? filePath,
       Value<int>? fileSizeBytes,
-      Value<int?>? planId,
+      Value<String?>? planId,
       Value<String>? provider,
       Value<String>? speechRate,
       Value<DateTime>? createdAt}) {
@@ -1019,7 +1158,7 @@ class TtsCacheTableCompanion extends UpdateCompanion<TtsCacheTableData> {
       map['file_size_bytes'] = Variable<int>(fileSizeBytes.value);
     }
     if (planId.present) {
-      map['plan_id'] = Variable<int>(planId.value);
+      map['plan_id'] = Variable<String>(planId.value);
     }
     if (provider.present) {
       map['provider'] = Variable<String>(provider.value);
@@ -1067,9 +1206,9 @@ class $ExecutionStateTableTable extends ExecutionStateTable
           GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
   static const VerificationMeta _planIdMeta = const VerificationMeta('planId');
   @override
-  late final GeneratedColumn<int> planId = GeneratedColumn<int>(
+  late final GeneratedColumn<String> planId = GeneratedColumn<String>(
       'plan_id', aliasedName, false,
-      type: DriftSqlType.int,
+      type: DriftSqlType.string,
       requiredDuringInsert: true,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES plans (id) ON DELETE CASCADE'));
@@ -1207,7 +1346,7 @@ class $ExecutionStateTableTable extends ExecutionStateTable
       id: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
       planId: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}plan_id'])!,
+          .read(DriftSqlType.string, data['${effectivePrefix}plan_id'])!,
       currentStepIndex: attachedDatabase.typeMapping.read(
           DriftSqlType.int, data['${effectivePrefix}current_step_index'])!,
       repeatCounters: attachedDatabase.typeMapping.read(
@@ -1234,7 +1373,7 @@ class $ExecutionStateTableTable extends ExecutionStateTable
 class ExecutionStateTableData extends DataClass
     implements Insertable<ExecutionStateTableData> {
   final int id;
-  final int planId;
+  final String planId;
 
   /// Index into the Plan's flattened step list.
   final int currentStepIndex;
@@ -1272,7 +1411,7 @@ class ExecutionStateTableData extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
-    map['plan_id'] = Variable<int>(planId);
+    map['plan_id'] = Variable<String>(planId);
     map['current_step_index'] = Variable<int>(currentStepIndex);
     map['repeat_counters'] = Variable<String>(repeatCounters);
     map['elapsed_ms'] = Variable<int>(elapsedMs);
@@ -1306,7 +1445,7 @@ class ExecutionStateTableData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return ExecutionStateTableData(
       id: serializer.fromJson<int>(json['id']),
-      planId: serializer.fromJson<int>(json['planId']),
+      planId: serializer.fromJson<String>(json['planId']),
       currentStepIndex: serializer.fromJson<int>(json['currentStepIndex']),
       repeatCounters: serializer.fromJson<String>(json['repeatCounters']),
       elapsedMs: serializer.fromJson<int>(json['elapsedMs']),
@@ -1321,7 +1460,7 @@ class ExecutionStateTableData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
-      'planId': serializer.toJson<int>(planId),
+      'planId': serializer.toJson<String>(planId),
       'currentStepIndex': serializer.toJson<int>(currentStepIndex),
       'repeatCounters': serializer.toJson<String>(repeatCounters),
       'elapsedMs': serializer.toJson<int>(elapsedMs),
@@ -1334,7 +1473,7 @@ class ExecutionStateTableData extends DataClass
 
   ExecutionStateTableData copyWith(
           {int? id,
-          int? planId,
+          String? planId,
           int? currentStepIndex,
           String? repeatCounters,
           int? elapsedMs,
@@ -1414,7 +1553,7 @@ class ExecutionStateTableData extends DataClass
 class ExecutionStateTableCompanion
     extends UpdateCompanion<ExecutionStateTableData> {
   final Value<int> id;
-  final Value<int> planId;
+  final Value<String> planId;
   final Value<int> currentStepIndex;
   final Value<String> repeatCounters;
   final Value<int> elapsedMs;
@@ -1435,7 +1574,7 @@ class ExecutionStateTableCompanion
   });
   ExecutionStateTableCompanion.insert({
     this.id = const Value.absent(),
-    required int planId,
+    required String planId,
     this.currentStepIndex = const Value.absent(),
     this.repeatCounters = const Value.absent(),
     this.elapsedMs = const Value.absent(),
@@ -1446,7 +1585,7 @@ class ExecutionStateTableCompanion
   }) : planId = Value(planId);
   static Insertable<ExecutionStateTableData> custom({
     Expression<int>? id,
-    Expression<int>? planId,
+    Expression<String>? planId,
     Expression<int>? currentStepIndex,
     Expression<String>? repeatCounters,
     Expression<int>? elapsedMs,
@@ -1470,7 +1609,7 @@ class ExecutionStateTableCompanion
 
   ExecutionStateTableCompanion copyWith(
       {Value<int>? id,
-      Value<int>? planId,
+      Value<String>? planId,
       Value<int>? currentStepIndex,
       Value<String>? repeatCounters,
       Value<int>? elapsedMs,
@@ -1498,7 +1637,7 @@ class ExecutionStateTableCompanion
       map['id'] = Variable<int>(id.value);
     }
     if (planId.present) {
-      map['plan_id'] = Variable<int>(planId.value);
+      map['plan_id'] = Variable<String>(planId.value);
     }
     if (currentStepIndex.present) {
       map['current_step_index'] = Variable<int>(currentStepIndex.value);
@@ -1804,242 +1943,6 @@ class AppSettingsTableCompanion extends UpdateCompanion<AppSettingsTableData> {
   }
 }
 
-class $ProviderCatalogTableTable extends ProviderCatalogTable
-    with TableInfo<$ProviderCatalogTableTable, ProviderCatalogTableData> {
-  @override
-  final GeneratedDatabase attachedDatabase;
-  final String? _alias;
-  $ProviderCatalogTableTable(this.attachedDatabase, [this._alias]);
-  static const VerificationMeta _idMeta = const VerificationMeta('id');
-  @override
-  late final GeneratedColumn<int> id = GeneratedColumn<int>(
-      'id', aliasedName, false,
-      type: DriftSqlType.int,
-      requiredDuringInsert: false,
-      defaultValue: const Constant(1));
-  static const VerificationMeta _catalogJsonMeta =
-      const VerificationMeta('catalogJson');
-  @override
-  late final GeneratedColumn<String> catalogJson = GeneratedColumn<String>(
-      'catalog_json', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
-  static const VerificationMeta _fetchedAtMeta =
-      const VerificationMeta('fetchedAt');
-  @override
-  late final GeneratedColumn<DateTime> fetchedAt = GeneratedColumn<DateTime>(
-      'fetched_at', aliasedName, false,
-      type: DriftSqlType.dateTime, requiredDuringInsert: true);
-  @override
-  List<GeneratedColumn> get $columns => [id, catalogJson, fetchedAt];
-  @override
-  String get aliasedName => _alias ?? actualTableName;
-  @override
-  String get actualTableName => $name;
-  static const String $name = 'provider_catalog';
-  @override
-  VerificationContext validateIntegrity(
-      Insertable<ProviderCatalogTableData> instance,
-      {bool isInserting = false}) {
-    final context = VerificationContext();
-    final data = instance.toColumns(true);
-    if (data.containsKey('id')) {
-      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
-    }
-    if (data.containsKey('catalog_json')) {
-      context.handle(
-          _catalogJsonMeta,
-          catalogJson.isAcceptableOrUnknown(
-              data['catalog_json']!, _catalogJsonMeta));
-    } else if (isInserting) {
-      context.missing(_catalogJsonMeta);
-    }
-    if (data.containsKey('fetched_at')) {
-      context.handle(_fetchedAtMeta,
-          fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta));
-    } else if (isInserting) {
-      context.missing(_fetchedAtMeta);
-    }
-    return context;
-  }
-
-  @override
-  Set<GeneratedColumn> get $primaryKey => {id};
-  @override
-  ProviderCatalogTableData map(Map<String, dynamic> data,
-      {String? tablePrefix}) {
-    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return ProviderCatalogTableData(
-      id: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
-      catalogJson: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}catalog_json'])!,
-      fetchedAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}fetched_at'])!,
-    );
-  }
-
-  @override
-  $ProviderCatalogTableTable createAlias(String alias) {
-    return $ProviderCatalogTableTable(attachedDatabase, alias);
-  }
-}
-
-class ProviderCatalogTableData extends DataClass
-    implements Insertable<ProviderCatalogTableData> {
-  /// Primary key — always 1 (single-row table).
-  final int id;
-
-  /// Full JSON-encoded catalog from GET /api/tts/providers.
-  ///
-  /// Structure:
-  /// ```json
-  /// { "providers": [ { "id": "gemini", "label": "...", "voices": [...], ... } ] }
-  /// ```
-  final String catalogJson;
-
-  /// UTC timestamp of the last successful catalog fetch from the server.
-  final DateTime fetchedAt;
-  const ProviderCatalogTableData(
-      {required this.id, required this.catalogJson, required this.fetchedAt});
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    final map = <String, Expression>{};
-    map['id'] = Variable<int>(id);
-    map['catalog_json'] = Variable<String>(catalogJson);
-    map['fetched_at'] = Variable<DateTime>(fetchedAt);
-    return map;
-  }
-
-  ProviderCatalogTableCompanion toCompanion(bool nullToAbsent) {
-    return ProviderCatalogTableCompanion(
-      id: Value(id),
-      catalogJson: Value(catalogJson),
-      fetchedAt: Value(fetchedAt),
-    );
-  }
-
-  factory ProviderCatalogTableData.fromJson(Map<String, dynamic> json,
-      {ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return ProviderCatalogTableData(
-      id: serializer.fromJson<int>(json['id']),
-      catalogJson: serializer.fromJson<String>(json['catalogJson']),
-      fetchedAt: serializer.fromJson<DateTime>(json['fetchedAt']),
-    );
-  }
-  @override
-  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
-    serializer ??= driftRuntimeOptions.defaultSerializer;
-    return <String, dynamic>{
-      'id': serializer.toJson<int>(id),
-      'catalogJson': serializer.toJson<String>(catalogJson),
-      'fetchedAt': serializer.toJson<DateTime>(fetchedAt),
-    };
-  }
-
-  ProviderCatalogTableData copyWith(
-          {int? id, String? catalogJson, DateTime? fetchedAt}) =>
-      ProviderCatalogTableData(
-        id: id ?? this.id,
-        catalogJson: catalogJson ?? this.catalogJson,
-        fetchedAt: fetchedAt ?? this.fetchedAt,
-      );
-  ProviderCatalogTableData copyWithCompanion(
-      ProviderCatalogTableCompanion data) {
-    return ProviderCatalogTableData(
-      id: data.id.present ? data.id.value : this.id,
-      catalogJson:
-          data.catalogJson.present ? data.catalogJson.value : this.catalogJson,
-      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
-    );
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('ProviderCatalogTableData(')
-          ..write('id: $id, ')
-          ..write('catalogJson: $catalogJson, ')
-          ..write('fetchedAt: $fetchedAt')
-          ..write(')'))
-        .toString();
-  }
-
-  @override
-  int get hashCode => Object.hash(id, catalogJson, fetchedAt);
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is ProviderCatalogTableData &&
-          other.id == this.id &&
-          other.catalogJson == this.catalogJson &&
-          other.fetchedAt == this.fetchedAt);
-}
-
-class ProviderCatalogTableCompanion
-    extends UpdateCompanion<ProviderCatalogTableData> {
-  final Value<int> id;
-  final Value<String> catalogJson;
-  final Value<DateTime> fetchedAt;
-  const ProviderCatalogTableCompanion({
-    this.id = const Value.absent(),
-    this.catalogJson = const Value.absent(),
-    this.fetchedAt = const Value.absent(),
-  });
-  ProviderCatalogTableCompanion.insert({
-    this.id = const Value.absent(),
-    required String catalogJson,
-    required DateTime fetchedAt,
-  })  : catalogJson = Value(catalogJson),
-        fetchedAt = Value(fetchedAt);
-  static Insertable<ProviderCatalogTableData> custom({
-    Expression<int>? id,
-    Expression<String>? catalogJson,
-    Expression<DateTime>? fetchedAt,
-  }) {
-    return RawValuesInsertable({
-      if (id != null) 'id': id,
-      if (catalogJson != null) 'catalog_json': catalogJson,
-      if (fetchedAt != null) 'fetched_at': fetchedAt,
-    });
-  }
-
-  ProviderCatalogTableCompanion copyWith(
-      {Value<int>? id,
-      Value<String>? catalogJson,
-      Value<DateTime>? fetchedAt}) {
-    return ProviderCatalogTableCompanion(
-      id: id ?? this.id,
-      catalogJson: catalogJson ?? this.catalogJson,
-      fetchedAt: fetchedAt ?? this.fetchedAt,
-    );
-  }
-
-  @override
-  Map<String, Expression> toColumns(bool nullToAbsent) {
-    final map = <String, Expression>{};
-    if (id.present) {
-      map['id'] = Variable<int>(id.value);
-    }
-    if (catalogJson.present) {
-      map['catalog_json'] = Variable<String>(catalogJson.value);
-    }
-    if (fetchedAt.present) {
-      map['fetched_at'] = Variable<DateTime>(fetchedAt.value);
-    }
-    return map;
-  }
-
-  @override
-  String toString() {
-    return (StringBuffer('ProviderCatalogTableCompanion(')
-          ..write('id: $id, ')
-          ..write('catalogJson: $catalogJson, ')
-          ..write('fetchedAt: $fetchedAt')
-          ..write(')'))
-        .toString();
-  }
-}
-
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2049,19 +1952,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ExecutionStateTableTable(this);
   late final $AppSettingsTableTable appSettingsTable =
       $AppSettingsTableTable(this);
-  late final $ProviderCatalogTableTable providerCatalogTable =
-      $ProviderCatalogTableTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [
-        plansTable,
-        ttsCacheTable,
-        executionStateTable,
-        appSettingsTable,
-        providerCatalogTable
-      ];
+  List<DatabaseSchemaEntity> get allSchemaEntities =>
+      [plansTable, ttsCacheTable, executionStateTable, appSettingsTable];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules(
         [
@@ -2084,7 +1980,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
 }
 
 typedef $$PlansTableTableCreateCompanionBuilder = PlansTableCompanion Function({
-  Value<int> id,
+  required String id,
   required String name,
   Value<String?> description,
   Value<String> category,
@@ -2094,10 +1990,14 @@ typedef $$PlansTableTableCreateCompanionBuilder = PlansTableCompanion Function({
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<DateTime?> lastUsedAt,
-  Value<bool> isUserCreated,
+  Value<bool> isActive,
+  Value<String> ttsStatus,
+  Value<int> ttsTotal,
+  Value<int> ttsCompleted,
+  Value<int> rowid,
 });
 typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
-  Value<int> id,
+  Value<String> id,
   Value<String> name,
   Value<String?> description,
   Value<String> category,
@@ -2107,7 +2007,11 @@ typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<DateTime?> lastUsedAt,
-  Value<bool> isUserCreated,
+  Value<bool> isActive,
+  Value<String> ttsStatus,
+  Value<int> ttsTotal,
+  Value<int> ttsCompleted,
+  Value<int> rowid,
 });
 
 final class $$PlansTableTableReferences
@@ -2122,7 +2026,7 @@ final class $$PlansTableTableReferences
 
   $$TtsCacheTableTableProcessedTableManager get ttsCacheTableRefs {
     final manager = $$TtsCacheTableTableTableManager($_db, $_db.ttsCacheTable)
-        .filter((f) => f.planId.id.sqlEquals($_itemColumn<int>('id')!));
+        .filter((f) => f.planId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_ttsCacheTableRefsTable($_db));
     return ProcessedTableManager(
@@ -2139,7 +2043,7 @@ final class $$PlansTableTableReferences
   $$ExecutionStateTableTableProcessedTableManager get executionStateTableRefs {
     final manager =
         $$ExecutionStateTableTableTableManager($_db, $_db.executionStateTable)
-            .filter((f) => f.planId.id.sqlEquals($_itemColumn<int>('id')!));
+            .filter((f) => f.planId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache =
         $_typedResult.readTableOrNull(_executionStateTableRefsTable($_db));
@@ -2157,7 +2061,7 @@ class $$PlansTableTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  ColumnFilters<int> get id => $composableBuilder(
+  ColumnFilters<String> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get name => $composableBuilder(
@@ -2191,8 +2095,17 @@ class $$PlansTableTableFilterComposer
   ColumnFilters<DateTime> get lastUsedAt => $composableBuilder(
       column: $table.lastUsedAt, builder: (column) => ColumnFilters(column));
 
-  ColumnFilters<bool> get isUserCreated => $composableBuilder(
-      column: $table.isUserCreated, builder: (column) => ColumnFilters(column));
+  ColumnFilters<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get ttsStatus => $composableBuilder(
+      column: $table.ttsStatus, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get ttsTotal => $composableBuilder(
+      column: $table.ttsTotal, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get ttsCompleted => $composableBuilder(
+      column: $table.ttsCompleted, builder: (column) => ColumnFilters(column));
 
   Expression<bool> ttsCacheTableRefs(
       Expression<bool> Function($$TtsCacheTableTableFilterComposer f) f) {
@@ -2246,7 +2159,7 @@ class $$PlansTableTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  ColumnOrderings<int> get id => $composableBuilder(
+  ColumnOrderings<String> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<String> get name => $composableBuilder(
@@ -2277,8 +2190,17 @@ class $$PlansTableTableOrderingComposer
   ColumnOrderings<DateTime> get lastUsedAt => $composableBuilder(
       column: $table.lastUsedAt, builder: (column) => ColumnOrderings(column));
 
-  ColumnOrderings<bool> get isUserCreated => $composableBuilder(
-      column: $table.isUserCreated,
+  ColumnOrderings<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get ttsStatus => $composableBuilder(
+      column: $table.ttsStatus, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get ttsTotal => $composableBuilder(
+      column: $table.ttsTotal, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get ttsCompleted => $composableBuilder(
+      column: $table.ttsCompleted,
       builder: (column) => ColumnOrderings(column));
 }
 
@@ -2291,7 +2213,7 @@ class $$PlansTableTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  GeneratedColumn<int> get id =>
+  GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
   GeneratedColumn<String> get name =>
@@ -2321,8 +2243,17 @@ class $$PlansTableTableAnnotationComposer
   GeneratedColumn<DateTime> get lastUsedAt => $composableBuilder(
       column: $table.lastUsedAt, builder: (column) => column);
 
-  GeneratedColumn<bool> get isUserCreated => $composableBuilder(
-      column: $table.isUserCreated, builder: (column) => column);
+  GeneratedColumn<bool> get isActive =>
+      $composableBuilder(column: $table.isActive, builder: (column) => column);
+
+  GeneratedColumn<String> get ttsStatus =>
+      $composableBuilder(column: $table.ttsStatus, builder: (column) => column);
+
+  GeneratedColumn<int> get ttsTotal =>
+      $composableBuilder(column: $table.ttsTotal, builder: (column) => column);
+
+  GeneratedColumn<int> get ttsCompleted => $composableBuilder(
+      column: $table.ttsCompleted, builder: (column) => column);
 
   Expression<T> ttsCacheTableRefs<T extends Object>(
       Expression<T> Function($$TtsCacheTableTableAnnotationComposer a) f) {
@@ -2393,7 +2324,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
           createComputedFieldComposer: () =>
               $$PlansTableTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback: ({
-            Value<int> id = const Value.absent(),
+            Value<String> id = const Value.absent(),
             Value<String> name = const Value.absent(),
             Value<String?> description = const Value.absent(),
             Value<String> category = const Value.absent(),
@@ -2403,7 +2334,11 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<DateTime?> lastUsedAt = const Value.absent(),
-            Value<bool> isUserCreated = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<String> ttsStatus = const Value.absent(),
+            Value<int> ttsTotal = const Value.absent(),
+            Value<int> ttsCompleted = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
           }) =>
               PlansTableCompanion(
             id: id,
@@ -2416,10 +2351,14 @@ class $$PlansTableTableTableManager extends RootTableManager<
             createdAt: createdAt,
             updatedAt: updatedAt,
             lastUsedAt: lastUsedAt,
-            isUserCreated: isUserCreated,
+            isActive: isActive,
+            ttsStatus: ttsStatus,
+            ttsTotal: ttsTotal,
+            ttsCompleted: ttsCompleted,
+            rowid: rowid,
           ),
           createCompanionCallback: ({
-            Value<int> id = const Value.absent(),
+            required String id,
             required String name,
             Value<String?> description = const Value.absent(),
             Value<String> category = const Value.absent(),
@@ -2429,7 +2368,11 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<DateTime?> lastUsedAt = const Value.absent(),
-            Value<bool> isUserCreated = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<String> ttsStatus = const Value.absent(),
+            Value<int> ttsTotal = const Value.absent(),
+            Value<int> ttsCompleted = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
           }) =>
               PlansTableCompanion.insert(
             id: id,
@@ -2442,7 +2385,11 @@ class $$PlansTableTableTableManager extends RootTableManager<
             createdAt: createdAt,
             updatedAt: updatedAt,
             lastUsedAt: lastUsedAt,
-            isUserCreated: isUserCreated,
+            isActive: isActive,
+            ttsStatus: ttsStatus,
+            ttsTotal: ttsTotal,
+            ttsCompleted: ttsCompleted,
+            rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0
               .map((e) => (
@@ -2514,7 +2461,7 @@ typedef $$TtsCacheTableTableCreateCompanionBuilder = TtsCacheTableCompanion
   required String voiceId,
   required String filePath,
   Value<int> fileSizeBytes,
-  Value<int?> planId,
+  Value<String?> planId,
   Value<String> provider,
   Value<String> speechRate,
   Value<DateTime> createdAt,
@@ -2526,7 +2473,7 @@ typedef $$TtsCacheTableTableUpdateCompanionBuilder = TtsCacheTableCompanion
   Value<String> voiceId,
   Value<String> filePath,
   Value<int> fileSizeBytes,
-  Value<int?> planId,
+  Value<String?> planId,
   Value<String> provider,
   Value<String> speechRate,
   Value<DateTime> createdAt,
@@ -2542,7 +2489,7 @@ final class $$TtsCacheTableTableReferences extends BaseReferences<_$AppDatabase,
           $_aliasNameGenerator(db.ttsCacheTable.planId, db.plansTable.id));
 
   $$PlansTableTableProcessedTableManager? get planId {
-    final $_column = $_itemColumn<int>('plan_id');
+    final $_column = $_itemColumn<String>('plan_id');
     if ($_column == null) return null;
     final manager = $$PlansTableTableTableManager($_db, $_db.plansTable)
         .filter((f) => f.id.sqlEquals($_column));
@@ -2744,7 +2691,7 @@ class $$TtsCacheTableTableTableManager extends RootTableManager<
             Value<String> voiceId = const Value.absent(),
             Value<String> filePath = const Value.absent(),
             Value<int> fileSizeBytes = const Value.absent(),
-            Value<int?> planId = const Value.absent(),
+            Value<String?> planId = const Value.absent(),
             Value<String> provider = const Value.absent(),
             Value<String> speechRate = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
@@ -2766,7 +2713,7 @@ class $$TtsCacheTableTableTableManager extends RootTableManager<
             required String voiceId,
             required String filePath,
             Value<int> fileSizeBytes = const Value.absent(),
-            Value<int?> planId = const Value.absent(),
+            Value<String?> planId = const Value.absent(),
             Value<String> provider = const Value.absent(),
             Value<String> speechRate = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
@@ -2841,7 +2788,7 @@ typedef $$TtsCacheTableTableProcessedTableManager = ProcessedTableManager<
 typedef $$ExecutionStateTableTableCreateCompanionBuilder
     = ExecutionStateTableCompanion Function({
   Value<int> id,
-  required int planId,
+  required String planId,
   Value<int> currentStepIndex,
   Value<String> repeatCounters,
   Value<int> elapsedMs,
@@ -2853,7 +2800,7 @@ typedef $$ExecutionStateTableTableCreateCompanionBuilder
 typedef $$ExecutionStateTableTableUpdateCompanionBuilder
     = ExecutionStateTableCompanion Function({
   Value<int> id,
-  Value<int> planId,
+  Value<String> planId,
   Value<int> currentStepIndex,
   Value<String> repeatCounters,
   Value<int> elapsedMs,
@@ -2873,7 +2820,7 @@ final class $$ExecutionStateTableTableReferences extends BaseReferences<
           db.executionStateTable.planId, db.plansTable.id));
 
   $$PlansTableTableProcessedTableManager get planId {
-    final $_column = $_itemColumn<int>('plan_id')!;
+    final $_column = $_itemColumn<String>('plan_id')!;
 
     final manager = $$PlansTableTableTableManager($_db, $_db.plansTable)
         .filter((f) => f.id.sqlEquals($_column));
@@ -3081,7 +3028,7 @@ class $$ExecutionStateTableTableTableManager extends RootTableManager<
                   $db: db, $table: table),
           updateCompanionCallback: ({
             Value<int> id = const Value.absent(),
-            Value<int> planId = const Value.absent(),
+            Value<String> planId = const Value.absent(),
             Value<int> currentStepIndex = const Value.absent(),
             Value<String> repeatCounters = const Value.absent(),
             Value<int> elapsedMs = const Value.absent(),
@@ -3103,7 +3050,7 @@ class $$ExecutionStateTableTableTableManager extends RootTableManager<
           ),
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
-            required int planId,
+            required String planId,
             Value<int> currentStepIndex = const Value.absent(),
             Value<String> repeatCounters = const Value.absent(),
             Value<int> elapsedMs = const Value.absent(),
@@ -3335,149 +3282,6 @@ typedef $$AppSettingsTableTableProcessedTableManager = ProcessedTableManager<
     ),
     AppSettingsTableData,
     PrefetchHooks Function()>;
-typedef $$ProviderCatalogTableTableCreateCompanionBuilder
-    = ProviderCatalogTableCompanion Function({
-  Value<int> id,
-  required String catalogJson,
-  required DateTime fetchedAt,
-});
-typedef $$ProviderCatalogTableTableUpdateCompanionBuilder
-    = ProviderCatalogTableCompanion Function({
-  Value<int> id,
-  Value<String> catalogJson,
-  Value<DateTime> fetchedAt,
-});
-
-class $$ProviderCatalogTableTableFilterComposer
-    extends Composer<_$AppDatabase, $ProviderCatalogTableTable> {
-  $$ProviderCatalogTableTableFilterComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  ColumnFilters<int> get id => $composableBuilder(
-      column: $table.id, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<String> get catalogJson => $composableBuilder(
-      column: $table.catalogJson, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<DateTime> get fetchedAt => $composableBuilder(
-      column: $table.fetchedAt, builder: (column) => ColumnFilters(column));
-}
-
-class $$ProviderCatalogTableTableOrderingComposer
-    extends Composer<_$AppDatabase, $ProviderCatalogTableTable> {
-  $$ProviderCatalogTableTableOrderingComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  ColumnOrderings<int> get id => $composableBuilder(
-      column: $table.id, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<String> get catalogJson => $composableBuilder(
-      column: $table.catalogJson, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<DateTime> get fetchedAt => $composableBuilder(
-      column: $table.fetchedAt, builder: (column) => ColumnOrderings(column));
-}
-
-class $$ProviderCatalogTableTableAnnotationComposer
-    extends Composer<_$AppDatabase, $ProviderCatalogTableTable> {
-  $$ProviderCatalogTableTableAnnotationComposer({
-    required super.$db,
-    required super.$table,
-    super.joinBuilder,
-    super.$addJoinBuilderToRootComposer,
-    super.$removeJoinBuilderFromRootComposer,
-  });
-  GeneratedColumn<int> get id =>
-      $composableBuilder(column: $table.id, builder: (column) => column);
-
-  GeneratedColumn<String> get catalogJson => $composableBuilder(
-      column: $table.catalogJson, builder: (column) => column);
-
-  GeneratedColumn<DateTime> get fetchedAt =>
-      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
-}
-
-class $$ProviderCatalogTableTableTableManager extends RootTableManager<
-    _$AppDatabase,
-    $ProviderCatalogTableTable,
-    ProviderCatalogTableData,
-    $$ProviderCatalogTableTableFilterComposer,
-    $$ProviderCatalogTableTableOrderingComposer,
-    $$ProviderCatalogTableTableAnnotationComposer,
-    $$ProviderCatalogTableTableCreateCompanionBuilder,
-    $$ProviderCatalogTableTableUpdateCompanionBuilder,
-    (
-      ProviderCatalogTableData,
-      BaseReferences<_$AppDatabase, $ProviderCatalogTableTable,
-          ProviderCatalogTableData>
-    ),
-    ProviderCatalogTableData,
-    PrefetchHooks Function()> {
-  $$ProviderCatalogTableTableTableManager(
-      _$AppDatabase db, $ProviderCatalogTableTable table)
-      : super(TableManagerState(
-          db: db,
-          table: table,
-          createFilteringComposer: () =>
-              $$ProviderCatalogTableTableFilterComposer($db: db, $table: table),
-          createOrderingComposer: () =>
-              $$ProviderCatalogTableTableOrderingComposer(
-                  $db: db, $table: table),
-          createComputedFieldComposer: () =>
-              $$ProviderCatalogTableTableAnnotationComposer(
-                  $db: db, $table: table),
-          updateCompanionCallback: ({
-            Value<int> id = const Value.absent(),
-            Value<String> catalogJson = const Value.absent(),
-            Value<DateTime> fetchedAt = const Value.absent(),
-          }) =>
-              ProviderCatalogTableCompanion(
-            id: id,
-            catalogJson: catalogJson,
-            fetchedAt: fetchedAt,
-          ),
-          createCompanionCallback: ({
-            Value<int> id = const Value.absent(),
-            required String catalogJson,
-            required DateTime fetchedAt,
-          }) =>
-              ProviderCatalogTableCompanion.insert(
-            id: id,
-            catalogJson: catalogJson,
-            fetchedAt: fetchedAt,
-          ),
-          withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
-              .toList(),
-          prefetchHooksCallback: null,
-        ));
-}
-
-typedef $$ProviderCatalogTableTableProcessedTableManager
-    = ProcessedTableManager<
-        _$AppDatabase,
-        $ProviderCatalogTableTable,
-        ProviderCatalogTableData,
-        $$ProviderCatalogTableTableFilterComposer,
-        $$ProviderCatalogTableTableOrderingComposer,
-        $$ProviderCatalogTableTableAnnotationComposer,
-        $$ProviderCatalogTableTableCreateCompanionBuilder,
-        $$ProviderCatalogTableTableUpdateCompanionBuilder,
-        (
-          ProviderCatalogTableData,
-          BaseReferences<_$AppDatabase, $ProviderCatalogTableTable,
-              ProviderCatalogTableData>
-        ),
-        ProviderCatalogTableData,
-        PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3490,8 +3294,6 @@ class $AppDatabaseManager {
       $$ExecutionStateTableTableTableManager(_db, _db.executionStateTable);
   $$AppSettingsTableTableTableManager get appSettingsTable =>
       $$AppSettingsTableTableTableManager(_db, _db.appSettingsTable);
-  $$ProviderCatalogTableTableTableManager get providerCatalogTable =>
-      $$ProviderCatalogTableTableTableManager(_db, _db.providerCatalogTable);
 }
 
 // **************************************************************************

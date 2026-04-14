@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:instructor/data/starter_plans.dart';
 import 'package:instructor/data/starter_templates.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
-import 'package:instructor/repositories/plan_repository.dart';
+import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
 
@@ -60,18 +59,14 @@ class _TemplatePickerSheetState extends ConsumerState<TemplatePickerSheet> {
       final settings = ref.read(appSettingsProvider);
       final now = DateTime.now();
 
-      // Look up the matching seeded plan to pre-fill steps. Falls back to an
-      // empty plan (user builds from scratch in the editor) when no match.
-      final seeded = buildStarterPlanForTemplate(template.name, now);
-
       final newId = await repo.createPlan(
         Plan(
-          id: 0, // auto-incremented by Drift — value ignored on insert
-          name: seeded?.name ?? template.name,
-          description: seeded?.description ?? template.description,
+          id: '',
+          name: template.name,
+          description: template.description,
           category: template.category,
           defaultVoice: template.defaultVoice,
-          steps: seeded?.steps ?? const [],
+          steps: const [],
           createdAt: now,
           updatedAt: now,
         ),

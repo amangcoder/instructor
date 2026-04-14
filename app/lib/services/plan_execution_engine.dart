@@ -44,6 +44,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
+import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
@@ -250,7 +251,7 @@ abstract class PlanExecutionEngine {
   /// restoring engine state, so it is safe to call before the user confirms
   /// they want to resume. Returns `null` when no session exists.
   Future<PersistedSessionSummary?> getPersistedSessionSummaryForPlan(
-      int planId);
+      String planId);
 
   /// Returns a recoverable session if one exists (for crash recovery on launch).
   ///
@@ -260,7 +261,7 @@ abstract class PlanExecutionEngine {
   /// If [planId] is provided, only the session for that specific plan is
   /// considered (used by the plan library to check before showing the
   /// "Continue where you left off?" dialog).
-  Future<ExecutionState?> getRecoverableSession([int? planId]);
+  Future<ExecutionState?> getRecoverableSession([String? planId]);
 
   /// Returns the 0-based flattened step index of any persisted session for
   /// [planId], or `null` if no recoverable session exists.
@@ -268,7 +269,7 @@ abstract class PlanExecutionEngine {
   /// This is a lightweight read-only DB query that does **not** restore the
   /// engine's internal state — safe to call before the user confirms they want
   /// to resume.
-  Future<int?> getRecoverableStepIndexForPlan(int planId);
+  Future<int?> getRecoverableStepIndexForPlan(String planId);
 
   /// Restores the persisted session for [planId] and resumes execution from
   /// the saved step and audio position.
@@ -276,7 +277,7 @@ abstract class PlanExecutionEngine {
   /// Returns `true` if a session was found and successfully resumed.
   /// Returns `false` if no recovery data exists for [planId] (caller should
   /// fall back to [startPlan]).
-  Future<bool> resumeFromPersistedState(int planId);
+  Future<bool> resumeFromPersistedState(String planId);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -295,10 +296,12 @@ class PlanExecutionEngineImpl
     required TTSService ttsService,
     required NotificationService notificationService,
     required AppDatabase db,
+    required TtsPlaybackMode Function() ttsPlaybackModeGetter,
   })  : _audioEngine = audioEngine,
         _ttsService = ttsService,
         _notificationService = notificationService,
-        _db = db {
+        _db = db,
+        _ttsPlaybackMode = ttsPlaybackModeGetter {
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -306,6 +309,27 @@ class PlanExecutionEngineImpl
   final TTSService _ttsService;
   final NotificationService _notificationService;
   final AppDatabase _db;
+
+  /// Returns the current [TtsPlaybackMode] at call time.
+  ///
+  /// Injected at construction so that tests can supply a controllable getter
+  /// without depending on Riverpod. Production code passes
+  /// `() => ref.read(ttsPlaybackModeProvider)`.
+  ///
+  /// ## Toggle-at-step-boundary semantics
+  ///
+  /// This getter is called **once at the start of each step** (inside
+  /// [_executeSayStep] and [_getNumberAudioPath]). Because the current step
+  /// has already begun executing by the time the user flips the
+  /// [NowPlayingTtsToggle], the toggle has no effect on the in-flight step:
+  /// it will complete in whichever mode was active when the step started.
+  /// The new mode takes effect on the **next** step transition, when the
+  /// execution loop calls [_executeStep] again and this getter is re-read.
+  ///
+  /// This behaviour is entirely natural — no extra locking or buffering is
+  /// required. Changing the provider value at any point is safe; the engine
+  /// will pick it up at the next step boundary.
+  final TtsPlaybackMode Function() _ttsPlaybackMode;
 
   // ── Execution state ───────────────────────────────────────────────────────
 
@@ -734,7 +758,7 @@ class PlanExecutionEngineImpl
   }
 
   @override
-  Future<ExecutionState?> getRecoverableSession([int? planId]) async {
+  Future<ExecutionState?> getRecoverableSession([String? planId]) async {
     // Query for paused or running rows, most recently saved first.
     // When [planId] is provided, restrict to that plan only.
     final List<ExecutionStateTableData> rows;
@@ -838,7 +862,7 @@ class PlanExecutionEngineImpl
   }
 
   @override
-  Future<int?> getRecoverableStepIndexForPlan(int planId) async {
+  Future<int?> getRecoverableStepIndexForPlan(String planId) async {
     // Lightweight read-only query — does NOT restore engine state.
     final rows = await (_db.select(_db.executionStateTable)
           ..where(
@@ -856,7 +880,7 @@ class PlanExecutionEngineImpl
 
   @override
   Future<PersistedSessionSummary?> getPersistedSessionSummaryForPlan(
-      int planId) async {
+      String planId) async {
     // Lightweight read-only query — does NOT restore engine state.
     final rows = await (_db.select(_db.executionStateTable)
           ..where(
@@ -877,7 +901,7 @@ class PlanExecutionEngineImpl
   }
 
   @override
-  Future<bool> resumeFromPersistedState(int planId) async {
+  Future<bool> resumeFromPersistedState(String planId) async {
     // Load persisted state into the engine for this specific plan.
     final session = await getRecoverableSession(planId);
     if (session == null) return false;
@@ -1015,8 +1039,15 @@ class PlanExecutionEngineImpl
         // errors (SocketException, timeout, etc.) are surfaced and the
         // fallback chain can run. Without this, cancellation would swallow
         // the TTS error and skip the fallback entirely.
+        //
+        // TTS mode toggle semantics: _ttsPlaybackMode() is read HERE, once
+        // per step, at step-start time. If the user toggles the
+        // NowPlayingTtsToggle while this step is executing, the change is
+        // ignored for the current step — it takes effect on the next step,
+        // when the execution loop calls _executeStep again and this line
+        // re-reads the provider. See _ttsPlaybackMode field docs for details.
         final ttsFuture =
-            _ttsService.renderTTS(text: text, voiceId: voiceId);
+            _ttsService.renderTTS(text, voiceId, _ttsPlaybackMode());
 
         // Also listen for the cancel signal so we know if pause/stop/skip
         // was requested, but do NOT let it short-circuit error handling.
@@ -1027,7 +1058,7 @@ class PlanExecutionEngineImpl
           }),
         );
 
-        String ttsResult;
+        String? ttsResult;
         try {
           debugPrint('PlanExecutionEngine: [SAY] awaiting ttsFuture…');
           ttsResult = await ttsFuture;
@@ -1039,6 +1070,13 @@ class PlanExecutionEngineImpl
         }
 
         if (_cancelled || cancelled) return;
+        if (ttsResult == null) {
+          // Platform mode returned null — use platform TTS fallback directly.
+          _currentStepPhase = StepPhase.active;
+          _emitState();
+          voicePlayedSuccessfully = await _platformTtsFallback(text);
+          return;
+        }
         path = ttsResult;
         debugPrint('PlanExecutionEngine: [SAY] renderTTS succeeded — path=$path');
       } on TtsFallbackException catch (e) {
@@ -1508,12 +1546,13 @@ class PlanExecutionEngineImpl
     if (cached != null) return cached;
 
     try {
+      // _ttsPlaybackMode() is read once per number render, at the point each
+      // number is spoken. Mode toggles take effect on the next CountStep number
+      // (or the next step entirely), consistent with SayStep toggle semantics.
       final path = await _ttsService.renderTTS(
-        text: number.toString(),
-        voiceId: voiceId,
-      );
-      _numberAudioPaths[cacheKey] = path;
-      return path;
+          number.toString(), voiceId, _ttsPlaybackMode());
+      _numberAudioPaths[cacheKey] = path ?? await _ttsService.renderWithPlatformTTS(number.toString());
+      return _numberAudioPaths[cacheKey]!;
     } catch (e) {
       debugPrint(
         'PlanExecutionEngine: backend TTS for number $number failed: $e',
@@ -1818,6 +1857,9 @@ PlanExecutionEngine planExecutionEngine(Ref ref) {
     ttsService: ref.watch(ttsServiceProvider),
     notificationService: ref.watch(notificationServiceProvider),
     db: ref.watch(appDatabaseProvider),
+    // Read the current playback mode at each renderTTS call — not watched,
+    // so the engine doesn't rebuild; it simply samples the latest value.
+    ttsPlaybackModeGetter: () => ref.read(ttsPlaybackModeProvider),
   );
   ref.onDispose(engine.dispose);
   return engine;

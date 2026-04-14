@@ -1,0 +1,5 @@
+{
+  "framework": "dart",
+  "command": "flutter test",
+  "testDir": "test"
+}

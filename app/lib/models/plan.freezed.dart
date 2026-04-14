@@ -20,7 +20,7 @@ Plan _$PlanFromJson(Map<String, dynamic> json) {
 
 /// @nodoc
 mixin _$Plan {
-  int get id => throw _privateConstructorUsedError;
+  String get id => throw _privateConstructorUsedError;
   String get name => throw _privateConstructorUsedError;
   String? get description => throw _privateConstructorUsedError;
   PlanCategory get category => throw _privateConstructorUsedError;
@@ -31,11 +31,19 @@ mixin _$Plan {
   DateTime get updatedAt => throw _privateConstructorUsedError;
   DateTime? get lastUsedAt => throw _privateConstructorUsedError;
 
-  /// Whether this plan was created by the user.
+  /// Whether this plan currently has an active GenAI TTS generation job.
+  bool get isActive => throw _privateConstructorUsedError;
+
+  /// The current TTS generation status for this plan.
   ///
-  /// Seeded starter plans have [isUserCreated]=false; every plan created
-  /// through the editor defaults to true.
-  bool get isUserCreated => throw _privateConstructorUsedError;
+  /// One of: none | pending | processing | completed | partial | failed.
+  String get ttsStatus => throw _privateConstructorUsedError;
+
+  /// Total number of TTS audio segments to generate for this plan.
+  int get ttsTotal => throw _privateConstructorUsedError;
+
+  /// Number of TTS audio segments that have been generated so far.
+  int get ttsCompleted => throw _privateConstructorUsedError;
 
   /// Serializes this Plan to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -52,7 +60,7 @@ abstract class $PlanCopyWith<$Res> {
       _$PlanCopyWithImpl<$Res, Plan>;
   @useResult
   $Res call(
-      {int id,
+      {String id,
       String name,
       String? description,
       PlanCategory category,
@@ -62,7 +70,10 @@ abstract class $PlanCopyWith<$Res> {
       DateTime createdAt,
       DateTime updatedAt,
       DateTime? lastUsedAt,
-      bool isUserCreated});
+      bool isActive,
+      String ttsStatus,
+      int ttsTotal,
+      int ttsCompleted});
 }
 
 /// @nodoc
@@ -90,13 +101,16 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
     Object? createdAt = null,
     Object? updatedAt = null,
     Object? lastUsedAt = freezed,
-    Object? isUserCreated = null,
+    Object? isActive = null,
+    Object? ttsStatus = null,
+    Object? ttsTotal = null,
+    Object? ttsCompleted = null,
   }) {
     return _then(_value.copyWith(
       id: null == id
           ? _value.id
           : id // ignore: cast_nullable_to_non_nullable
-              as int,
+              as String,
       name: null == name
           ? _value.name
           : name // ignore: cast_nullable_to_non_nullable
@@ -133,10 +147,22 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
           ? _value.lastUsedAt
           : lastUsedAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
-      isUserCreated: null == isUserCreated
-          ? _value.isUserCreated
-          : isUserCreated // ignore: cast_nullable_to_non_nullable
+      isActive: null == isActive
+          ? _value.isActive
+          : isActive // ignore: cast_nullable_to_non_nullable
               as bool,
+      ttsStatus: null == ttsStatus
+          ? _value.ttsStatus
+          : ttsStatus // ignore: cast_nullable_to_non_nullable
+              as String,
+      ttsTotal: null == ttsTotal
+          ? _value.ttsTotal
+          : ttsTotal // ignore: cast_nullable_to_non_nullable
+              as int,
+      ttsCompleted: null == ttsCompleted
+          ? _value.ttsCompleted
+          : ttsCompleted // ignore: cast_nullable_to_non_nullable
+              as int,
     ) as $Val);
   }
 }
@@ -149,7 +175,7 @@ abstract class _$$PlanImplCopyWith<$Res> implements $PlanCopyWith<$Res> {
   @override
   @useResult
   $Res call(
-      {int id,
+      {String id,
       String name,
       String? description,
       PlanCategory category,
@@ -159,7 +185,10 @@ abstract class _$$PlanImplCopyWith<$Res> implements $PlanCopyWith<$Res> {
       DateTime createdAt,
       DateTime updatedAt,
       DateTime? lastUsedAt,
-      bool isUserCreated});
+      bool isActive,
+      String ttsStatus,
+      int ttsTotal,
+      int ttsCompleted});
 }
 
 /// @nodoc
@@ -184,13 +213,16 @@ class __$$PlanImplCopyWithImpl<$Res>
     Object? createdAt = null,
     Object? updatedAt = null,
     Object? lastUsedAt = freezed,
-    Object? isUserCreated = null,
+    Object? isActive = null,
+    Object? ttsStatus = null,
+    Object? ttsTotal = null,
+    Object? ttsCompleted = null,
   }) {
     return _then(_$PlanImpl(
       id: null == id
           ? _value.id
           : id // ignore: cast_nullable_to_non_nullable
-              as int,
+              as String,
       name: null == name
           ? _value.name
           : name // ignore: cast_nullable_to_non_nullable
@@ -227,10 +259,22 @@ class __$$PlanImplCopyWithImpl<$Res>
           ? _value.lastUsedAt
           : lastUsedAt // ignore: cast_nullable_to_non_nullable
               as DateTime?,
-      isUserCreated: null == isUserCreated
-          ? _value.isUserCreated
-          : isUserCreated // ignore: cast_nullable_to_non_nullable
+      isActive: null == isActive
+          ? _value.isActive
+          : isActive // ignore: cast_nullable_to_non_nullable
               as bool,
+      ttsStatus: null == ttsStatus
+          ? _value.ttsStatus
+          : ttsStatus // ignore: cast_nullable_to_non_nullable
+              as String,
+      ttsTotal: null == ttsTotal
+          ? _value.ttsTotal
+          : ttsTotal // ignore: cast_nullable_to_non_nullable
+              as int,
+      ttsCompleted: null == ttsCompleted
+          ? _value.ttsCompleted
+          : ttsCompleted // ignore: cast_nullable_to_non_nullable
+              as int,
     ));
   }
 }
@@ -249,7 +293,10 @@ class _$PlanImpl extends _Plan {
       required this.createdAt,
       required this.updatedAt,
       this.lastUsedAt,
-      this.isUserCreated = true})
+      this.isActive = false,
+      this.ttsStatus = 'none',
+      this.ttsTotal = 0,
+      this.ttsCompleted = 0})
       : assert(defaultVoice != '', 'defaultVoice must not be empty'),
         _tags = tags,
         _steps = steps,
@@ -259,7 +306,7 @@ class _$PlanImpl extends _Plan {
       _$$PlanImplFromJson(json);
 
   @override
-  final int id;
+  final String id;
   @override
   final String name;
   @override
@@ -295,17 +342,31 @@ class _$PlanImpl extends _Plan {
   @override
   final DateTime? lastUsedAt;
 
-  /// Whether this plan was created by the user.
-  ///
-  /// Seeded starter plans have [isUserCreated]=false; every plan created
-  /// through the editor defaults to true.
+  /// Whether this plan currently has an active GenAI TTS generation job.
   @override
   @JsonKey()
-  final bool isUserCreated;
+  final bool isActive;
+
+  /// The current TTS generation status for this plan.
+  ///
+  /// One of: none | pending | processing | completed | partial | failed.
+  @override
+  @JsonKey()
+  final String ttsStatus;
+
+  /// Total number of TTS audio segments to generate for this plan.
+  @override
+  @JsonKey()
+  final int ttsTotal;
+
+  /// Number of TTS audio segments that have been generated so far.
+  @override
+  @JsonKey()
+  final int ttsCompleted;
 
   @override
   String toString() {
-    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isUserCreated: $isUserCreated)';
+    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isActive: $isActive, ttsStatus: $ttsStatus, ttsTotal: $ttsTotal, ttsCompleted: $ttsCompleted)';
   }
 
   @override
@@ -329,8 +390,14 @@ class _$PlanImpl extends _Plan {
                 other.updatedAt == updatedAt) &&
             (identical(other.lastUsedAt, lastUsedAt) ||
                 other.lastUsedAt == lastUsedAt) &&
-            (identical(other.isUserCreated, isUserCreated) ||
-                other.isUserCreated == isUserCreated));
+            (identical(other.isActive, isActive) ||
+                other.isActive == isActive) &&
+            (identical(other.ttsStatus, ttsStatus) ||
+                other.ttsStatus == ttsStatus) &&
+            (identical(other.ttsTotal, ttsTotal) ||
+                other.ttsTotal == ttsTotal) &&
+            (identical(other.ttsCompleted, ttsCompleted) ||
+                other.ttsCompleted == ttsCompleted));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -347,7 +414,10 @@ class _$PlanImpl extends _Plan {
       createdAt,
       updatedAt,
       lastUsedAt,
-      isUserCreated);
+      isActive,
+      ttsStatus,
+      ttsTotal,
+      ttsCompleted);
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.
@@ -367,7 +437,7 @@ class _$PlanImpl extends _Plan {
 
 abstract class _Plan extends Plan {
   const factory _Plan(
-      {required final int id,
+      {required final String id,
       required final String name,
       final String? description,
       final PlanCategory category,
@@ -377,13 +447,16 @@ abstract class _Plan extends Plan {
       required final DateTime createdAt,
       required final DateTime updatedAt,
       final DateTime? lastUsedAt,
-      final bool isUserCreated}) = _$PlanImpl;
+      final bool isActive,
+      final String ttsStatus,
+      final int ttsTotal,
+      final int ttsCompleted}) = _$PlanImpl;
   const _Plan._() : super._();
 
   factory _Plan.fromJson(Map<String, dynamic> json) = _$PlanImpl.fromJson;
 
   @override
-  int get id;
+  String get id;
   @override
   String get name;
   @override
@@ -403,12 +476,23 @@ abstract class _Plan extends Plan {
   @override
   DateTime? get lastUsedAt;
 
-  /// Whether this plan was created by the user.
-  ///
-  /// Seeded starter plans have [isUserCreated]=false; every plan created
-  /// through the editor defaults to true.
+  /// Whether this plan currently has an active GenAI TTS generation job.
   @override
-  bool get isUserCreated;
+  bool get isActive;
+
+  /// The current TTS generation status for this plan.
+  ///
+  /// One of: none | pending | processing | completed | partial | failed.
+  @override
+  String get ttsStatus;
+
+  /// Total number of TTS audio segments to generate for this plan.
+  @override
+  int get ttsTotal;
+
+  /// Number of TTS audio segments that have been generated so far.
+  @override
+  int get ttsCompleted;
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.

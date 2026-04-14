@@ -59,3 +59,6 @@ app/ios/.symlinks/
 *.apk
 *.ipa
 *.aab
+
+# Orchestrator runtime artifacts
+.graphify/

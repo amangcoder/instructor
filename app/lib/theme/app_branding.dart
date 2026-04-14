@@ -37,17 +37,20 @@ abstract final class AppBranding {
   /// Builds the standard branded AppBar used on most screens.
   ///
   /// Matches the Stitch design: gradient "Instructor" title on the left,
-  /// optional [actions] on the right.
+  /// optional [actions] on the right, optional [bottom] widget (e.g. a
+  /// [TabBar]).
   static AppBar brandedAppBar({
     List<Widget>? actions,
     Widget? leading,
     bool centerTitle = false,
+    PreferredSizeWidget? bottom,
   }) {
     return AppBar(
       title: gradientTitle(),
       centerTitle: centerTitle,
       leading: leading,
       actions: actions,
+      bottom: bottom,
     );
   }
 }

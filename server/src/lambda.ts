@@ -46,6 +46,7 @@ import 'reflect-metadata';
 import './instrument';
 
 import type { Handler, Context } from 'aws-lambda';
+import type { INestApplication } from '@nestjs/common';
 import { configure } from '@codegenie/serverless-express';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
@@ -53,6 +54,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { JsonLoggerService } from './common/json-logger.service';
 import { SESEmailService } from './email/ses-email.service';
+import { TtsPregenService } from './tts/tts-pregen.service';
 
 // ── Background task types ─────────────────────────────────────────────────────
 
@@ -62,11 +64,20 @@ export interface SendOtpEmailTask {
   code: string;
 }
 
+export interface TtsPregenWorkerTask {
+  task: 'ttsPregen';
+  planId: string;
+  jobIds: string[];
+}
+
 // ── Module-level handler cache ────────────────────────────────────────────────
 // Persists for the lifetime of the Lambda execution environment.
 // On cold start: undefined → triggers bootstrap().
 // On warm invocations: reused directly, skipping NestJS re-init.
 let cachedHandler: Handler | undefined;
+// Cached NestJS application instance — used by background task handlers that
+// need to resolve services from the DI container (e.g. TtsPregenService).
+let cachedApp: INestApplication | undefined;
 
 // ── Secrets loading ───────────────────────────────────────────────────────────
 
@@ -194,6 +205,9 @@ async function bootstrap(): Promise<Handler> {
   // keep cold start under the 5-second target at 1024 MB Lambda memory.
   await app.init();
 
+  // Cache the app instance so background task handlers can resolve services.
+  cachedApp = app;
+
   // ── 6. Wrap with serverless-express ───────────────────────────────────────
   // configure() translates API Gateway REST API (v1) proxy events into
   // Express-compatible request/response objects and back again.
@@ -265,13 +279,23 @@ export const handler: Handler = async (
   // the event contains a `task` field instead of an API Gateway HTTP payload.
   // Handle these tasks directly without going through the HTTP adapter.
   if (event && typeof event === 'object' && 'task' in event) {
-    const taskEvent = event as SendOtpEmailTask;
+    const taskEvent = event as SendOtpEmailTask | TtsPregenWorkerTask;
     if (taskEvent.task === 'sendOtpEmail') {
       const emailService = new SESEmailService();
       await emailService.sendOtpEmail(taskEvent.to, taskEvent.code);
       return { success: true };
     }
-    console.error('[Lambda] Unknown background task:', taskEvent.task);
+    if (taskEvent.task === 'ttsPregen') {
+      // Ensure the NestJS container is bootstrapped so we can resolve services.
+      if (!cachedApp) {
+        cachedHandler = await bootstrap();
+      }
+      const task = taskEvent as TtsPregenWorkerTask;
+      const pregenService = cachedApp!.get(TtsPregenService);
+      await pregenService.processJobs(task.planId, task.jobIds);
+      return { success: true };
+    }
+    console.error('[Lambda] Unknown background task:', (taskEvent as { task: string }).task);
     return { success: false };
   }
 

@@ -105,7 +105,7 @@ class _VoicePickerSheetState extends ConsumerState<_VoicePickerSheet> {
     final mediaQuery = MediaQuery.of(context);
 
     // Watch the Riverpod provider — rebuilds instantly when catalog refreshes.
-    final voicesAsync = ref.watch(voicesForProviderProvider(widget.providerId));
+    final voicesAsync = ref.watch(availableVoicesProvider);
 
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),

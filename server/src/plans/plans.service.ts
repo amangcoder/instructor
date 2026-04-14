@@ -13,7 +13,7 @@ import {
   type PlanPhase,
 } from './prompts/phase1.prompt';
 import { PHASE2_SYSTEM_PROMPT, buildPhase2PhasePrompt } from './prompts/phase2.prompt';
-import { DatabaseService, type PlanSummaryRecord, type SavePlanResult } from '../database/database.service';
+import { DatabaseService, type PlanRecord, type PlanSummaryRecord, type SavePlanResult } from '../database/database.service';
 import { SavePlanDto } from './dto/save-plan.dto';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -128,6 +128,33 @@ export class PlansService {
     this.logger.log(`listPlans — userId=${userId}`);
     const planList = await this.db.listPlans(userId);
     return { plans: planList };
+  }
+
+  /**
+   * Fetch a single plan by ID for the authenticated user (IDOR-safe).
+   * Returns null if not found or not owned by userId.
+   */
+  async getPlanById(userId: string, planId: string): Promise<PlanRecord | null> {
+    this.logger.log(`getPlanById — userId=${userId}, planId=${planId}`);
+    return this.db.getPlanById(planId, userId);
+  }
+
+  /**
+   * Delete a plan for the authenticated user (IDOR-safe).
+   * Throws NotFoundException if not found or not owned by userId.
+   */
+  async deletePlan(userId: string, planId: string): Promise<void> {
+    this.logger.log(`deletePlan — userId=${userId}, planId=${planId}`);
+    return this.db.deletePlan(planId, userId);
+  }
+
+  /**
+   * Activate a plan for the authenticated user.
+   * For studio voice quality, sets ttsStatus='pending' to trigger pre-generation.
+   */
+  async activatePlan(userId: string, planId: string, voiceQuality: string): Promise<void> {
+    this.logger.log(`activatePlan — userId=${userId}, planId=${planId}, voiceQuality=${voiceQuality}`);
+    return this.db.activatePlan(planId, userId, voiceQuality);
   }
 
   // ── Phase generation (with 1 retry per phase) ──────────────────────────────

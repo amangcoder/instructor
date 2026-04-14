@@ -1,15 +1,16 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/app.dart';
 import 'package:instructor/database/app_database.dart';
+import 'package:instructor/services/audio_engine.dart';
+import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/background_service.dart';
 import 'package:instructor/services/notification_service.dart';
-import 'package:instructor/data/starter_plans.dart';
-import 'package:instructor/repositories/plan_repository.dart';
-import 'package:instructor/services/audio_engine.dart';
 import 'package:instructor/services/notification_tap_channel.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/services/plans_migration.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/services/widget_state_channel.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -66,6 +67,66 @@ Future<void> _bootstrap() async {
   // [parent] parameter so only one instance of each provider is created.
   final container = ProviderContainer();
 
+  // ── Step 2a: Pre-load auth state from secure storage (TASK-063). ─────────
+  //
+  // AuthServiceImpl.isAuthenticated is an in-memory cache that starts as
+  // false on every cold launch. isLoggedIn() reads tokens from
+  // FlutterSecureStorage (Keychain / EncryptedSharedPrefs) and populates
+  // that cache. It does NOT make any database query, so calling it here is
+  // safe — the SQLite file has not been opened yet.
+  //
+  // Critical ordering guarantee (REQ-003 / TASK-063):
+  //
+  //   1. auth  → isLoggedIn() reads secure storage; in-memory cache set.
+  //   2. db    → NativeDatabase.createInBackground is still idle (lazy).
+  //   3. migration → migratePlansToServer() calls settings.plansMigratedV2(),
+  //                  which issues the first SQL query, triggering Drift's
+  //                  onUpgrade callback (v5 → v6):
+  //                    a. Capture user-created plans into app_settings BEFORE
+  //                       the plans table is dropped.
+  //                    b. DROP TABLE tts_cache / plans.
+  //                    c. CREATE TABLE plans (TEXT pk, v6 columns).
+  //                    d. CREATE TABLE tts_cache (TEXT FK).
+  //   4. schema v6  → DB is now fully migrated; app continues with v6 schema.
+  //
+  // Without this pre-load, isAuthenticated is false on every startup because
+  // the in-memory cache is never populated. migratePlansToServer() would then
+  // defer the upload to the next launch — but by that point the plans table
+  // has already been dropped (step 3b), so the data would be lost forever.
+  final auth = container.read(authServiceProvider);
+  await auth.isLoggedIn();
+
+  // ── Step 2b: Upload pre-v6 plans to the server (TASK-059). ───────────────
+  //
+  // Reads user-created plans captured by the v5→v6 schema migration and
+  // uploads them to the backend API before the rest of the app starts.
+  // Accessing [appSettingsProvider] here triggers the database open (and
+  // the v5→v6 schema migration) for the first time.
+  //
+  // Must run BEFORE any provider that observes the plans table so that the
+  // local SQLite cache can be refreshed from the server after upload.
+  await migratePlansToServer(
+    container,
+    onProgress: (current, total) =>
+        debugPrint('Syncing your plans... $current/$total'),
+  );
+
+  // ── Step 2c: Schedule deferred migration to resume on next login (TASK-061).
+  //
+  // If the user was not authenticated when migratePlansToServer ran, it set
+  // migrationPendingProvider = true and returned without uploading. Register
+  // a one-shot authStateStream listener that re-runs migratePlansToServer the
+  // first time the user authenticates within this app session. This handles
+  // the common case where a user upgrades from pre-v6 while logged out and
+  // logs in without restarting the app.
+  if (container.read(migrationPendingProvider)) {
+    schedulePostLoginMigration(
+      container,
+      onProgress: (current, total) =>
+          debugPrint('Syncing your plans... $current/$total'),
+    );
+  }
+
   final engine = container.read(planExecutionEngineProvider);
   // Read audioEngine early so the Riverpod singleton is created before
   // PlanExecutionEngine first references it. The handler no longer holds a
@@ -89,9 +150,6 @@ Future<void> _bootstrap() async {
     debugPrint('Background service init failed: $e');
   }
 
-  // ── Step 4: Seed starter plans on first launch. ──────────────────────────
-  await seedStarterPlans(container.read(planRepositoryProvider));
-
   // ── Step 4b: Initialise iOS widget state bridge (TASK-017). ─────────────
   //
   // Reads widgetStateChannelProvider to create the singleton, which wires up
@@ -107,3 +165,4 @@ Future<void> _bootstrap() async {
     ),
   );
 }
+

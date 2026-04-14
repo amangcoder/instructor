@@ -9,6 +9,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,6 +17,7 @@ import 'package:instructor/theme/step_colors.dart';
 import 'package:instructor/screens/now_playing/widgets/next_up_preview.dart';
 import 'package:instructor/screens/now_playing/widgets/session_gesture_detector.dart';
 import 'package:instructor/screens/now_playing/widgets/step_countdown_timer.dart';
+import 'package:instructor/screens/now_playing/widgets/tts_toggle.dart';
 
 /// Full-screen Now Playing view shown while a Plan is executing.
 ///
@@ -54,6 +56,12 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   // ── Completion handling ──────────────────────────────────────────────────────
 
   bool _completionHandled = false;
+
+  // ── TTS auto-default ──────────────────────────────────────────────────────
+  /// Set to `true` once we have automatically defaulted the playback mode to
+  /// [TtsPlaybackMode.genai] for this session.  Prevents repeated auto-switches
+  /// if the provider rebuilds while AI Voice is already selected.
+  bool _hasAutoDefaultedToGenai = false;
 
   // ── Gesture debounce ─────────────────────────────────────────────────────────
 
@@ -411,6 +419,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                           await engine.resumeFromPersistedState(
                             session.plan.id,
                           );
+                          // TASK-058: After crash recovery, default the TTS
+                          // toggle based on isTtsReadyProvider: AI Voice if
+                          // TTS files are ready, Device (platform) otherwise.
+                          if (!mounted) return;
+                          final isTtsReady =
+                              ref.read(isTtsReadyProvider(session.plan.id));
+                          ref.read(ttsPlaybackModeProvider.notifier).state =
+                              isTtsReady
+                                  ? TtsPlaybackMode.genai
+                                  : TtsPlaybackMode.platform;
                         } else {
                           // No persisted session — nothing to recover.
                           if (context.mounted) {
@@ -462,6 +480,49 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
       _handleStopped(context);
     }
 
+    // ── TTS readiness & download state ───────────────────────────────────────
+    // isTtsReadyProvider orchestrates both the local-cache fast-path and
+    // live server polling (via planTtsStatusProvider) internally.
+    final isTtsReady = ref.watch(isTtsReadyProvider(state.plan.id));
+
+    // Show a snackbar the moment AI Voice transitions from not-ready to ready
+    // during an active playback session.  The `prev == false` guard ensures
+    // the notification only fires on a genuine false→true transition — it is
+    // NOT triggered on initial load (prev == null) or when the value was
+    // already true when the screen mounted.
+    ref.listen<bool>(isTtsReadyProvider(state.plan.id), (prev, next) {
+      if (prev == false && next == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('AI Voice is now ready'),
+            duration: Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
+
+    // Auto-default to AI Voice the first time TTS becomes ready in this
+    // session.  The post-frame callback avoids mutating provider state during
+    // the build phase.
+    if (isTtsReady && !_hasAutoDefaultedToGenai) {
+      _hasAutoDefaultedToGenai = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(ttsPlaybackModeProvider.notifier).state =
+              TtsPlaybackMode.genai;
+        }
+      });
+    }
+
+    // Live ttsStatus: watch the polling provider so the toggle updates in
+    // real time as generation progresses (pending → processing → completed).
+    // Falls back to the plan's last-known cached status when polling hasn't
+    // emitted yet (i.e. the plan is not active or already completed).
+    final liveStatusAsync = ref.watch(planTtsStatusProvider(state.plan.id));
+    final effectiveTtsStatus =
+        liveStatusAsync.valueOrNull?.status ?? state.plan.ttsStatus;
+
     // Use ExecutionState text fields populated by the engine from the flattened
     // step list. This correctly handles plans with RepeatStep blocks where the
     // flattened index differs from the top-level step index.
@@ -512,6 +573,18 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                   children: [
                     // ── Header: close | Instructor | more ──────────────
                     _TopBar(onClose: _onEndRequested),
+
+                    // ── TTS Voice mode toggle ──────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: TtsToggle(
+                          ttsStatus: effectiveTtsStatus,
+                          isActive: state.plan.isActive,
+                        ),
+                      ),
+                    ),
 
                     // ── Timer & Instruction Area ───────────────────────
                     Expanded(

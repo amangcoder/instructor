@@ -6,7 +6,7 @@ part of 'plan_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$planListHash() => r'dd4fdbf48e0968a0b4c6d78b470698aec11e9700';
+String _$planListHash() => r'074466f0eb98760c6347368a1b45d111ca23566d';
 
 /// Copied from Dart SDK
 class _SystemHash {
@@ -31,7 +31,7 @@ class _SystemHash {
 
 /// Reactive stream of all Plans, with optional search and category filters.
 ///
-/// Backed by [PlanRepository.watchAllPlans] — Plans are sorted by most recently
+/// Backed by [PlanRepository.watchUserPlans] — Plans are sorted by most recently
 /// used (nulls last) and filtered in real-time as [searchQuery] or [category]
 /// change.
 ///
@@ -50,7 +50,7 @@ const planListProvider = PlanListFamily();
 
 /// Reactive stream of all Plans, with optional search and category filters.
 ///
-/// Backed by [PlanRepository.watchAllPlans] — Plans are sorted by most recently
+/// Backed by [PlanRepository.watchUserPlans] — Plans are sorted by most recently
 /// used (nulls last) and filtered in real-time as [searchQuery] or [category]
 /// change.
 ///
@@ -67,7 +67,7 @@ const planListProvider = PlanListFamily();
 class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
   /// Reactive stream of all Plans, with optional search and category filters.
   ///
-  /// Backed by [PlanRepository.watchAllPlans] — Plans are sorted by most recently
+  /// Backed by [PlanRepository.watchUserPlans] — Plans are sorted by most recently
   /// used (nulls last) and filtered in real-time as [searchQuery] or [category]
   /// change.
   ///
@@ -85,7 +85,7 @@ class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
 
   /// Reactive stream of all Plans, with optional search and category filters.
   ///
-  /// Backed by [PlanRepository.watchAllPlans] — Plans are sorted by most recently
+  /// Backed by [PlanRepository.watchUserPlans] — Plans are sorted by most recently
   /// used (nulls last) and filtered in real-time as [searchQuery] or [category]
   /// change.
   ///
@@ -136,7 +136,7 @@ class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
 
 /// Reactive stream of all Plans, with optional search and category filters.
 ///
-/// Backed by [PlanRepository.watchAllPlans] — Plans are sorted by most recently
+/// Backed by [PlanRepository.watchUserPlans] — Plans are sorted by most recently
 /// used (nulls last) and filtered in real-time as [searchQuery] or [category]
 /// change.
 ///
@@ -153,7 +153,7 @@ class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
 class PlanListProvider extends AutoDisposeStreamProvider<List<Plan>> {
   /// Reactive stream of all Plans, with optional search and category filters.
   ///
-  /// Backed by [PlanRepository.watchAllPlans] — Plans are sorted by most recently
+  /// Backed by [PlanRepository.watchUserPlans] — Plans are sorted by most recently
   /// used (nulls last) and filtered in real-time as [searchQuery] or [category]
   /// change.
   ///
@@ -263,7 +263,7 @@ class _PlanListProviderElement
   PlanCategory? get category => (origin as PlanListProvider).category;
 }
 
-String _$planByIdHash() => r'c104d497974af3818bee4cf7df8ae26ed5edecf0';
+String _$planByIdHash() => r'4794472ca254454d962cf1779bb8bcafc70eb9b4';
 
 /// Fetches a single Plan by [id].
 ///
@@ -292,7 +292,7 @@ class PlanByIdFamily extends Family<AsyncValue<Plan?>> {
   ///
   /// Copied from [planById].
   PlanByIdProvider call(
-    int id,
+    String id,
   ) {
     return PlanByIdProvider(
       id,
@@ -335,7 +335,7 @@ class PlanByIdProvider extends AutoDisposeFutureProvider<Plan?> {
   ///
   /// Copied from [planById].
   PlanByIdProvider(
-    int id,
+    String id,
   ) : this._internal(
           (ref) => planById(
             ref as PlanByIdRef,
@@ -362,7 +362,7 @@ class PlanByIdProvider extends AutoDisposeFutureProvider<Plan?> {
     required this.id,
   }) : super.internal();
 
-  final int id;
+  final String id;
 
   @override
   Override overrideWith(
@@ -405,7 +405,7 @@ class PlanByIdProvider extends AutoDisposeFutureProvider<Plan?> {
 // ignore: unused_element
 mixin PlanByIdRef on AutoDisposeFutureProviderRef<Plan?> {
   /// The parameter `id` of this provider.
-  int get id;
+  String get id;
 }
 
 class _PlanByIdProviderElement extends AutoDisposeFutureProviderElement<Plan?>
@@ -413,7 +413,63 @@ class _PlanByIdProviderElement extends AutoDisposeFutureProviderElement<Plan?>
   _PlanByIdProviderElement(super.provider);
 
   @override
-  int get id => (origin as PlanByIdProvider).id;
+  String get id => (origin as PlanByIdProvider).id;
 }
+
+String _$planRepositoryHash() => r'73acda42ef4b77261d34ffc182beead747c91992';
+
+/// Singleton [PlanRepository] provider.
+///
+/// [keepAlive: true] — the repository must outlive any individual screen so
+/// that watch streams remain active and the database is not torn down.
+///
+/// Backed by [ApiPlanRepository]: all mutations are routed through the backend
+/// API first; the local SQLite cache is updated on success so that
+/// [watchUserPlans] streams remain reactive.
+///
+/// Override in tests with a mock or an [AppDatabase.forTesting] instance:
+/// ```dart
+/// final container = ProviderContainer(overrides: [
+///   planRepositoryProvider.overrideWithValue(FakePlanRepository()),
+/// ]);
+/// ```
+///
+/// Copied from [planRepository].
+@ProviderFor(planRepository)
+final planRepositoryProvider = Provider<PlanRepository>.internal(
+  planRepository,
+  name: r'planRepositoryProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$planRepositoryHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef PlanRepositoryRef = ProviderRef<PlanRepository>;
+String _$planApiServiceHash() => r'1ec4986c6c05e19f4cb4ded26441db162a978725';
+
+/// Keep-alive [PlanApiService] provider shared across the app.
+///
+/// Using [keepAlive] ensures a single [PlanApiService] instance is reused for
+/// the lifetime of the application, avoiding redundant HTTP client creation.
+///
+/// Copied from [planApiService].
+@ProviderFor(planApiService)
+final planApiServiceProvider = Provider<PlanApiService>.internal(
+  planApiService,
+  name: r'planApiServiceProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$planApiServiceHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef PlanApiServiceRef = ProviderRef<PlanApiService>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

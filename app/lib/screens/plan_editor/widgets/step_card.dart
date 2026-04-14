@@ -303,8 +303,7 @@ class SayStepEditorState extends ConsumerState<SayStepEditor> {
   /// Opens [showVoicePickerSheet] filtered to the currently selected TTS
   /// provider and updates [_voiceId] when a new voice is confirmed.
   Future<void> _onPickVoice() async {
-    final providerId =
-        ref.read(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
+    const providerId = 'kokoro';
     final picked = await showVoicePickerSheet(
       context,
       providerId: providerId,
@@ -323,9 +322,7 @@ class SayStepEditorState extends ConsumerState<SayStepEditor> {
     // Resolve a human-readable label for the current voice ID.
     // Uses the catalog for the currently selected provider; falls back to
     // [formatVoiceId] if the voice is not yet loaded or provider changed.
-    final providerId =
-        ref.watch(selectedTtsProviderProvider).valueOrNull ?? 'kokoro';
-    final voicesAsync = ref.watch(voicesForProviderProvider(providerId));
+    final voicesAsync = ref.watch(availableVoicesProvider);
     final voiceLabel = voicesAsync.valueOrNull
             ?.where((v) => v.id == _voiceId)
             .map((v) => v.label)

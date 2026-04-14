@@ -32,6 +32,7 @@ import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/services/audio_engine.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -206,8 +207,16 @@ class _FakeAudioEngine implements AudioEngine {
 
 /// Observable fake [TTSService].
 class _FakeTTSService implements TTSService {
-  final List<({String text, String voiceId})> renderCalls = [];
+  /// Records every call to [renderTTS] including the [TtsPlaybackMode].
+  final List<({String text, String voiceId, TtsPlaybackMode mode})> renderCalls =
+      [];
   Exception? renderError;
+
+  /// When non-null, [renderTTS] returns this value instead of a file path.
+  ///
+  /// Use `renderReturnValue = null` to simulate platform TTS mode where
+  /// [TTSService.renderTTS] returns `null`, triggering [_platformTtsFallback].
+  String? renderReturnValue = '/fake/tts/default.mp3';
 
   /// Number of times [speakDirect] was called.
   ///
@@ -220,20 +229,16 @@ class _FakeTTSService implements TTSService {
   int stopSpeakingCount = 0;
 
   @override
-  Future<String> renderTTS({required String text, required String voiceId}) async {
-    renderCalls.add((text: text, voiceId: voiceId));
+  Future<String?> renderTTS(
+      String text, String voiceId, TtsPlaybackMode mode) async {
+    renderCalls.add((text: text, voiceId: voiceId, mode: mode));
     if (renderError != null) throw renderError!;
+    if (renderReturnValue == null) return null;
     return '/fake/tts/${text.hashCode}_$voiceId.mp3';
   }
 
   @override
-  Future<void> preRenderPlan(
-    Plan plan, {
-    void Function(int completed, int total)? onProgress,
-  }) async {}
-
-  @override
-  Future<void> clearCacheForPlan(int planId) async {}
+  Future<void> clearCacheForPlan(String planId) async {}
 
   @override
   Future<bool> isCached(String textHash, String voiceId) async => true;
@@ -291,7 +296,7 @@ class _FakeNotificationService implements NotificationService {
 
 /// Creates a minimal [Plan] for use in tests.
 Plan _makePlan({
-  int id = 1,
+  String id = 'plan-1',
   String name = 'Test Plan',
   String defaultVoice = 'nova',
   List<PlanStep> steps = const [],
@@ -307,21 +312,29 @@ Plan _makePlan({
   );
 }
 
+// Counter used to generate unique plan IDs in tests.
+int _planIdCounter = 0;
+
 /// Creates a plan row in the DB so that FK references succeed.
+///
+/// Returns the String UUID assigned to the plan so that in-memory [Plan]
+/// objects can be built with the same ID via [_makePlan].
 ///
 /// [steps] defaults to an empty list. For tests that recover via
 /// [getRecoverableSession] (which loads steps from the DB), pass the actual
 /// steps so the reconstructed plan matches the in-memory plan.
-Future<int> _insertPlanRow(
+Future<String> _insertPlanRow(
   AppDatabase db, {
-  int? id,
+  String? id,
   String name = 'Test Plan',
   List<PlanStep> steps = const [],
 }) async {
+  final planId = id ?? 'test-plan-${++_planIdCounter}';
   final now = DateTime(2026);
-  return db.into(db.plansTable).insert(
-    PlansTableCompanion.insert(
-      name: name,
+  await db.into(db.plansTable).insert(
+    PlansTableCompanion(
+      id: Value(planId),
+      name: Value(name),
       category: Value(PlanCategory.custom.name),
       defaultVoice: const Value('nova'),
       steps: Value(steps),
@@ -329,6 +342,7 @@ Future<int> _insertPlanRow(
       updatedAt: Value(now),
     ),
   );
+  return planId;
 }
 
 SayStep _sayStep(String text, {String id = '', String? voiceId}) => PlanStep.say(
@@ -349,12 +363,20 @@ NotifyStep _notifyStep(String title, String body, {String id = 'notify-1'}) =>
 
 /// Builds a [PlanExecutionEngineImpl] wired to the given fakes and an
 /// in-memory [AppDatabase].
+///
+/// [ttsPlaybackMode] sets the value returned by the injected
+/// [ttsPlaybackModeGetter] — defaults to [TtsPlaybackMode.genai] so that
+/// the fake [_FakeTTSService.renderTTS] returns a non-null file path and
+/// audio playback proceeds normally in non-mode-specific tests.
 (
   PlanExecutionEngineImpl engine,
   _FakeAudioEngine audio,
   _FakeTTSService tts,
   _FakeNotificationService notifications,
-) _makeEngine(AppDatabase db) {
+) _makeEngine(
+  AppDatabase db, {
+  TtsPlaybackMode ttsPlaybackMode = TtsPlaybackMode.genai,
+}) {
   final audio = _FakeAudioEngine();
   final tts = _FakeTTSService();
   final notifications = _FakeNotificationService();
@@ -363,6 +385,7 @@ NotifyStep _notifyStep(String title, String body, {String id = 'notify-1'}) =>
     ttsService: tts,
     notificationService: notifications,
     db: db,
+    ttsPlaybackModeGetter: () => ttsPlaybackMode,
   );
   return (engine, audio, tts, notifications);
 }
@@ -376,6 +399,7 @@ void main() {
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    _planIdCounter = 0; // reset per-test so IDs are stable and predictable
   });
 
   tearDown(() async {
@@ -2236,12 +2260,6 @@ class _OrderTrackingTTSService implements TTSService {
   Future<String> renderTTS({required String text, required String voiceId}) async {
     return '/fake/tts.mp3';
   }
-
-  @override
-  Future<void> preRenderPlan(
-    Plan plan, {
-    void Function(int completed, int total)? onProgress,
-  }) async {}
 
   @override
   Future<void> clearCacheForPlan(int planId) async {}

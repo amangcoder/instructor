@@ -23,7 +23,8 @@
     "db:migrate": "bash scripts/migrate.sh",
     "db:push": "DATABASE_URL=${DATABASE_URL_DIRECT:-$DATABASE_URL} drizzle-kit push",
     "db:studio": "DATABASE_URL=${DATABASE_URL_DIRECT:-$DATABASE_URL} drizzle-kit studio",
-    "db:verify": "psql ${DATABASE_URL_DIRECT:-$DATABASE_URL} -f scripts/verify-schema.sql"
+    "db:verify": "psql ${DATABASE_URL_DIRECT:-$DATABASE_URL} -f scripts/verify-schema.sql",
+    "seed:library-plans": "ts-node -r tsconfig-paths/register scripts/seed-library-plans.ts"
   },
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1027.0",

@@ -19,6 +19,11 @@
 # Required GitHub Secrets (per Environment: dev / staging / prod):
 #   AWS_DEPLOY_ROLE_ARN     — IAM role ARN for OIDC assumption
 #                             e.g. arn:aws:iam::<account>:role/github-deploy-<env>
+#   DATABASE_URL_DIRECT     — Neon direct connection string (no -pooler suffix)
+#                             Required for drizzle-kit migrations; cannot use pooler.
+#                             e.g. postgres://user:pass@ep-<name>.<region>.aws.neon.tech/neondb?sslmode=require
+#   DATABASE_URL            — Neon pooler connection string (for seed script)
+#                             e.g. postgres://user:pass@ep-<name>-pooler.<region>.aws.neon.tech/neondb?sslmode=require
 #
 # OIDC trust policy the IAM role needs (one-time setup):
 #   aws iam create-role --role-name github-deploy-<env> \
@@ -150,6 +155,8 @@ jobs:
           AWS_REGION: ap-south-1
           AWS_ACCESS_KEY_ID: test-key-id
           AWS_SECRET_ACCESS_KEY: test-secret-key
+          # Admin key for POST /api/library/plans (x-api-key header)
+          ADMIN_API_KEY: test-admin-key-for-ci
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -188,6 +195,8 @@ jobs:
           AWS_REGION: ap-south-1
           AWS_ACCESS_KEY_ID: test-key-id
           AWS_SECRET_ACCESS_KEY: test-secret-key
+          # Admin key for POST /api/library/plans (x-api-key header)
+          ADMIN_API_KEY: test-admin-key-for-ci
           # In-memory SQLite so E2E tests need no filesystem state
           DATABASE_PATH: ':memory:'
 
@@ -319,6 +328,15 @@ jobs:
         env:
           CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
 
+      # ── Database migration — MUST run before Lambda deploy ────────────────
+      # Applies schema changes (library_plans, tts_jobs, plans columns, drop
+      # sync_metadata) against the Neon PostgreSQL direct connection.
+      # Uses DATABASE_URL_DIRECT (no -pooler suffix) as required by drizzle-kit.
+      # Migrations are idempotent — safe to run on every deploy.
+      - name: Run database migrations — dev
+        run: DATABASE_URL=${{ secrets.DATABASE_URL_DIRECT }} npx drizzle-kit migrate --config drizzle.config.js
+        working-directory: server
+
       - name: CDK deploy — dev
         run: |
           npx cdk deploy InstructorStack-dev \
@@ -337,7 +355,14 @@ jobs:
           echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
           echo "::notice title=Dev API URL::${API_URL}"
 
-      # ── Post-deployment smoke test ─────────────────────────────────────
+      # ── Seed library plans — idempotent, runs after each deploy ──────────
+      # Populates library_plans with the 5 starter plans (REQ-015).
+      # The seed script is idempotent — skips plans already in the table.
+      - name: Seed library plans — dev
+        run: DATABASE_URL=${{ secrets.DATABASE_URL }} npm run seed:library-plans
+        working-directory: server
+
+      # ── Post-deployment smoke tests ───────────────────────────────────────
       # Retries 3× with 15 s delay to accommodate Lambda cold starts.
       - name: Smoke test — GET /api/health → 200
         run: |
@@ -367,6 +392,37 @@ jobs:
 
           echo "❌ Smoke test FAILED — /api/health returned HTTP ${HTTP_STATUS}"
           cat /tmp/health-response.json || true
+          exit 1
+
+      # Verify the library endpoint is accessible (public, no auth required).
+      - name: Smoke test — GET /api/library/plans → 200
+        run: |
+          API_URL="${{ steps.extract-url.outputs.api_url }}"
+          LIBRARY_URL="${API_URL}/api/library/plans"
+          echo "Smoke testing library endpoint: ${LIBRARY_URL}"
+
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /tmp/library-response.json \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "${LIBRARY_URL}" || echo "000")
+
+            echo "Attempt ${attempt}/3 → HTTP ${HTTP_STATUS}"
+
+            if [ "${HTTP_STATUS}" = "200" ]; then
+              echo "✅ Library endpoint smoke test passed (dev)"
+              cat /tmp/library-response.json || true
+              exit 0
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 10 s..."
+              sleep 10
+            fi
+          done
+
+          echo "❌ Library smoke test FAILED — /api/library/plans returned HTTP ${HTTP_STATUS}"
+          cat /tmp/library-response.json || true
           exit 1
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -410,6 +466,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ── Database migration — MUST run before Lambda deploy ────────────────
+      - name: Run database migrations — staging
+        run: DATABASE_URL=${{ secrets.DATABASE_URL_DIRECT }} npx drizzle-kit migrate --config drizzle.config.js
+        working-directory: server
+
       - name: CDK deploy — staging
         run: |
           npx cdk deploy InstructorStack-staging \
@@ -427,6 +488,11 @@ jobs:
           API_URL=$(jq -r '."InstructorStack-staging".ApiUrl' infra/cdk-outputs-staging.json)
           echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
           echo "::notice title=Staging API URL::${API_URL}"
+
+      # ── Seed library plans — idempotent ──────────────────────────────────
+      - name: Seed library plans — staging
+        run: DATABASE_URL=${{ secrets.DATABASE_URL }} npm run seed:library-plans
+        working-directory: server
 
       - name: Smoke test — GET /api/health → 200
         run: |
@@ -456,6 +522,36 @@ jobs:
 
           echo "❌ Smoke test FAILED — /api/health returned HTTP ${HTTP_STATUS}"
           cat /tmp/health-response.json || true
+          exit 1
+
+      - name: Smoke test — GET /api/library/plans → 200
+        run: |
+          API_URL="${{ steps.extract-url.outputs.api_url }}"
+          LIBRARY_URL="${API_URL}/api/library/plans"
+          echo "Smoke testing library endpoint: ${LIBRARY_URL}"
+
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /tmp/library-response.json \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "${LIBRARY_URL}" || echo "000")
+
+            echo "Attempt ${attempt}/3 → HTTP ${HTTP_STATUS}"
+
+            if [ "${HTTP_STATUS}" = "200" ]; then
+              echo "✅ Library endpoint smoke test passed (staging)"
+              cat /tmp/library-response.json || true
+              exit 0
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 10 s..."
+              sleep 10
+            fi
+          done
+
+          echo "❌ Library smoke test FAILED — /api/library/plans returned HTTP ${HTTP_STATUS}"
+          cat /tmp/library-response.json || true
           exit 1
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -505,6 +601,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ── Database migration — MUST run before Lambda deploy ────────────────
+      # Uses DATABASE_URL_DIRECT (direct Neon connection, no -pooler suffix).
+      # Migrations are idempotent — re-running on a deployed schema is safe.
+      - name: Run database migrations — prod
+        run: DATABASE_URL=${{ secrets.DATABASE_URL_DIRECT }} npx drizzle-kit migrate --config drizzle.config.js
+        working-directory: server
+
       - name: CDK deploy — prod
         run: |
           npx cdk deploy InstructorStack-prod \
@@ -522,6 +625,12 @@ jobs:
           API_URL=$(jq -r '."InstructorStack-prod".ApiUrl' infra/cdk-outputs-prod.json)
           echo "api_url=${API_URL}" >> "$GITHUB_OUTPUT"
           echo "::notice title=Production API URL::${API_URL}"
+
+      # ── Seed library plans — idempotent ──────────────────────────────────
+      # Uses DATABASE_URL (pooler) — seed script uses standard app queries.
+      - name: Seed library plans — prod
+        run: DATABASE_URL=${{ secrets.DATABASE_URL }} npm run seed:library-plans
+        working-directory: server
 
       - name: Smoke test — GET /api/health → 200
         run: |
@@ -551,4 +660,34 @@ jobs:
 
           echo "❌ Smoke test FAILED — /api/health returned HTTP ${HTTP_STATUS}"
           cat /tmp/health-response.json || true
+          exit 1
+
+      - name: Smoke test — GET /api/library/plans → 200
+        run: |
+          API_URL="${{ steps.extract-url.outputs.api_url }}"
+          LIBRARY_URL="${API_URL}/api/library/plans"
+          echo "Smoke testing library endpoint: ${LIBRARY_URL}"
+
+          for attempt in 1 2 3; do
+            HTTP_STATUS=$(curl -s -o /tmp/library-response.json \
+              -w "%{http_code}" \
+              --max-time 30 \
+              "${LIBRARY_URL}" || echo "000")
+
+            echo "Attempt ${attempt}/3 → HTTP ${HTTP_STATUS}"
+
+            if [ "${HTTP_STATUS}" = "200" ]; then
+              echo "✅ Library endpoint smoke test passed (prod)"
+              cat /tmp/library-response.json || true
+              exit 0
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 10 s..."
+              sleep 10
+            fi
+          done
+
+          echo "❌ Library smoke test FAILED — /api/library/plans returned HTTP ${HTTP_STATUS}"
+          cat /tmp/library-response.json || true
           exit 1

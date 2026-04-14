@@ -75,6 +75,8 @@ jobs:
           AWS_REGION: ap-south-1
           AWS_ACCESS_KEY_ID: test-key-id
           AWS_SECRET_ACCESS_KEY: test-secret-key
+          # Admin key for POST /api/library/plans (x-api-key header)
+          ADMIN_API_KEY: test-admin-key-for-ci
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         if: always()
@@ -137,6 +139,8 @@ jobs:
           AWS_REGION: ap-south-1
           AWS_ACCESS_KEY_ID: test-key-id
           AWS_SECRET_ACCESS_KEY: test-secret-key
+          # Admin key for POST /api/library/plans (x-api-key header)
+          ADMIN_API_KEY: test-admin-key-for-ci
           DATABASE_PATH: ':memory:'
 
   # ─────────────────────────────────────────────────────────────────────────

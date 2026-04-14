@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +11,6 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/tables/execution_state_table.dart';
 import 'package:instructor/database/tables/plans_table.dart';
-import 'package:instructor/database/tables/provider_catalog_table.dart';
 import 'package:instructor/database/tables/settings_table.dart';
 import 'package:instructor/database/tables/tts_cache_table.dart';
 import 'package:instructor/database/type_converters.dart';
@@ -27,14 +28,12 @@ part 'app_database.g.dart';
 /// - [TtsCacheTable] — cached TTS audio file paths keyed by content hash
 /// - [ExecutionStateTable] — crash-recovery state for the execution engine
 /// - [AppSettingsTable] — key/value app preferences
-/// - [ProviderCatalogTable] — cached TTS provider catalog (single-row, id=1)
 @DriftDatabase(
   tables: [
     PlansTable,
     TtsCacheTable,
     ExecutionStateTable,
     AppSettingsTable,
-    ProviderCatalogTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -44,25 +43,8 @@ class AppDatabase extends _$AppDatabase {
   /// Constructor used in tests to pass an in-memory executor.
   AppDatabase.forTesting(super.executor);
 
-  /// The absolute path to the `.db` file on disk.
-  ///
-  /// Used by [SyncService] to locate the database file for upload/restore.
-  /// Returns an empty string when running with an in-memory executor (tests).
-  String get dbFilePath {
-    if (_documentsPath.isEmpty) return '';
-    return p.join(_documentsPath, 'instructor.db');
-  }
-
-  /// Runs a WAL checkpoint to merge the WAL file into the main database file.
-  ///
-  /// Must be called before uploading the database to S3 to ensure all pending
-  /// writes are flushed into `instructor.db`.
-  Future<void> walCheckpoint() async {
-    await customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
-  }
-
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -93,12 +75,6 @@ class AppDatabase extends _$AppDatabase {
                 "UPDATE plans SET is_user_created = 0 WHERE name = '$escaped'",
               );
             }
-          }
-          if (from < 4) {
-            // v3 → v4: add provider_catalog table for caching TTS provider
-            // catalogs fetched from GET /api/tts/providers. Single-row table
-            // (id = 1) replaced via INSERT OR REPLACE on every refresh.
-            await m.createTable(providerCatalogTable);
           }
           if (from < 3) {
             // v2 → v3: add ambientAssetKey column to execution_state for
@@ -141,6 +117,87 @@ class AppDatabase extends _$AppDatabase {
             // (OpenAI) and old voice IDs, so it's no longer valid.
             await customStatement('DELETE FROM tts_cache');
           }
+          if (from < 6) {
+            // ── Pre-migration plan capture (TASK-059) ──────────────────────
+            //
+            // Before dropping the plans table, capture all user-created plans
+            // and persist them as a JSON blob in app_settings. This survives
+            // the migration and is later read by _migratePlansToServer() in
+            // main.dart to upload the plans to the server.
+            //
+            // We use app_settings because:
+            //  • It is not dropped in this migration.
+            //  • Data written here persists even if the app is killed before
+            //    the upload completes, enabling retry on next launch.
+            //  • NativeDatabase.createInBackground runs on a background
+            //    isolate — static Dart variables are not shared across
+            //    isolates, so SQLite storage is the only safe mechanism.
+            //
+            // The plans_migrated_v2 flag is checked first so a re-entry
+            // (e.g. app killed after upload but before the flag was set)
+            // does not overwrite already-captured data.
+            try {
+              final flagRow = await customSelect(
+                "SELECT value FROM app_settings "
+                "WHERE key = 'plans_migrated_v2'",
+              ).getSingleOrNull();
+              final alreadyMigrated = flagRow?.data['value'] == 'true';
+
+              if (!alreadyMigrated) {
+                // Capture user-created plans only (is_user_created = 1).
+                // Starter plans (is_user_created = 0) exist in the server
+                // library — no need to upload them.
+                //
+                // Note: if upgrading from schema < v5, the is_user_created
+                // column is added by the `if (from < 5)` block above and
+                // defaults to 1 for existing rows, so this query is safe.
+                final rows = await customSelect(
+                  'SELECT id, name, description, category, tags, '
+                  'default_voice, steps, created_at, updated_at, last_used_at '
+                  'FROM plans WHERE is_user_created = 1',
+                ).get();
+
+                if (rows.isNotEmpty) {
+                  final plansJson = jsonEncode(
+                    rows
+                        .map((r) => Map<String, dynamic>.from(r.data))
+                        .toList(),
+                  );
+                  await customStatement(
+                    'INSERT OR REPLACE INTO app_settings '
+                    '(key, value, updated_at) VALUES (?, ?, ?)',
+                    [
+                      '_pending_migration_plans',
+                      plansJson,
+                      DateTime.now().millisecondsSinceEpoch,
+                    ],
+                  );
+                  debugPrint(
+                    '[DB Migration v6] Captured ${rows.length} pre-v6 '
+                    'user plan(s) for server upload.',
+                  );
+                }
+              }
+            } catch (e) {
+              // Non-fatal: fresh install, table missing, or read error.
+              // Proceed with the schema migration; no plans will be migrated.
+              debugPrint('[DB Migration v6] Plan capture failed: $e');
+            }
+
+            // v5 → v6: server-first architecture migration.
+            //
+            // plans.id changes from INTEGER (auto-increment) to TEXT (UUID),
+            // gains is_active/tts_status/tts_total/tts_completed columns, and
+            // loses is_user_created. tts_cache.plan_id changes from INTEGER FK
+            // to TEXT FK to match the new plans PK type.
+            //
+            // All existing local plans are discarded — they will be re-fetched
+            // from the server. Drop tts_cache first to satisfy the FK constraint.
+            await customStatement('DROP TABLE IF EXISTS tts_cache');
+            await customStatement('DROP TABLE IF EXISTS plans');
+            await m.createTable(plansTable);
+            await m.createTable(ttsCacheTable);
+          }
         },
         beforeOpen: (OpeningDetails details) async {
           // Enable WAL mode for better concurrent read performance.
@@ -159,21 +216,6 @@ class AppDatabase extends _$AppDatabase {
           await customStatement(
             'CREATE INDEX IF NOT EXISTS idx_tts_cache_plan_id '
             'ON tts_cache (plan_id)',
-          );
-
-          // plans: index on updated_at for the "recently modified" sort in
-          //   PlanLibraryScreen.
-          await customStatement(
-            'CREATE INDEX IF NOT EXISTS idx_plans_updated_at '
-            'ON plans (updated_at)',
-          );
-
-          // plans: index on last_used_at for the "recently played" sort.
-          // Column is nullable; NULL rows are placed last automatically in
-          // SQLite ORDER BY … ASC NULLS LAST.
-          await customStatement(
-            'CREATE INDEX IF NOT EXISTS idx_plans_last_used_at '
-            'ON plans (last_used_at)',
           );
 
           // tts_cache: index on created_at for LRU eviction queries.

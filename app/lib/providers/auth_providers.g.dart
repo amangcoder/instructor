@@ -43,7 +43,7 @@ final currentUserProvider = AutoDisposeProvider<AuthUser?>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef CurrentUserRef = AutoDisposeProviderRef<AuthUser?>;
-String _$authStateNotifierHash() => r'f82f3e32ed896e070e89a2c4bcdb7641a7309fdf';
+String _$authStateNotifierHash() => r'a72497417fe546dcf3b38cefe7339c5dd1f361e5';
 
 /// Async notifier that manages the global [AuthState].
 ///
