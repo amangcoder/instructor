@@ -1,0 +1,92 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@theme {
+  /* ── Light mode (Material Theme Builder — seed #5B6BE8) ────────────── */
+  --color-primary: #565C8C;
+  --color-primary-container: #C0C6FD;
+  --color-surface: #FBF8FE;
+  --color-on-surface: #31323B;
+  --color-surface-container: #EFECF4;
+  --color-on-surface-variant: #46464F;
+  --color-outline: #777680;
+  --color-outline-variant: #C7C5D0;
+  --color-surface-dim: #DCD9E1;
+  --color-surface-bright: #FBF8FE;
+  --color-inverse-surface: #313034;
+  --color-inverse-on-surface: #F3F0F7;
+  --color-error: #BA1A1A;
+  --color-error-container: #FFDAD6;
+  --color-on-error: #FFFFFF;
+  --color-on-error-container: #410002;
+  --color-success: #1B6D30;
+  --color-success-container: #A3F6AA;
+  --color-warning: #7D5700;
+  --color-warning-container: #FFDEAB;
+}
+
+/* ── Dark mode (Material Theme Builder — seed #5B6BE8) ───────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-primary: #BEC6FF;
+    --color-primary-container: #3E4578;
+    --color-surface: #121318;
+    --color-on-surface: #C7C5D0;
+    --color-surface-container: #201F25;
+    --color-on-surface-variant: #C7C5D0;
+    --color-outline: #8F909A;
+    --color-outline-variant: #46464F;
+    --color-surface-dim: #121318;
+    --color-surface-bright: #38373E;
+    --color-inverse-surface: #E5E1E9;
+    --color-inverse-on-surface: #313034;
+    --color-error: #FFB4AB;
+    --color-error-container: #93000A;
+    --color-on-error: #690005;
+    --color-on-error-container: #FFDAD6;
+    --color-success: #88D990;
+    --color-success-container: #005319;
+    --color-warning: #FABD48;
+    --color-warning-container: #5A3F00;
+  }
+}
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-surface text-on-surface antialiased;
+  }
+
+  /* Focus indicators for keyboard navigation — WCAG 2.1 AA */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* Ensure skip-to-content link appears on focus */
+  .skip-link:not(:focus) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .skip-link:focus {
+    position: fixed;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 9999;
+    padding: 0.75rem 1.5rem;
+    background-color: var(--color-primary);
+    color: white;
+    font-weight: 700;
+    border-radius: 0.5rem;
+    text-decoration: none;
+  }
+}
