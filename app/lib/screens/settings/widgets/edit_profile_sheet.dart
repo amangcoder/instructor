@@ -80,10 +80,17 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
         _error = null;
       });
 
+      // image_picker converts HEIC/HEIF to JPEG when imageQuality is set,
+      // but picked.mimeType may still report the original HEIC mime type.
+      final rawMime = picked.mimeType ?? 'image/jpeg';
+      final mimeType = (rawMime == 'image/heic' || rawMime == 'image/heif')
+          ? 'image/jpeg'
+          : rawMime;
+
       try {
         await ref.read(authServiceProvider).uploadProfilePhoto(
               bytes: bytes,
-              mimeType: picked.mimeType ?? 'image/jpeg',
+              mimeType: mimeType,
             );
       } on AuthException catch (e) {
         if (mounted) setState(() => _error = e.userMessage);
@@ -162,130 +169,142 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
     // Show local preview while uploading; fall back to cached photoUrl.
     final photoUrl = currentUser?.photoUrl;
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + insets.bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ── Title ──────────────────────────────────────────────────────
-          Row(
-            children: [
-              Text('Edit Profile', style: theme.textTheme.titleLarge),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.of(context).pop(),
-                tooltip: 'Close',
-              ),
-            ],
-          ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ── Scrollable content ───────────────────────────────────────────
+        Flexible(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Title ────────────────────────────────────────────────
+                Row(
+                  children: [
+                    Text('Edit Profile', style: theme.textTheme.titleLarge),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(context).pop(),
+                      tooltip: 'Close',
+                    ),
+                  ],
+                ),
 
-          const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-          // ── Avatar picker ──────────────────────────────────────────────
-          Center(
-            child: GestureDetector(
-              onTap: _uploadingPhoto ? null : _showSourcePicker,
-              child: Stack(
-                alignment: Alignment.bottomRight,
-                children: [
-                  CircleAvatar(
-                    radius: 48,
-                    backgroundColor: colorScheme.primaryContainer,
-                    backgroundImage: _pendingImageBytes != null
-                        ? MemoryImage(_pendingImageBytes!)
-                        : (photoUrl != null && photoUrl.isNotEmpty
-                            ? NetworkImage(photoUrl) as ImageProvider
-                            : null),
-                    child: (_pendingImageBytes == null &&
-                            (photoUrl == null || photoUrl.isEmpty))
-                        ? Text(
-                            (currentUser?.name?.isNotEmpty == true
-                                    ? currentUser!.name![0]
-                                    : currentUser?.email?.isNotEmpty == true
-                                        ? currentUser!.email[0]
-                                        : '?')
-                                .toUpperCase(),
-                            style: TextStyle(
-                              fontSize: 32,
-                              color: colorScheme.onPrimaryContainer,
-                            ),
-                          )
-                        : null,
-                  ),
-                  // Upload progress overlay
-                  if (_uploadingPhoto)
-                    const Positioned.fill(
-                      child: CircleAvatar(
-                        radius: 48,
-                        backgroundColor: Colors.black45,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+                // ── Avatar picker ─────────────────────────────────────────
+                Center(
+                  child: GestureDetector(
+                    onTap: _uploadingPhoto ? null : _showSourcePicker,
+                    child: Stack(
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        CircleAvatar(
+                          radius: 48,
+                          backgroundColor: colorScheme.primaryContainer,
+                          backgroundImage: _pendingImageBytes != null
+                              ? MemoryImage(_pendingImageBytes!)
+                              : (photoUrl != null && photoUrl.isNotEmpty
+                                  ? NetworkImage(photoUrl) as ImageProvider
+                                  : null),
+                          child: (_pendingImageBytes == null &&
+                                  (photoUrl == null || photoUrl.isEmpty))
+                              ? Text(
+                                  (currentUser?.name?.isNotEmpty == true
+                                          ? currentUser!.name![0]
+                                          : currentUser?.email?.isNotEmpty == true
+                                              ? currentUser!.email[0]
+                                              : '?')
+                                      .toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 32,
+                                    color: colorScheme.onPrimaryContainer,
+                                  ),
+                                )
+                              : null,
                         ),
-                      ),
+                        // Upload progress overlay
+                        if (_uploadingPhoto)
+                          const Positioned.fill(
+                            child: CircleAvatar(
+                              radius: 48,
+                              backgroundColor: Colors.black45,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        // Camera badge
+                        Material(
+                          color: colorScheme.secondaryContainer,
+                          shape: const CircleBorder(),
+                          elevation: 2,
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: Icon(
+                              Icons.camera_alt,
+                              size: 16,
+                              color: colorScheme.onSecondaryContainer,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  // Camera badge
-                  Material(
-                    color: colorScheme.secondaryContainer,
-                    shape: const CircleBorder(),
-                    elevation: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.all(6),
-                      child: Icon(
-                        Icons.camera_alt,
-                        size: 16,
-                        color: colorScheme.onSecondaryContainer,
-                      ),
-                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── Name ──────────────────────────────────────────────────
+                TextField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Display Name',
+                    hintText: 'e.g. Alex',
+                    border: OutlineInputBorder(),
+                  ),
+                  textCapitalization: TextCapitalization.words,
+                  maxLength: 100,
+                ),
+
+                const SizedBox(height: 16),
+
+                // ── Username ──────────────────────────────────────────────
+                TextField(
+                  controller: _usernameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Username',
+                    hintText: 'e.g. alex_meditates',
+                    helperText: 'Letters, numbers, and underscores only',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLength: 30,
+                ),
+
+                // ── Error ─────────────────────────────────────────────────
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: TextStyle(color: colorScheme.error, fontSize: 13),
                   ),
                 ],
-              ),
+
+                const SizedBox(height: 8),
+              ],
             ),
           ),
+        ),
 
-          const SizedBox(height: 20),
-
-          // ── Name ───────────────────────────────────────────────────────
-          TextField(
-            controller: _nameCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Display Name',
-              hintText: 'e.g. Alex',
-              border: OutlineInputBorder(),
-            ),
-            textCapitalization: TextCapitalization.words,
-            maxLength: 100,
-          ),
-
-          const SizedBox(height: 16),
-
-          // ── Username ───────────────────────────────────────────────────
-          TextField(
-            controller: _usernameCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Username',
-              hintText: 'e.g. alex_meditates',
-              helperText: 'Letters, numbers, and underscores only',
-              border: OutlineInputBorder(),
-            ),
-            maxLength: 30,
-          ),
-
-          // ── Error ──────────────────────────────────────────────────────
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              style: TextStyle(color: colorScheme.error, fontSize: 13),
-            ),
-          ],
-
-          const SizedBox(height: 20),
-
-          // ── Save button ────────────────────────────────────────────────
-          FilledButton(
+        // ── Save button — always visible, pinned above keyboard ──────────
+        Padding(
+          padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + insets.bottom),
+          child: FilledButton(
             onPressed: (_saving || _uploadingPhoto) ? null : _save,
             child: _saving
                 ? const SizedBox(
@@ -295,8 +314,8 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
                   )
                 : const Text('Save'),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

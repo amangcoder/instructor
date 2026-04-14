@@ -50,7 +50,7 @@ export class AuthController {
    * POST /api/auth/profile/photo
    * Accepts a multipart/form-data upload (field: 'photo').
    * Uploads the image to S3 and returns a presigned URL (7-day TTL).
-   * Max file size: 5 MB. Allowed types: JPEG, PNG, WebP.
+   * Max file size: 5 MB. Allowed types: any image/*.
    */
   @Post('profile/photo')
   @UseGuards(JwtAuthGuard)
@@ -59,10 +59,10 @@ export class AuthController {
       storage: memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
-        if (/^image\/(jpeg|png|webp)$/.test(file.mimetype)) {
+        if (file.mimetype.startsWith('image/')) {
           cb(null, true);
         } else {
-          cb(new BadRequestException('Only JPEG, PNG, and WebP images are allowed'), false);
+          cb(new BadRequestException('Only image files are allowed'), false);
         }
       },
     }),
