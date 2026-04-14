@@ -185,7 +185,10 @@ export class AuthService {
         email: user.email,
         name: user.name ?? null,
         username: user.username ?? null,
-        photoUrl: user.photoUrl ?? null,
+        // resolvePhotoUrl converts the stored S3 key into a fresh presigned URL.
+        // The DB stores the key (avatars/…), not the URL, so returning the raw
+        // value would break Image.network on the client.
+        photoUrl: await this.resolvePhotoUrl(user.photoUrl ?? null),
       },
     };
   }

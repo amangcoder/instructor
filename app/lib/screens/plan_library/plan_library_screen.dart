@@ -106,13 +106,38 @@ class _PlanLibraryScreenState extends ConsumerState<PlanLibraryScreen>
       initialIndex: ref.read(libProviders.libraryTabIndexProvider),
     );
     _tabController.addListener(_onTabChanged);
+    // Fetch fresh data for the initially-visible tab.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshCurrentTab());
   }
 
   /// Propagates controller changes → provider so all widgets stay in sync.
+  /// Also triggers a background refresh whenever the user switches tabs.
   void _onTabChanged() {
     if (!_tabController.indexIsChanging) {
       ref.read(libProviders.libraryTabIndexProvider.notifier).state =
           _tabController.index;
+      _refreshCurrentTab();
+    }
+  }
+
+  /// Refreshes data for the currently visible tab.
+  ///
+  /// - My Plans (0): calls [PlanRepository.refreshFromServer] silently so the
+  ///   Drift stream picks up any server-side changes without a pull-to-refresh.
+  /// - Discover (1): invalidates [libraryPlansProvider] to re-fetch the list.
+  ///
+  /// Errors are swallowed — the user can still pull-to-refresh manually.
+  Future<void> _refreshCurrentTab() async {
+    if (!mounted) return;
+    switch (_tabController.index) {
+      case 0:
+        try {
+          await ref.read(planRepositoryProvider).refreshFromServer();
+        } catch (_) {
+          // Silent — pull-to-refresh remains available.
+        }
+      case 1:
+        ref.invalidate(libProviders.libraryPlansProvider);
     }
   }
 
@@ -128,18 +153,20 @@ class _PlanLibraryScreenState extends ConsumerState<PlanLibraryScreen>
     final tabIndex = ref.watch(libProviders.libraryTabIndexProvider);
     final isLoggedIn = ref.watch(isAuthenticatedProvider);
 
-    // Propagates provider changes → controller (e.g. external deep-link).
-    // Propagates provider changes → controller (e.g. external deep-link or
-    // after "Add to My Plans" navigates back to My Plans tab).
-    if (_tabController.index != tabIndex && !_tabController.indexIsChanging) {
-      _tabController.animateTo(tabIndex);
-    }
+    // Propagates provider changes → controller (e.g. "View" snackbar action or
+    // external deep-link). Uses ref.listen so animateTo runs post-build and
+    // never triggers a "setState during build" assertion.
+    ref.listen<int>(libProviders.libraryTabIndexProvider, (_, newIndex) {
+      if (_tabController.index != newIndex && !_tabController.indexIsChanging) {
+        _tabController.animateTo(newIndex);
+      }
+    });
 
     return Scaffold(
       appBar: AppBranding.brandedAppBar(
         actions: [
           ProfileAvatarButton(
-            onTap: () => context.push(AppRoutes.settings),
+            onTap: () => context.go(AppRoutes.settings),
           ),
         ],
         bottom: TabBar(
@@ -232,6 +259,11 @@ class _MyPlansTab extends ConsumerWidget {
             data: (plans) => _PlanList(
               plans: plans,
               isAuthenticated: isLoggedIn,
+              hasActiveFilter:
+                  searchQuery.isNotEmpty || selectedCategory != null,
+              onGoToDiscover: () => ref
+                  .read(libProviders.libraryTabIndexProvider.notifier)
+                  .state = 1,
               onRefresh: () async {
                 final repo = ref.read(planRepositoryProvider);
                 try {
@@ -242,7 +274,10 @@ class _MyPlansTab extends ConsumerWidget {
                       ? 'No internet connection \u2014 showing cached plans'
                       : 'Could not refresh plans';
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(message)),
+                    SnackBar(
+                      content: Text(message),
+                      behavior: SnackBarBehavior.floating,
+                    ),
                   );
                 }
               },
@@ -428,10 +463,12 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
       messenger.showSnackBar(
         SnackBar(
           content: Text('"${summary.name}" added to My Plans'),
-          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
           action: SnackBarAction(
             label: 'View',
             onPressed: () {
+              messenger.hideCurrentSnackBar();
               ref
                   .read(libProviders.libraryTabIndexProvider.notifier)
                   .state = 0;
@@ -447,7 +484,10 @@ class _DiscoverTabState extends ConsumerState<_DiscoverTab> {
           ? e.userMessage
           : 'Failed to add plan. Please try again.';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
   }
@@ -1033,10 +1073,17 @@ class _PlanList extends ConsumerWidget {
     required this.plans,
     required this.isAuthenticated,
     required this.onRefresh,
+    required this.hasActiveFilter,
+    required this.onGoToDiscover,
   });
 
   final List<Plan> plans;
   final bool isAuthenticated;
+  final bool hasActiveFilter;
+
+  /// Switches to the Discover tab. Passed to [_EmptyState] when there are no
+  /// plans and no active filter so the user can browse public plans.
+  final VoidCallback onGoToDiscover;
 
   /// Called when the user pulls down to refresh. Typically calls
   /// [PlanRepository.refreshFromServer] to sync plans from the backend.
@@ -1051,10 +1098,13 @@ class _PlanList extends ConsumerWidget {
         onRefresh: onRefresh,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          slivers: const [
+          slivers: [
             SliverFillRemaining(
               hasScrollBody: false,
-              child: _EmptyState(),
+              child: _EmptyState(
+                isFiltered: hasActiveFilter,
+                onGoToDiscover: hasActiveFilter ? null : onGoToDiscover,
+              ),
             ),
           ],
         ),
@@ -1102,12 +1152,11 @@ class _PlanList extends ConsumerWidget {
                   : null,
               onActivate: isAuthenticated
                   ? () async {
-                      final voice = ref.read(defaultVoiceSettingProvider).valueOrNull ?? kDefaultVoice;
                       final locale = ref.read(ttsLocaleSettingProvider).valueOrNull ?? kDefaultTtsLocale;
                       final speechRate = ref.read(speechRateSettingProvider).valueOrNull ?? kDefaultSpeechRate;
-                      await ref.read(planApiServiceProvider).activatePlan(
+                      await ref.read(planRepositoryProvider).activatePlan(
                             plan.id,
-                            voice: voice.name,
+                            voice: plan.defaultVoice,
                             locale: locale.name,
                             speechRate: speechRate.toString(),
                           );
@@ -1268,7 +1317,10 @@ class _PlanList extends ConsumerWidget {
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('"${plan.name}" duplicated')),
+      SnackBar(
+        content: Text('"${plan.name}" duplicated'),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -1309,7 +1361,10 @@ class _PlanList extends ConsumerWidget {
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('"${plan.name}" deleted')),
+      SnackBar(
+        content: Text('"${plan.name}" deleted'),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 }
@@ -1379,11 +1434,23 @@ class _SearchBarState extends ConsumerState<_SearchBar> {
 // ────────────────────────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  const _EmptyState({
+    required this.isFiltered,
+    this.onGoToDiscover,
+  });
+
+  /// True when a search query or category chip is active.
+  final bool isFiltered;
+
+  /// Called when the user taps "Discover" in the no-plans state.
+  /// Null when [isFiltered] is true (filter hint is shown instead).
+  final VoidCallback? onGoToDiscover;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -1391,24 +1458,55 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.playlist_play_outlined,
+              isFiltered
+                  ? Icons.search_off_outlined
+                  : Icons.playlist_play_outlined,
               size: 64,
-              color: theme.colorScheme.primary.withValues(alpha: 0.5),
+              color: colorScheme.primary.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
-              'No plans yet',
+              isFiltered ? 'No plans found' : 'No plans yet',
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            Text(
-              'Tap the + button to create your first plan,\n'
-              'or try clearing your search filter.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            if (isFiltered)
+              Text(
+                'Try adjusting your search or clearing the category filter.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              )
+            else ...[
+              Text(
+                'Made no plans yet? No problem — head over to the ',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
+              GestureDetector(
+                onTap: onGoToDiscover,
+                child: Text(
+                  'Discover tab',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                    decoration: TextDecoration.underline,
+                    decorationColor: colorScheme.primary,
+                  ),
+                ),
+              ),
+              Text(
+                'to browse publicly available plans.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
         ),
       ),

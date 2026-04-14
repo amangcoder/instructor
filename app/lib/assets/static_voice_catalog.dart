@@ -200,6 +200,7 @@ const List<TtsProviderConfig> kStaticVoiceCatalog = [
     voices: _kGeminiVoices,
     locales: _kGeminiLocales,
     voiceMap: _kGeminiVoiceMap,
+    defaultVoice: 'aoede',
   ),
   TtsProviderConfig(
     id: 'kokoro',
@@ -207,6 +208,8 @@ const List<TtsProviderConfig> kStaticVoiceCatalog = [
     voices: _kKokoroVoices,
     locales: _kKokoroLocales,
     voiceMap: _kKokoroVoiceMap,
+    isActive: true, // static fallback assumes kokoro
+    defaultVoice: 'af_heart',
   ),
   TtsProviderConfig(
     id: 'elevenlabs',
@@ -214,5 +217,6 @@ const List<TtsProviderConfig> kStaticVoiceCatalog = [
     voices: _kElevenLabsVoices,
     locales: _kElevenLabsLocales,
     voiceMap: _kElevenLabsVoiceMap,
+    defaultVoice: 'EXAVITQu4vr4xnSDxMaL',
   ),
 ];

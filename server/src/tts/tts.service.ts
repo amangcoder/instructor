@@ -252,24 +252,22 @@ export class TtsService {
     }
   }
 
-  /** L2: write to S3 (fire-and-forget — don't block the response). */
-  private writeS3Cache(hash: string, audio: Buffer): void {
+  /** L2: write to S3. Resolves when the upload completes (or logs a warning on failure). */
+  private async writeS3Cache(hash: string, audio: Buffer): Promise<void> {
     if (!this.s3 || !this.bucket) return;
-    this.s3
-      .send(
+    try {
+      await this.s3.send(
         new PutObjectCommand({
           Bucket: this.bucket,
           Key: this.s3Key(hash),
           Body: audio,
           ContentType: 'audio/wav',
         }),
-      )
-      .then(() =>
-        this.logger.log(`S3 upload OK — ${this.s3Key(hash)}, ${audio.length} bytes`),
-      )
-      .catch((err) =>
-        this.logger.warn(`S3 upload failed for ${hash.slice(0, 12)}…: ${err.message}`),
       );
+      this.logger.log(`S3 upload OK — ${this.s3Key(hash)}, ${audio.length} bytes`);
+    } catch (err: any) {
+      this.logger.warn(`S3 upload failed for ${hash.slice(0, 12)}…: ${err.message}`);
+    }
   }
 
   /**
@@ -299,7 +297,7 @@ export class TtsService {
       const legacyLocal = await this.readLocalCache(legacyHash);
       if (legacyLocal) {
         this.logger.log(`Legacy cache hit — migrating hash ${legacyHash.slice(0, 12)}… → ${hash.slice(0, 12)}…`);
-        this.writeCache(hash, legacyLocal);
+        void this.writeCache(hash, legacyLocal);
         return legacyLocal;
       }
 
@@ -307,7 +305,7 @@ export class TtsService {
       if (legacyRemote) {
         this.logger.log(`Legacy S3 cache hit — migrating hash ${legacyHash.slice(0, 12)}… → ${hash.slice(0, 12)}…`);
         await this.writeLocalCache(hash, legacyRemote);
-        this.writeS3Cache(hash, legacyRemote);
+        void this.writeS3Cache(hash, legacyRemote);
         return legacyRemote;
       }
     }
@@ -315,13 +313,12 @@ export class TtsService {
     return null;
   }
 
-  /** Writes to both L1 and L2. L1 write is async; S3 upload is non-blocking. */
-  private writeCache(hash: string, audio: Buffer): void {
-    // Fire-and-forget for both layers — caller has already returned the audio.
-    this.writeLocalCache(hash, audio).catch((err) =>
+  /** Writes to both L1 (local disk) and L2 (S3). Resolves only after both writes complete. */
+  private async writeCache(hash: string, audio: Buffer): Promise<void> {
+    await this.writeLocalCache(hash, audio).catch((err) =>
       this.logger.warn(`L1 cache write failed for ${hash.slice(0, 12)}…: ${err.message}`),
     );
-    this.writeS3Cache(hash, audio);
+    await this.writeS3Cache(hash, audio);
   }
 
   // ── Cache-only lookup (no synthesis) ──────────────────────────────────────
@@ -450,8 +447,8 @@ export class TtsService {
       audio = await this.synthesizeGemini(text, effectiveVoice, locale);
     }
 
-    // Persist to L1 + L2.
-    this.writeCache(hash, audio);
+    // Persist to L1 + L2. Await so callers know the cache is committed before returning.
+    await this.writeCache(hash, audio);
     this.logger.log(`Cached — hash=${hash.slice(0, 12)}…, ${audio.length} bytes`);
 
     return audio;

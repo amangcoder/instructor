@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/providers/auth_providers.dart';
+import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_generation_client.dart';
 import 'plan_review_screen.dart';
@@ -73,10 +74,17 @@ class _PlanGenerationScreenState extends ConsumerState<PlanGenerationScreen> {
 
     try {
       final client = ref.read(planGenerationClientProvider);
+      final activeProvider = await ref.read(activeProviderProvider.future);
       final lang = _selectedLanguage == 'Auto-detect'
           ? null
           : _selectedLanguage;
-      final plan = await client.generatePlan(prompt, language: lang);
+      final plan = await client.generatePlan(
+        prompt,
+        language: lang,
+        fallbackVoice: activeProvider.defaultVoice.isNotEmpty
+            ? activeProvider.defaultVoice
+            : 'af_heart',
+      );
 
       if (mounted) {
         context.push(

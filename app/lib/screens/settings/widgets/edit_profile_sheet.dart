@@ -18,6 +18,7 @@ Future<void> showEditProfileSheet(BuildContext context) {
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    useRootNavigator: true,
     builder: (ctx) => const _EditProfileSheet(),
   );
 }
@@ -303,7 +304,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
 
         // ── Save button — always visible, pinned above keyboard ──────────
         Padding(
-          padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + insets.bottom),
+          padding: EdgeInsets.fromLTRB(24, 8, 24, 50 + insets.bottom),
           child: FilledButton(
             onPressed: (_saving || _uploadingPhoto) ? null : _save,
             child: _saving

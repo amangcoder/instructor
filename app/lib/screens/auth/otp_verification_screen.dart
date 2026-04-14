@@ -147,6 +147,15 @@ class _OtpVerificationScreenState
       appBar: AppBar(
         title: const Text('Verify OTP'),
         centerTitle: true,
+        // Explicit back button so GoRouter's declarative navigator correctly
+        // pops to /login regardless of how ModalRoute.canPop is evaluated.
+        leading: BackButton(
+          onPressed: () {
+            // Dismiss the keyboard / OTP focus before leaving the screen.
+            FocusScope.of(context).unfocus();
+            if (context.canPop()) context.pop();
+          },
+        ),
       ),
       body: SafeArea(
         child: Center(

@@ -70,6 +70,8 @@ class TtsProviderConfig {
     required this.voices,
     required this.locales,
     this.voiceMap = const {},
+    this.isActive = false,
+    this.defaultVoice = '',
   });
 
   /// Machine-readable provider identifier (e.g. 'gemini', 'kokoro').
@@ -85,6 +87,12 @@ class TtsProviderConfig {
   /// Used by the frontend to remap plan voices when the user switches providers.
   final Map<String, String> voiceMap;
 
+  /// True when this is the currently active TTS backend on the server.
+  final bool isActive;
+
+  /// Recommended default voice ID for new plans on this provider.
+  final String defaultVoice;
+
   factory TtsProviderConfig.fromJson(Map<String, dynamic> json) {
     return TtsProviderConfig(
       id: json['id']?.toString() ?? '',
@@ -97,6 +105,8 @@ class TtsProviderConfig {
           .toList(),
       voiceMap: (json['voiceMap'] as Map<String, dynamic>? ?? {})
           .map((k, v) => MapEntry(k, v.toString())),
+      isActive: json['isActive'] as bool? ?? false,
+      defaultVoice: json['defaultVoice']?.toString() ?? '',
     );
   }
 }

@@ -39,6 +39,7 @@ Future<PlanMetadata?> showPlanMetadataSheet(
   required PlanCategory initialCategory,
   required List<String> initialTags,
   required String initialVoice,
+  bool voiceLocked = false,
 }) {
   return showModalBottomSheet<PlanMetadata>(
     context: context,
@@ -53,6 +54,7 @@ Future<PlanMetadata?> showPlanMetadataSheet(
       initialCategory: initialCategory,
       initialTags: initialTags,
       initialVoice: initialVoice,
+      voiceLocked: voiceLocked,
     ),
   );
 }
@@ -68,6 +70,7 @@ class _PlanMetadataSheet extends ConsumerStatefulWidget {
     required this.initialCategory,
     required this.initialTags,
     required this.initialVoice,
+    this.voiceLocked = false,
   });
 
   final String initialName;
@@ -75,6 +78,10 @@ class _PlanMetadataSheet extends ConsumerStatefulWidget {
   final PlanCategory initialCategory;
   final List<String> initialTags;
   final String initialVoice;
+
+  /// When true, the voice picker is disabled because TTS has already been
+  /// pre-generated for this plan. Changing the voice would invalidate the cache.
+  final bool voiceLocked;
 
   @override
   ConsumerState<_PlanMetadataSheet> createState() => _PlanMetadataSheetState();
@@ -309,6 +316,32 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
 
   Widget _buildVoiceDropdown() {
     final voicesAsync = ref.watch(availableVoicesProvider);
+
+    // When TTS has been pre-generated, lock the voice to avoid cache mismatches.
+    if (widget.voiceLocked) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButtonFormField<String>(
+            value: _voice,
+            decoration: const InputDecoration(
+              labelText: 'Default Voice',
+              suffixIcon: Icon(Icons.lock_outline, size: 18),
+            ),
+            items: [DropdownMenuItem(value: _voice, child: Text(_voice))],
+            onChanged: null,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Voice is locked because AI audio has already been generated for this plan.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      );
+    }
 
     return voicesAsync.when(
       data: (voices) {

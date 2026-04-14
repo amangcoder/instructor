@@ -272,7 +272,8 @@ class _PlanCardState extends State<PlanCard> {
                           status: widget.plan.ttsStatus,
                           completed: widget.plan.ttsCompleted,
                           total: widget.plan.ttsTotal,
-                          onRetry: widget.plan.ttsStatus == 'failed' &&
+                          onRetry: (widget.plan.ttsStatus == 'failed' ||
+                                      widget.plan.ttsStatus == 'partial') &&
                                   widget.onActivate != null
                               ? _handleActivate
                               : null,

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/plans_migration.dart';
 import 'package:instructor/widgets/mini_player_bar.dart';
 
@@ -66,6 +67,15 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
     // rendered so showDialog has a valid Navigator context to work with.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+
+      // Initialize the notification plugin and request OS permissions after
+      // the UI is visible. This is intentionally deferred so the app renders
+      // first and the OS permission dialog appears in context rather than
+      // before any UI is shown. Safe to call on every cold start — the OS
+      // only shows the dialog once (subsequent calls are no-ops if already
+      // granted or denied).
+      ref.read(notificationServiceProvider).initialize();
+
       if (ref.read(migrationPendingProvider) && !_migrationWarningShown) {
         _migrationWarningShown = true;
         _showMigrationDeferredDialog();

@@ -2,9 +2,15 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:instructor/data/starter_templates.dart';
+import 'package:instructor/models/plan.dart';
+import 'package:instructor/providers/auth_providers.dart';
+import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/screens/onboarding/widgets/template_picker_sheet.dart';
+import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/theme/gradient_button.dart';
 
 /// Stitch onboarding: hero image area, "Your personal life conductor" heading,
@@ -17,6 +23,56 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 }
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // If a template was selected before login, the user was redirected here
+    // after authenticating. Auto-create the pending plan on the next frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkPendingTemplate());
+  }
+
+  /// Creates the plan stored in [pendingTemplateProvider] if the user is now
+  /// authenticated. Called on mount so it fires after a login redirect.
+  Future<void> _checkPendingTemplate() async {
+    if (!mounted) return;
+    final template = ref.read(pendingTemplateProvider);
+    if (template == null) return;
+    if (!ref.read(isAuthenticatedProvider)) return;
+
+    // Clear immediately to prevent re-triggering on hot-reload / re-mounts.
+    ref.read(pendingTemplateProvider.notifier).state = null;
+    await _createPlanFromTemplate(template);
+  }
+
+  Future<void> _createPlanFromTemplate(StarterTemplate template) async {
+    final repo = ref.read(planRepositoryProvider);
+    final settings = ref.read(appSettingsProvider);
+    final now = DateTime.now();
+
+    try {
+      final newId = await repo.createPlan(
+        Plan(
+          id: '',
+          name: template.name,
+          description: template.description,
+          category: template.category,
+          defaultVoice: template.defaultVoice,
+          steps: const [],
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      await settings.setHasCompletedOnboarding();
+      if (!mounted) return;
+      context.go('/editor/$newId');
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not create Plan — please try again.')),
+      );
+    }
+  }
+
   Future<void> _getStarted() async {
     await showTemplatePickerSheet(context);
   }

@@ -96,15 +96,6 @@ GoRouter router(Ref ref) {
     refreshListenable: authChangeNotifier,
     redirect: (BuildContext context, GoRouterState state) async {
       try {
-        // ── Onboarding guard ──────────────────────────────────────────────
-        final settings = ref.read(appSettingsProvider);
-        final isComplete = await settings.hasCompletedOnboarding();
-        final isOnOnboarding =
-            state.matchedLocation == AppRoutes.onboarding;
-
-        if (!isComplete && !isOnOnboarding) return AppRoutes.onboarding;
-        if (isComplete && isOnOnboarding) return AppRoutes.library;
-
         // ── Auth guard ────────────────────────────────────────────────────
         final authStateAsync = ref.read(authStateNotifierProvider);
         final isAuthenticated = authStateAsync.maybeWhen(
@@ -115,6 +106,19 @@ GoRouter router(Ref ref) {
         final isOnLoginFlow =
             state.matchedLocation == AppRoutes.login ||
                 state.matchedLocation == AppRoutes.otpVerification;
+
+        // ── Onboarding guard ──────────────────────────────────────────────
+        // The login flow is exempt so that unauthenticated users can reach
+        // /login from the onboarding screen (e.g. when selecting a template
+        // before signing in). Without this exemption the router would loop
+        // the user back to /onboarding and they'd be locked out.
+        final settings = ref.read(appSettingsProvider);
+        final isComplete = await settings.hasCompletedOnboarding();
+        final isOnOnboarding =
+            state.matchedLocation == AppRoutes.onboarding;
+
+        if (!isComplete && !isOnOnboarding && !isOnLoginFlow) return AppRoutes.onboarding;
+        if (isComplete && isOnOnboarding) return AppRoutes.library;
 
         // Authenticated user visiting login — send home.
         if (isAuthenticated && isOnLoginFlow) return AppRoutes.library;

@@ -47,10 +47,10 @@ class TtsStatusBadge extends StatelessWidget {
   /// Total number of audio segments to generate for this plan.
   final int total;
 
-  /// Optional callback invoked when the user taps the failed-state badge.
+  /// Optional callback invoked when the user taps the failed or partial badge.
   ///
-  /// When non-null and [status] is `'failed'`, the badge becomes tappable and
-  /// shows a tooltip directing the user to retry TTS generation.
+  /// When non-null and [status] is `'failed'` or `'partial'`, the badge becomes
+  /// tappable and shows a tooltip directing the user to retry TTS generation.
   final VoidCallback? onRetry;
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -96,8 +96,8 @@ class TtsStatusBadge extends StatelessWidget {
       colorSelector: (cs) => cs.error,
       tooltipMessage: status == 'failed'
           ? 'Generation failed — tap to retry'
-          : 'Some audio could not be generated — device voice will be used for those steps',
-      onTap: status == 'failed' ? onRetry : null,
+          : 'Some audio failed — tap to retry remaining',
+      onTap: onRetry,
     );
 
     // status == 'none' or any unrecognised value → render nothing.

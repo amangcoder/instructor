@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/app.dart';
 import 'package:instructor/database/app_database.dart';
+import 'package:instructor/services/audio_download_service.dart';
 import 'package:instructor/services/audio_engine.dart';
 import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/background_service.dart';
@@ -58,6 +59,7 @@ Future<void> _bootstrap() async {
   // ── Step 1: Resolve the SQLite file path and TTS audio directory. ──────────
   await initDatabase();
   await initTtsAudioDirectory();
+  await initAudioDownloadDirectory();
 
   // ── Step 2: Create the Riverpod container early so we can read services ───
   //           that are needed by the background handler.

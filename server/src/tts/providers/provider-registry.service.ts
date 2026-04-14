@@ -28,6 +28,10 @@ export interface ProviderConfig {
   locales: LocaleOption[];
   /** Maps foreign voice IDs → this provider's native voice IDs. */
   voiceMap: Record<string, string>;
+  /** True when this provider is the currently active TTS backend (DEFAULT_TTS_PROVIDER). */
+  isActive: boolean;
+  /** The recommended default voice ID for new plans on this provider. */
+  defaultVoice: string;
 }
 
 // ── Gemini static voice/locale catalog ───────────────────────────────────────
@@ -297,7 +301,9 @@ export class ProviderRegistryService {
 
     this.logger.log('Provider catalog cache MISS — fetching live');
 
-    const allConfigs: ProviderConfig[] = [
+    const activeProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+
+    const rawConfigs: Omit<ProviderConfig, 'isActive' | 'defaultVoice'>[] = [
       {
         id: 'gemini',
         label: 'Google Gemini TTS',
@@ -308,6 +314,12 @@ export class ProviderRegistryService {
       await this.getKokoroConfig(),
       await this.getElevenLabsConfig(),
     ];
+
+    const allConfigs: ProviderConfig[] = rawConfigs.map((c) => ({
+      ...c,
+      isActive: c.id === activeProvider,
+      defaultVoice: c.voices[0]?.id ?? '',
+    }));
 
     // Fire-and-forget: store in Redis without blocking the response.
     this._setCachedCatalog(allConfigs);
@@ -351,7 +363,7 @@ export class ProviderRegistryService {
     }
   }
 
-  private async getKokoroConfig(): Promise<ProviderConfig> {
+  private async getKokoroConfig(): Promise<Omit<ProviderConfig, 'isActive' | 'defaultVoice'>> {
     try {
       const resp = await fetch(`${this.kokoroUrl}/voices`, {
         signal: AbortSignal.timeout(5_000),
@@ -383,7 +395,7 @@ export class ProviderRegistryService {
     };
   }
 
-  private async getElevenLabsConfig(): Promise<ProviderConfig> {
+  private async getElevenLabsConfig(): Promise<Omit<ProviderConfig, 'isActive' | 'defaultVoice'>> {
     try {
       const apiVoices = await this.elevenLabs.fetchVoices();
       if (apiVoices.length > 0) {

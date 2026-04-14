@@ -19,6 +19,7 @@ import 'package:instructor/models/audio_file_url.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/library_plan_summary.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/models/tts_status_info.dart';
 import 'package:instructor/services/api_client.dart';
 
@@ -123,6 +124,12 @@ abstract class PlanApiService {
   /// completed TTS audio files belonging to [planId]. URLs are short-lived
   /// (~1 hour) and should be consumed promptly.
   Future<List<AudioFileUrl>> getAudioUrls(String planId);
+
+  /// GET /api/tts/providers
+  ///
+  /// Returns all TTS provider configs. The active provider has [isActive] ==
+  /// true and [defaultVoice] set to the recommended voice for new plans.
+  Future<TtsProvidersResponse> fetchProviderCatalog();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -389,6 +396,27 @@ class PlanApiServiceImpl implements PlanApiService {
       throw PlanApiException(
         e.toString(),
         userMessage: 'Failed to fetch audio files. Please try again.',
+      );
+    }
+  }
+
+  @override
+  Future<TtsProvidersResponse> fetchProviderCatalog() async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/tts/providers');
+    try {
+      final response = await _client.getJson(uri);
+      return TtsProvidersResponse.fromJson(response);
+    } on ApiException catch (e) {
+      throw PlanApiException(
+        'fetchProviderCatalog() failed: ${e.message}',
+        userMessage: _friendlyError(e),
+      );
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      debugPrint('PlanApiService.fetchProviderCatalog: unexpected error: $e');
+      throw PlanApiException(
+        e.toString(),
+        userMessage: 'Failed to fetch TTS provider config.',
       );
     }
   }

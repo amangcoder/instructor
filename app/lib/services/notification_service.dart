@@ -250,6 +250,21 @@ class FlutterNotificationService extends NotificationService {
           _onBackgroundNotificationResponse,
     );
 
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      // Explicitly request iOS notification permissions. The flags in
+      // DarwinInitializationSettings alone are not always sufficient in
+      // flutter_local_notifications v18 — calling requestPermissions() here
+      // ensures the OS dialog is shown the first time.
+      final iosPlugin = _plugin
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>();
+      await iosPlugin?.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    }
+
     // Android API 33+ requires explicit POST_NOTIFICATIONS permission.
     if (defaultTargetPlatform == TargetPlatform.android) {
       final androidPlugin = _plugin

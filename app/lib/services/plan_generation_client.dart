@@ -46,8 +46,17 @@ final class PlanGenerationException implements Exception {
 abstract class PlanGenerationClient {
   /// Generates a structured [Plan] from a natural-language [prompt].
   ///
+  /// [fallbackVoice] is used when the server response is missing a voice field.
+  /// It should be the active provider's default voice so the generated plan is
+  /// immediately compatible with TTS activation.
+  ///
   /// Throws [PlanGenerationException] on API errors (4xx, 5xx, network failure).
-  Future<Plan> generatePlan(String prompt, {String? category, String? language});
+  Future<Plan> generatePlan(
+    String prompt, {
+    String? category,
+    String? language,
+    String fallbackVoice = 'af_heart',
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,7 +71,12 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
   final ApiClient _apiClient;
 
   @override
-  Future<Plan> generatePlan(String prompt, {String? category, String? language}) async {
+  Future<Plan> generatePlan(
+    String prompt, {
+    String? category,
+    String? language,
+    String fallbackVoice = 'af_heart',
+  }) async {
     final baseUrl = await _apiClient.backendBaseUrl;
     final uri = Uri.parse('$baseUrl/api/plans/generate');
 
@@ -94,7 +108,7 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
         );
       }
 
-      final plan = _parsePlan(planJson);
+      final plan = _parsePlan(planJson, fallbackVoice: fallbackVoice);
 
       // Breakpoint: inspect parsed `plan` before navigating away.
       // debugger(message: 'PlanGen: plan parsed successfully');
@@ -134,7 +148,7 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
     }
   }
 
-  Plan _parsePlan(Map<String, dynamic> json) {
+  Plan _parsePlan(Map<String, dynamic> json, {String fallbackVoice = 'af_heart'}) {
     final stepsRaw = json['steps'] as List<dynamic>? ?? [];
     final steps = stepsRaw
         .map((s) => PlanStep.fromJson(_normalizeStep(s as Map<String, dynamic>)))
@@ -151,7 +165,7 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
       name: json['name']?.toString() ?? 'Untitled Plan',
       description: json['description']?.toString(),
       category: category,
-      defaultVoice: json['defaultVoice']?.toString() ?? 'af_heart',
+      defaultVoice: json['defaultVoice']?.toString() ?? fallbackVoice,
       steps: steps,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),

@@ -6,10 +6,55 @@ part of 'tts_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$availableVoicesHash() => r'e31de50c65077730bc6c0add938990e703589039';
+String _$ttsProviderCatalogHash() =>
+    r'c8d2bfd28c4391f143e4f310430edc6574f472ae';
 
-/// Returns the list of available voices for the kokoro provider from the
-/// bundled [kStaticVoiceCatalog].
+/// Fetches the full TTS provider catalog from the backend.
+/// Falls back to [kStaticVoiceCatalog] on any error so the app always has
+/// voice data available offline.
+///
+/// Copied from [ttsProviderCatalog].
+@ProviderFor(ttsProviderCatalog)
+final ttsProviderCatalogProvider =
+    AutoDisposeFutureProvider<List<TtsProviderConfig>>.internal(
+  ttsProviderCatalog,
+  name: r'ttsProviderCatalogProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$ttsProviderCatalogHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef TtsProviderCatalogRef
+    = AutoDisposeFutureProviderRef<List<TtsProviderConfig>>;
+String _$activeProviderHash() => r'9383dccc866c6d64851bbabcd0edb0ae76fd3974';
+
+/// Returns the [TtsProviderConfig] flagged [isActive] == true by the backend.
+/// Falls back to the kokoro entry from [kStaticVoiceCatalog] when the catalog
+/// hasn't loaded yet or no provider is flagged active.
+///
+/// Copied from [activeProvider].
+@ProviderFor(activeProvider)
+final activeProviderProvider =
+    AutoDisposeFutureProvider<TtsProviderConfig>.internal(
+  activeProvider,
+  name: r'activeProviderProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$activeProviderHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef ActiveProviderRef = AutoDisposeFutureProviderRef<TtsProviderConfig>;
+String _$availableVoicesHash() => r'a3ed5b1a359c2afc35cead611733e85ed7e88545';
+
+/// Returns the list of available voices for the currently active TTS provider.
 ///
 /// Copied from [availableVoices].
 @ProviderFor(availableVoices)

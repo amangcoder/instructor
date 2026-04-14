@@ -7,8 +7,9 @@ import {
 } from '@nestjs/common';
 import { parseDslPlan } from './parsers/dsl.parser';
 import {
-  PHASE1_SYSTEM_PROMPT,
-  PHASE1_SCHEMA,
+  buildPhase1SystemPrompt,
+  buildPhase1Schema,
+  PROVIDER_DEFAULT_VOICES,
   type Phase1Requirements,
   type PlanPhase,
 } from './prompts/phase1.prompt';
@@ -62,9 +63,11 @@ export class PlansService {
       this.logger.log(`Backend: Ollama ${ollamaModel()} @ ${ollamaBaseUrl()}`);
     }
 
+    const ttsProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+
     // ── Phase 1: Extract requirements + divide into phases ─────────────────
-    this.logger.log(`Phase 1: Extracting requirements for user ${userId}`);
-    const requirements = await this.extractRequirements(geminiApiKey, prompt);
+    this.logger.log(`Phase 1: Extracting requirements for user ${userId} (ttsProvider=${ttsProvider})`);
+    const requirements = await this.extractRequirements(geminiApiKey, prompt, ttsProvider);
 
     // Override language if the user explicitly selected one in the UI.
     if (language) {
@@ -172,17 +175,19 @@ export class PlansService {
         const plan = await this.db.getPlanById(planId, userId);
         if (!plan) return;
 
-        // Use client-provided voice, falling back to plan default or 'af_heart'.
-        let effectiveVoice = voice ?? 'af_heart';
+        const effectiveProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+        const providerDefaultVoice = PROVIDER_DEFAULT_VOICES[effectiveProvider] ?? PROVIDER_DEFAULT_VOICES.kokoro;
+
+        // Use client-provided voice, falling back to plan default, then provider default.
+        let effectiveVoice = voice ?? providerDefaultVoice;
         if (!voice) {
           try {
             const parsed = JSON.parse(plan.planJson);
             if (parsed.defaultVoice) effectiveVoice = parsed.defaultVoice;
-          } catch { /* use fallback voice */ }
+          } catch { /* use provider default voice */ }
         }
 
         const effectiveLocale = locale ?? 'enIN';
-        const effectiveProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
         const effectiveSpeechRate = speechRate ?? '1.0';
 
         await this.ttsPregen.startPregen(
@@ -249,15 +254,18 @@ export class PlansService {
   private async extractRequirements(
     geminiApiKey: string | undefined,
     userPrompt: string,
+    ttsProvider: string,
   ): Promise<Phase1Requirements> {
+    const systemPrompt = buildPhase1SystemPrompt(ttsProvider);
+    const schema = buildPhase1Schema(ttsProvider);
     let text: string;
 
     if (geminiApiKey) {
       const body = JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: `${PHASE1_SYSTEM_PROMPT}\n\nUser request: ${userPrompt}` }] }],
+        contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\nUser request: ${userPrompt}` }] }],
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: PHASE1_SCHEMA,
+          responseSchema: schema,
           temperature: 0.3,
           maxOutputTokens: 2048,
         },
@@ -265,7 +273,7 @@ export class PlansService {
       const response = await this.callGeminiRaw(geminiApiKey, body, 'Phase 1 (requirements)');
       text = this.extractGeminiText(response, 'Phase 1');
     } else {
-      text = await this.ollamaJson(PHASE1_SYSTEM_PROMPT, userPrompt, PHASE1_SCHEMA, 'Phase 1 (requirements)');
+      text = await this.ollamaJson(systemPrompt, userPrompt, schema, 'Phase 1 (requirements)');
     }
 
     try {

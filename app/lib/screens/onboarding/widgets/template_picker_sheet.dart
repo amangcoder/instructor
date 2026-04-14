@@ -5,9 +5,15 @@ import 'package:go_router/go_router.dart';
 import 'package:instructor/data/starter_templates.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
+
+/// Holds a [StarterTemplate] the user selected during onboarding before they
+/// were authenticated. After login the onboarding screen reads this provider
+/// and automatically creates the plan on their behalf.
+final pendingTemplateProvider = StateProvider<StarterTemplate?>((ref) => null);
 
 /// Shows the [TemplatePickerSheet] as a modal bottom sheet.
 ///
@@ -52,6 +58,19 @@ class _TemplatePickerSheetState extends ConsumerState<TemplatePickerSheet> {
 
   Future<void> _selectTemplate(StarterTemplate template) async {
     if (_isLoading) return;
+
+    // Guard: the plan creation API requires an authenticated user.
+    // If not logged in, store the selection and redirect to login.
+    // The onboarding screen will auto-create the plan once auth completes.
+    if (!ref.read(isAuthenticatedProvider)) {
+      ref.read(pendingTemplateProvider.notifier).state = template;
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      if (!context.mounted) return;
+      context.go(AppRoutes.login);
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {

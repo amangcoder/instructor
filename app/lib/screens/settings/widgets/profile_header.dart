@@ -73,21 +73,35 @@ class _AuthenticatedHeader extends StatelessWidget {
           children: [
             Semantics(
               label: 'Profile avatar',
-              child: CircleAvatar(
-                radius: 72,
-                backgroundColor: colorScheme.primaryContainer,
-                backgroundImage: photoUrl != null && photoUrl.isNotEmpty
-                    ? NetworkImage(photoUrl)
-                    : null,
-                child: photoUrl == null || photoUrl.isEmpty
-                    ? Text(
-                        initial,
-                        style: TextStyle(
-                          fontSize: 48,
-                          color: colorScheme.onPrimaryContainer,
+              child: ClipOval(
+                child: SizedBox.fromSize(
+                  size: const Size.fromRadius(72),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // Fallback — always visible; hidden by image once loaded.
+                      ColoredBox(
+                        color: colorScheme.primaryContainer,
+                        child: Center(
+                          child: Text(
+                            initial,
+                            style: TextStyle(
+                              fontSize: 48,
+                              color: colorScheme.onPrimaryContainer,
+                            ),
+                          ),
                         ),
-                      )
-                    : null,
+                      ),
+                      // Network image — covers fallback on success, disappears on error.
+                      if (photoUrl != null && photoUrl.isNotEmpty)
+                        Image.network(
+                          photoUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
             // Edit icon badge

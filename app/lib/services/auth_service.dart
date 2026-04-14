@@ -14,7 +14,7 @@
 /// startup via [isLoggedIn] and updated after every [verifyOtp]/[logout].
 library auth_service;
 
-import 'dart:async';
+import 'dart:async' show Completer, StreamController, unawaited;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -296,6 +296,14 @@ class AuthServiceImpl implements AuthService {
         Authenticated(user: result.user, accessToken: result.accessToken));
 
     debugPrint('AuthService: OTP verified, tokens stored for ${result.user.email}');
+
+    // The verify-otp endpoint returns basic user fields but does not generate
+    // a signed photo URL from S3. Kick off a background profile fetch so the
+    // photo (and any other enriched fields) appear immediately after login
+    // without blocking the OTP response. fetchProfile() will emit an updated
+    // Authenticated event to the stream on completion.
+    unawaited(fetchProfile());
+
     return result;
   }
 
@@ -516,6 +524,13 @@ class AuthServiceImpl implements AuthService {
         final user = AuthUser.fromJson(json);
         await _persistProfileFields(user);
         _cachedUser = user;
+        // Broadcast the refreshed profile so any listener (e.g.
+        // AuthStateNotifier) updates UI with the latest data, including
+        // the freshly signed photo URL from /api/auth/me.
+        if (_isAuthenticated) {
+          _authStateController.add(
+              Authenticated(user: user, accessToken: accessToken));
+        }
         return user;
       }
     } catch (e) {
@@ -555,7 +570,18 @@ class AuthServiceImpl implements AuthService {
     }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final updatedUser = AuthUser.fromJson(json);
+    final serverUser = AuthUser.fromJson(json);
+
+    // Prefer the presigned URL already cached locally over any new one the server
+    // generates.  Updating name/username doesn't change the photo, but the server
+    // calls getProfile() which re-signs the S3 URL with a new signature — giving
+    // Flutter a cache-miss on an image it already had loaded.  If the server fails
+    // to resolve the photo URL (returns null), we also keep the local copy.
+    final resolvedPhotoUrl = _cachedUser?.photoUrl ?? serverUser.photoUrl;
+    final updatedUser = resolvedPhotoUrl != serverUser.photoUrl
+        ? serverUser.copyWith(photoUrl: resolvedPhotoUrl)
+        : serverUser;
+
     await _persistProfileFields(updatedUser);
     _cachedUser = updatedUser;
     if (updatedUser.id.isNotEmpty) {

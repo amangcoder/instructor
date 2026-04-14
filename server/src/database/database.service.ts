@@ -116,6 +116,7 @@ export interface LibraryPlanSummaryRecord {
   defaultVoice: string;
   locale: string;
   stepCount: number;
+  totalDurationSeconds: number;
   sortOrder: number;
 }
 
@@ -155,6 +156,8 @@ export interface TtsPregenStatusRecord {
   completed: number;
   failed: number;
   ready: boolean;
+  /** Timestamp of the last write to this plan row — used for stale-job detection. */
+  updatedAt: Date;
 }
 
 // ── PostgreSQL error codes ─────────────────────────────────────────────────
@@ -791,6 +794,7 @@ export class DatabaseService {
         defaultVoice: row.defaultVoice,
         locale: row.locale,
         stepCount: this.countSteps(row.planJson),
+        totalDurationSeconds: this.calcTotalDurationSeconds(row.planJson),
         sortOrder: row.sortOrder,
       })),
       total: countRows[0]?.count ?? 0,
@@ -918,7 +922,7 @@ export class DatabaseService {
   /** Get TTS pre-generation status summary for a plan. */
   async getPlanTtsStatus(planId: string): Promise<TtsPregenStatusRecord> {
     if (this.noop) {
-      return { status: 'none', total: 0, completed: 0, failed: 0, ready: false };
+      return { status: 'none', total: 0, completed: 0, failed: 0, ready: false, updatedAt: new Date(0) };
     }
 
     const planRows = await this.withRetry(() =>
@@ -927,6 +931,7 @@ export class DatabaseService {
           ttsStatus: plans.ttsStatus,
           ttsTotal: plans.ttsTotal,
           ttsCompleted: plans.ttsCompleted,
+          updatedAt: plans.updatedAt,
         })
         .from(plans)
         .where(eq(plans.id, planId))
@@ -934,7 +939,7 @@ export class DatabaseService {
     );
 
     if (planRows.length === 0) {
-      return { status: 'none', total: 0, completed: 0, failed: 0, ready: false };
+      return { status: 'none', total: 0, completed: 0, failed: 0, ready: false, updatedAt: new Date(0) };
     }
 
     const plan = planRows[0];
@@ -955,6 +960,7 @@ export class DatabaseService {
       completed: plan.ttsCompleted,
       failed,
       ready,
+      updatedAt: plan.updatedAt,
     };
   }
 
@@ -970,6 +976,21 @@ export class DatabaseService {
     );
 
     return rows.map((row) => this.mapTtsJobRecord(row));
+  }
+
+  /**
+   * Mark all pending (unstarted) TTS jobs for a plan as failed.
+   * Called when a stale plan is detected so finalizePlanTtsStatus() can
+   * compute the correct partial/failed outcome.
+   */
+  async failStalePendingJobs(planId: string): Promise<void> {
+    if (this.noop) return;
+    await this.withRetry(() =>
+      this.db!
+        .update(ttsJobs)
+        .set({ status: 'failed', error: 'Job abandoned — worker did not complete' })
+        .where(and(eq(ttsJobs.planId, planId), eq(ttsJobs.status, 'pending'))),
+    );
   }
 
   /**
@@ -1046,6 +1067,27 @@ export class DatabaseService {
     try {
       const parsed = JSON.parse(planJson) as { steps?: unknown[] };
       return Array.isArray(parsed.steps) ? parsed.steps.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private calcTotalDurationSeconds(planJson: string): number {
+    try {
+      const parsed = JSON.parse(planJson) as {
+        steps?: { runtimeType?: string; duration?: number; estimatedDuration?: number }[];
+      };
+      if (!Array.isArray(parsed.steps)) return 0;
+      const totalMicros = parsed.steps.reduce((sum, step) => {
+        if (step.runtimeType === 'wait' && typeof step.duration === 'number') {
+          return sum + step.duration;
+        }
+        if (step.runtimeType === 'say' && typeof step.estimatedDuration === 'number') {
+          return sum + step.estimatedDuration;
+        }
+        return sum;
+      }, 0);
+      return Math.round(totalMicros / 1_000_000);
     } catch {
       return 0;
     }

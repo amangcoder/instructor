@@ -9,7 +9,7 @@
 /// [currentUserProvider] — the currently logged-in [AuthUser] or null.
 library auth_providers;
 
-import 'dart:async';
+import 'dart:async' show unawaited;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -48,6 +48,12 @@ class AuthStateNotifier extends _$AuthStateNotifier {
       final user = service.getUser(); // sync after isLoggedIn() call
       final token = await service.getAccessToken();
       if (user != null && token != null && token.isNotEmpty) {
+        // Refresh profile in background on every app startup so that
+        // cached values (especially the pre-signed S3 photoUrl which expires
+        // after 7 days) are always up-to-date. fetchProfile() broadcasts an
+        // updated Authenticated event to the stream when it completes, so the
+        // UI refreshes automatically without blocking the initial render.
+        unawaited(service.fetchProfile());
         return Authenticated(user: user, accessToken: token);
       }
     }

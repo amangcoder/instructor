@@ -10,7 +10,9 @@ import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/assets/static_voice_catalog.dart';
 import 'package:instructor/providers/plan_providers.dart';
+import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -26,6 +28,16 @@ import 'widgets/step_card.dart';
 import 'widgets/step_insert_button.dart';
 
 const _uuid = Uuid();
+
+/// Returns the default voice from the static catalog's active provider.
+/// Used as a synchronous initial value before the async catalog loads.
+String _staticActiveDefaultVoice() {
+  final active = kStaticVoiceCatalog.firstWhere(
+    (p) => p.isActive,
+    orElse: () => kStaticVoiceCatalog.first,
+  );
+  return active.defaultVoice.isNotEmpty ? active.defaultVoice : 'af_heart';
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PlanEditorScreen
@@ -69,7 +81,10 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   String _description = '';
   PlanCategory _category = PlanCategory.custom;
   List<String> _tags = [];
-  String _defaultVoice = 'aoede';
+  // Initial value from static catalog; overwritten once the async catalog loads
+  // or a plan is loaded. See _resolveDefaultVoice().
+  String _defaultVoice = _staticActiveDefaultVoice();
+  String _ttsStatus = 'none';
 
   // Original timestamps (preserved when editing an existing plan)
   DateTime? _originalCreatedAt;
@@ -141,8 +156,23 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     if (widget.planId != null) {
       _loadPlan();
     } else {
-      // Capture initial fingerprint for new plans immediately.
+      // For new plans, load the active provider's default voice asynchronously
+      // and update if the user hasn't changed the voice yet.
+      _initDefaultVoiceForNewPlan();
       _initialFingerprint = _currentFingerprint();
+    }
+  }
+
+  Future<void> _initDefaultVoiceForNewPlan() async {
+    try {
+      final provider = await ref.read(activeProviderProvider.future);
+      final voice = provider.defaultVoice.isNotEmpty ? provider.defaultVoice : _defaultVoice;
+      if (mounted && _defaultVoice == _staticActiveDefaultVoice()) {
+        setState(() => _defaultVoice = voice);
+        _initialFingerprint = _currentFingerprint();
+      }
+    } catch (_) {
+      // Keep static fallback.
     }
   }
 
@@ -168,7 +198,8 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           _tags = List<String>.from(plan.tags);
           _defaultVoice = PlanVoice.values.map((v) => v.name).contains(plan.defaultVoice)
               ? plan.defaultVoice
-              : 'af_heart';
+              : _staticActiveDefaultVoice();
+          _ttsStatus = plan.ttsStatus;
           _steps = List<PlanStep>.from(plan.steps);
           _originalCreatedAt = plan.createdAt;
           _originalLastUsedAt = plan.lastUsedAt;
@@ -304,6 +335,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       initialCategory: _category,
       initialTags: _tags,
       initialVoice: _defaultVoice,
+      voiceLocked: _ttsStatus != 'none',
     );
     if (result == null) return;
     setState(() {
@@ -424,6 +456,20 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   // Save
   // ─────────────────────────────────────────────────────────────────────────
 
+  /// Navigates away from the editor after a save or discard.
+  ///
+  /// Uses [context.pop] when the editor was pushed onto the stack (e.g. from
+  /// the plan library). Falls back to [AppRoutes.library] when the editor was
+  /// reached via [context.go] — e.g. the onboarding template flow — where
+  /// there is nothing below to pop back to.
+  void _navigateAfterEdit() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(AppRoutes.library);
+    }
+  }
+
   Future<void> _save() async {
     // Require a name before saving.
     if (_name.trim().isEmpty) {
@@ -485,7 +531,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       if (mounted) {
         // Reset fingerprint so PopScope doesn't block navigation after save.
         _initialFingerprint = _currentFingerprint();
-        context.pop();
+        _navigateAfterEdit();
       }
     } catch (e) {
       if (!mounted) return;
@@ -587,7 +633,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           ),
         );
         if (confirmed == true && context.mounted) {
-          context.pop();
+          _navigateAfterEdit();
         }
       },
       child: Scaffold(
