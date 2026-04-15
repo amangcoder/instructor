@@ -59,6 +59,7 @@ void main() {
     test('inserts a record and returns successfully', () async {
       await expectLater(
         repo.recordCompletion(
+          userId: 'user-1',
           planId: 'plan-1',
           completedAt: _day(2026, 4, 15),
           durationMs: 600000,
@@ -71,6 +72,7 @@ void main() {
       final completedAt = _day(2026, 4, 15);
 
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-yoga',
         completedAt: completedAt,
         durationMs: 1200000,
@@ -87,11 +89,13 @@ void main() {
 
     test('multiple records can be inserted for the same planId', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 14),
         durationMs: 300000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -106,11 +110,13 @@ void main() {
 
     test('records from different plans are stored independently', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-yoga',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-meditation',
         completedAt: _day(2026, 4, 15),
         durationMs: 900000,
@@ -131,16 +137,19 @@ void main() {
   group('getCompletionsSince', () {
     test('returns only completions after the given timestamp', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 10),
         durationMs: 300000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 14),
         durationMs: 600000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -157,16 +166,19 @@ void main() {
     test('returns completions ordered by completedAt ascending', () async {
       // Insert out of order
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 13),
         durationMs: 600000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 14),
         durationMs: 600000,
@@ -189,6 +201,7 @@ void main() {
 
     test('returns empty list when no completions after timestamp', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 10),
         durationMs: 300000,
@@ -216,11 +229,13 @@ void main() {
     test('returns only records with syncedAt IS NULL', () async {
       // Record two completions
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 14),
         durationMs: 300000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -233,11 +248,13 @@ void main() {
 
     test('after markSynced, those records are excluded', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 14),
         durationMs: 300000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -253,6 +270,7 @@ void main() {
 
     test('returns empty list when all are synced', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -271,6 +289,7 @@ void main() {
   group('markSynced', () {
     test('updates syncedAt timestamp for given IDs', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -296,11 +315,13 @@ void main() {
 
     test('only marks specified IDs, leaves others unsynced', () async {
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 14),
         durationMs: 300000,
       );
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-2',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -339,6 +360,7 @@ void main() {
 
       // Insert a completion
       await repo.recordCompletion(
+        userId: 'user-1',
         planId: 'plan-1',
         completedAt: _day(2026, 4, 15),
         durationMs: 600000,
@@ -366,6 +388,7 @@ void main() {
       // Insert three completions
       for (int i = 0; i < 3; i++) {
         await repo.recordCompletion(
+          userId: 'user-1',
           planId: 'plan-$i',
           completedAt: _day(2026, 4, 13 + i),
           durationMs: 600000,

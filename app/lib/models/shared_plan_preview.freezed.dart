@@ -52,13 +52,12 @@ abstract class $SharedPlanPreviewCopyWith<$Res> {
           SharedPlanPreview value, $Res Function(SharedPlanPreview) then) =
       _$SharedPlanPreviewCopyWithImpl<$Res, SharedPlanPreview>;
   @useResult
-  $Res call({
-    String name,
-    String? description,
-    List<dynamic> steps,
-    int stepCount,
-    int estimatedDurationMs,
-  });
+  $Res call(
+      {String name,
+      String? description,
+      List<dynamic> steps,
+      int stepCount,
+      int estimatedDurationMs});
 }
 
 /// @nodoc
@@ -115,13 +114,12 @@ abstract class _$$SharedPlanPreviewImplCopyWith<$Res>
       __$$SharedPlanPreviewImplCopyWithImpl<$Res>;
   @override
   @useResult
-  $Res call({
-    String name,
-    String? description,
-    List<dynamic> steps,
-    int stepCount,
-    int estimatedDurationMs,
-  });
+  $Res call(
+      {String name,
+      String? description,
+      List<dynamic> steps,
+      int stepCount,
+      int estimatedDurationMs});
 }
 
 /// @nodoc
@@ -171,13 +169,13 @@ class __$$SharedPlanPreviewImplCopyWithImpl<$Res>
 /// @nodoc
 @JsonSerializable()
 class _$SharedPlanPreviewImpl extends _SharedPlanPreview {
-  const _$SharedPlanPreviewImpl({
-    required this.name,
-    this.description,
-    final List<dynamic> steps = const [],
-    required this.stepCount,
-    required this.estimatedDurationMs,
-  })  : _steps = steps,
+  const _$SharedPlanPreviewImpl(
+      {required this.name,
+      this.description,
+      final List<dynamic> steps = const [],
+      required this.stepCount,
+      required this.estimatedDurationMs})
+      : _steps = steps,
         super._();
 
   factory _$SharedPlanPreviewImpl.fromJson(Map<String, dynamic> json) =>
@@ -191,12 +189,14 @@ class _$SharedPlanPreviewImpl extends _SharedPlanPreview {
   @override
   final String? description;
 
-  /// Raw step data for the preview.
+  /// Raw step data for the preview — each element is a map with at least
+  /// `name` (String) and `estimatedDurationMs` (int) keys.
   final List<dynamic> _steps;
 
   /// Raw step data for the preview — each element is a map with at least
   /// `name` (String) and `estimatedDurationMs` (int) keys.
   @override
+  @JsonKey()
   List<dynamic> get steps {
     if (_steps is EqualUnmodifiableListView) return _steps;
     // ignore: implicit_dynamic_type
@@ -234,13 +234,12 @@ class _$SharedPlanPreviewImpl extends _SharedPlanPreview {
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
   int get hashCode => Object.hash(
-        runtimeType,
-        name,
-        description,
-        const DeepCollectionEquality().hash(_steps),
-        stepCount,
-        estimatedDurationMs,
-      );
+      runtimeType,
+      name,
+      description,
+      const DeepCollectionEquality().hash(_steps),
+      stepCount,
+      estimatedDurationMs);
 
   /// Create a copy of SharedPlanPreview
   /// with the given fields replaced by the non-null parameter values.
@@ -260,13 +259,12 @@ class _$SharedPlanPreviewImpl extends _SharedPlanPreview {
 }
 
 abstract class _SharedPlanPreview extends SharedPlanPreview {
-  const factory _SharedPlanPreview({
-    required final String name,
-    final String? description,
-    final List<dynamic> steps,
-    required final int stepCount,
-    required final int estimatedDurationMs,
-  }) = _$SharedPlanPreviewImpl;
+  const factory _SharedPlanPreview(
+      {required final String name,
+      final String? description,
+      final List<dynamic> steps,
+      required final int stepCount,
+      required final int estimatedDurationMs}) = _$SharedPlanPreviewImpl;
   const _SharedPlanPreview._() : super._();
 
   factory _SharedPlanPreview.fromJson(Map<String, dynamic> json) =

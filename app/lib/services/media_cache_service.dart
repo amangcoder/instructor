@@ -94,7 +94,7 @@ abstract class MediaCacheService {
     required String provider,
     required String speechRate,
     required List<int> bytes,
-    int? planId,
+    String? planId,
   });
 
   /// Deletes all cache entries and their associated audio files from disk.
@@ -197,7 +197,7 @@ class MediaCacheServiceImpl implements MediaCacheService {
     required String provider,
     required String speechRate,
     required List<int> bytes,
-    int? planId,
+    String? planId,
   }) async {
     final cacheKey = computeCacheKey(
       text: text,

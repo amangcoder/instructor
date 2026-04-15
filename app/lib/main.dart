@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 
 import 'package:instructor/app.dart';
 import 'package:instructor/database/app_database.dart';
@@ -11,12 +14,10 @@ import 'package:instructor/services/background_service.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/notification_tap_channel.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/services/plan_trigger_service.dart';
 import 'package:instructor/services/plans_migration.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/services/widget_state_channel.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
-
-const String _sentryDsn = String.fromEnvironment('SENTRY_DSN');
 
 /// Entry point for the Instructor app.
 ///
@@ -36,29 +37,33 @@ const String _sentryDsn = String.fromEnvironment('SENTRY_DSN');
 ///    container instance, so the [PlanExecutionEngine] wired into the
 ///    background handler is the exact same object used by the UI.
 void main() async {
-  await SentryFlutter.init(
-    (SentryFlutterOptions options) {
-      options
-        ..dsn = _sentryDsn
-        ..tracesSampleRate = 0.2;
-    },
-    appRunner: _bootstrap,
-  );
+  await _bootstrap();
 }
 
 Future<void> _bootstrap() async {
+  debugPrint('[BOOT] 0: binding');
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ── Step 0: Register platform-channel handlers (must be after binding). ───
-  //
-  // Sets up the "com.instructor.app/notification" MethodChannel so that
-  // MainActivity.onNewIntent() can notify Flutter when the user taps the
-  // Android foreground notification body (REQ-004).
+  debugPrint('[BOOT] 1: notification channel');
   initNotificationTapChannel();
 
-  // ── Step 1: Resolve the SQLite file path and TTS audio directory. ──────────
+  // Load the IANA timezone database and set the local zone so
+  // flutter_local_notifications.zonedSchedule (used by PlanTriggerService on
+  // iOS) fires at the right wall-clock time even if the user later changes
+  // regions. Safe to call on any platform; fails closed to UTC on error.
+  tzdata.initializeTimeZones();
+  try {
+    final localName = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(localName));
+  } catch (e) {
+    debugPrint('[BOOT] timezone init failed, falling back to UTC: $e');
+  }
+
+  debugPrint('[BOOT] 2: initDatabase');
   await initDatabase();
+  debugPrint('[BOOT] 3: initTtsAudioDirectory');
   await initTtsAudioDirectory();
+  debugPrint('[BOOT] 4: initAudioDownloadDirectory');
   await initAudioDownloadDirectory();
 
   // ── Step 2: Create the Riverpod container early so we can read services ───
@@ -95,8 +100,11 @@ Future<void> _bootstrap() async {
   // the in-memory cache is never populated. migratePlansToServer() would then
   // defer the upload to the next launch — but by that point the plans table
   // has already been dropped (step 3b), so the data would be lost forever.
+  debugPrint('[BOOT] 5: container created');
   final auth = container.read(authServiceProvider);
+  debugPrint('[BOOT] 6: auth.isLoggedIn');
   await auth.isLoggedIn();
+  debugPrint('[BOOT] 7: auth done');
 
   // ── Step 2b: Upload pre-v6 plans to the server (TASK-059). ───────────────
   //
@@ -107,11 +115,17 @@ Future<void> _bootstrap() async {
   //
   // Must run BEFORE any provider that observes the plans table so that the
   // local SQLite cache can be refreshed from the server after upload.
-  await migratePlansToServer(
-    container,
-    onProgress: (current, total) =>
-        debugPrint('Syncing your plans... $current/$total'),
-  );
+  debugPrint('[BOOT] 8: migratePlansToServer');
+  try {
+    await migratePlansToServer(
+      container,
+      onProgress: (current, total) =>
+          debugPrint('Syncing your plans... $current/$total'),
+    ).timeout(const Duration(seconds: 10));
+  } catch (e) {
+    debugPrint('migratePlansToServer skipped: $e');
+  }
+  debugPrint('[BOOT] 9: migration done');
 
   // ── Step 2c: Schedule deferred migration to resume on next login (TASK-061).
   //
@@ -129,11 +143,27 @@ Future<void> _bootstrap() async {
     );
   }
 
+  // Re-arm scheduled plan triggers from the local Drift store onto the native
+  // layer (AlarmManager / UNUserNotificationCenter). Handles the case where
+  // the app was reinstalled or its cache wiped — native queues are empty but
+  // Drift rows remain, and the backend may hold rows this device has never
+  // seen. Best-effort: failures are logged and do not block app startup.
+  final currentUser = auth.getUser();
+  if (currentUser != null) {
+    try {
+      await container
+          .read(planTriggerServiceProvider)
+          .rescheduleAll(currentUser.id);
+    } catch (e) {
+      debugPrint('[BOOT] plan trigger rearm failed: $e');
+    }
+  }
+
+  debugPrint('[BOOT] 10: read planExecutionEngine');
   final engine = container.read(planExecutionEngineProvider);
-  // Read audioEngine early so the Riverpod singleton is created before
-  // PlanExecutionEngine first references it. The handler no longer holds a
-  // direct reference — engine.stop() calls audioEngine.stopAll() internally.
+  debugPrint('[BOOT] 11: read audioEngine');
   container.read(audioEngineProvider);
+  debugPrint('[BOOT] 12: read notificationService');
   final notificationService = container.read(notificationServiceProvider);
 
   // ── Step 3: Initialise audio_service and the iOS AVAudioSession. ──────────

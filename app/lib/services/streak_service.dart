@@ -165,7 +165,15 @@ class StreakServiceImpl implements StreakService {
   }
 
   @override
-  Stream<StreakState> watchStreak() => _stateController.stream;
+  Stream<StreakState> watchStreak() => Stream.multi((controller) {
+        controller.add(_cachedState);
+        final sub = _stateController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = sub.cancel;
+      });
 
   @override
   Future<bool> consumeStreakFreeze() async {

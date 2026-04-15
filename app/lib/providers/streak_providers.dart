@@ -25,12 +25,23 @@
 library streak_providers;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:instructor/database/app_database.dart';
+import 'package:instructor/models/streak_state.dart';
+import 'package:instructor/repositories/session_completion_repository.dart';
+import 'package:instructor/services/streak_service.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import 'package:instructor/models/streak_state.dart';
-import 'package:instructor/services/streak_service.dart';
-
 part 'streak_providers.g.dart';
+
+/// Live total count of recorded session completions.
+///
+/// Watches the repository stream so the UI updates as new completions land.
+@riverpod
+Stream<int> totalSessionCount(Ref ref) {
+  final db = ref.watch(appDatabaseProvider);
+  final repo = SessionCompletionRepository(db);
+  return repo.watchCompletions().map((rows) => rows.length);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main state provider
@@ -48,7 +59,7 @@ part 'streak_providers.g.dart';
 ///
 /// All other providers depend on this provider.
 @riverpod
-Stream<StreakState> streakStateProvider(Ref ref) {
+Stream<StreakState> streakState(Ref ref) {
   final service = ref.watch(streakServiceProvider);
   return service.watchStreak();
 }
@@ -67,7 +78,7 @@ Stream<StreakState> streakStateProvider(Ref ref) {
 /// - [AsyncValue.data]: The current streak count (may be 0)
 /// - [AsyncValue.error]: Stream failed
 @riverpod
-Future<int> currentStreakProvider(Ref ref) async {
+Future<int> currentStreak(Ref ref) async {
   final state = await ref.watch(streakStateProvider.future);
   return state.currentStreak;
 }
@@ -84,7 +95,7 @@ Future<int> currentStreakProvider(Ref ref) async {
 /// - [AsyncValue.data]: true/false indicating today's completion
 /// - [AsyncValue.error]: Stream failed
 @riverpod
-Future<bool> completedTodayProvider(Ref ref) async {
+Future<bool> completedToday(Ref ref) async {
   final state = await ref.watch(streakStateProvider.future);
   return state.completedToday;
 }
@@ -98,7 +109,7 @@ Future<bool> completedTodayProvider(Ref ref) async {
 /// - [AsyncValue.data]: List of day statuses (oldest → newest)
 /// - [AsyncValue.error]: Stream failed
 @riverpod
-Future<List<DayStatus>> streakCalendarProvider(Ref ref) async {
+Future<List<DayStatus>> streakCalendar(Ref ref) async {
   final state = await ref.watch(streakStateProvider.future);
   return state.calendarDays;
 }
@@ -116,7 +127,7 @@ Future<List<DayStatus>> streakCalendarProvider(Ref ref) async {
 /// - [AsyncValue.data]: Number of freezes available (0–2)
 /// - [AsyncValue.error]: Stream failed
 @riverpod
-Future<int> availableFreezesProvider(Ref ref) async {
+Future<int> availableFreezes(Ref ref) async {
   final state = await ref.watch(streakStateProvider.future);
   return state.freezesAvailable;
 }
@@ -135,7 +146,7 @@ Future<int> availableFreezesProvider(Ref ref) async {
 /// ref.read(consumeStreakFreezeProvider).call();
 /// ```
 @riverpod
-Future<bool> consumeStreakFreezeProvider(Ref ref) async {
+Future<bool> consumeStreakFreeze(Ref ref) async {
   final service = ref.watch(streakServiceProvider);
   return await service.consumeStreakFreeze();
 }
@@ -153,7 +164,7 @@ Future<bool> consumeStreakFreezeProvider(Ref ref) async {
 /// - [StreakState] if available
 /// - null if stream is still loading or errored
 @riverpod
-StreakState? cachedStreakStateProvider(Ref ref) {
+StreakState? cachedStreakState(Ref ref) {
   final asyncState = ref.watch(streakStateProvider);
   return asyncState.maybeWhen(
     data: (state) => state,
@@ -165,7 +176,7 @@ StreakState? cachedStreakStateProvider(Ref ref) {
 ///
 /// Returns the cached current streak; 0 if not yet loaded.
 @riverpod
-int cachedCurrentStreakProvider(Ref ref) {
+int cachedCurrentStreak(Ref ref) {
   final state = ref.watch(cachedStreakStateProvider);
   return state?.currentStreak ?? 0;
 }
@@ -174,7 +185,7 @@ int cachedCurrentStreakProvider(Ref ref) {
 ///
 /// Returns cached status; false if not yet loaded.
 @riverpod
-bool cachedCompletedTodayProvider(Ref ref) {
+bool cachedCompletedToday(Ref ref) {
   final state = ref.watch(cachedStreakStateProvider);
   return state?.completedToday ?? false;
 }
@@ -183,7 +194,7 @@ bool cachedCompletedTodayProvider(Ref ref) {
 ///
 /// Returns cached freeze count; 0 if not yet loaded.
 @riverpod
-int cachedAvailableFreezesProvider(Ref ref) {
+int cachedAvailableFreezes(Ref ref) {
   final state = ref.watch(cachedStreakStateProvider);
   return state?.freezesAvailable ?? 0;
 }

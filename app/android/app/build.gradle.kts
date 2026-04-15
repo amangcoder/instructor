@@ -69,13 +69,6 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
 }
 
-// Sentry 8.x pulls in sentry-compose-android by default. This app does not
-// use Jetpack Compose, so exclude it to prevent ClassNotFoundException at
-// runtime when Sentry tries to load Compose APIs.
-configurations.all {
-    exclude(group = "io.sentry", module = "sentry-compose-android")
-}
-
 flutter {
     source = "../.."
 }

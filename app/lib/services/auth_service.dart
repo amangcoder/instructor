@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/painting.dart' show NetworkImage, PaintingBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -417,9 +418,25 @@ class AuthServiceImpl implements AuthService {
 
   @override
   Future<bool> isLoggedIn() async {
-    final id = await _storage.read(key: _StorageKeys.userId);
-    final email = await _storage.read(key: _StorageKeys.userEmail);
-    final token = await _storage.read(key: _StorageKeys.accessToken);
+    final String? id;
+    final String? email;
+    final String? token;
+    try {
+      id = await _storage.read(key: _StorageKeys.userId);
+      email = await _storage.read(key: _StorageKeys.userEmail);
+      token = await _storage.read(key: _StorageKeys.accessToken);
+    } catch (e) {
+      // Secure storage cipher mismatch (BadPaddingException) — typically caused
+      // by Keystore key loss after app reinstall or device backup restore.
+      // Wipe the corrupted blob so subsequent launches don't repeatedly throw.
+      debugPrint('AuthService.isLoggedIn: secure storage read failed ($e); wiping');
+      try {
+        await _storage.deleteAll();
+      } catch (_) {}
+      _cachedUser = null;
+      _isAuthenticated = false;
+      return false;
+    }
 
     if (token == null || token.isEmpty ||
         id == null || id.isEmpty ||
@@ -436,7 +453,7 @@ class AuthServiceImpl implements AuthService {
     if (_isTokenExpired(token)) {
       debugPrint('AuthService.isLoggedIn: access token expired, attempting silent refresh…');
       try {
-        await refreshToken();
+        await refreshToken().timeout(const Duration(seconds: 5));
         // Ensure in-memory cache is populated — refreshToken() only updates
         // the stream if _cachedUser is already non-null, so set it explicitly.
         final name = await _storage.read(key: _StorageKeys.userName);
@@ -522,6 +539,10 @@ class AuthServiceImpl implements AuthService {
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         final user = AuthUser.fromJson(json);
+        final newPhoto = user.photoUrl;
+        if (newPhoto != null && newPhoto.isNotEmpty) {
+          PaintingBinding.instance.imageCache.evict(NetworkImage(newPhoto));
+        }
         await _persistProfileFields(user);
         _cachedUser = user;
         // Broadcast the refreshed profile so any listener (e.g.
@@ -621,6 +642,14 @@ class AuthServiceImpl implements AuthService {
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     final photoUrl = json['photoUrl']?.toString();
     if (photoUrl != null && photoUrl.isNotEmpty) {
+      // The S3 URL is stable per user, so Flutter's ImageCache may still hold a
+      // failed load from an earlier upload attempt. Evict both the plain URL and
+      // any prior cached entry before broadcasting the new photo.
+      PaintingBinding.instance.imageCache.evict(NetworkImage(photoUrl));
+      final previous = _cachedUser?.photoUrl;
+      if (previous != null && previous.isNotEmpty && previous != photoUrl) {
+        PaintingBinding.instance.imageCache.evict(NetworkImage(previous));
+      }
       await _storage.write(key: _StorageKeys.userPhotoUrl, value: photoUrl);
       if (_cachedUser != null) {
         _cachedUser = _cachedUser!.copyWith(photoUrl: photoUrl);

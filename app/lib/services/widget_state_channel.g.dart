@@ -7,7 +7,7 @@ part of 'widget_state_channel.dart';
 // **************************************************************************
 
 String _$widgetStateChannelHash() =>
-    r'840096d265be12e8bde578c10c191848dd047418';
+    r'b4d3163d4df15274fd04394db3144ffd45cfcadf';
 
 /// See also [widgetStateChannel].
 @ProviderFor(widgetStateChannel)

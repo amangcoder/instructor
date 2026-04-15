@@ -76,28 +76,50 @@ class _AuthenticatedTile extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: colorScheme.primaryContainer,
-        child: Icon(
-          Icons.person_outlined,
-          color: colorScheme.onPrimaryContainer,
-        ),
-      ),
-      title: const Text('Signed in as'),
-      subtitle: Text(
-        email,
-        style: TextStyle(
-          color: colorScheme.primary,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      trailing: Semantics(
-        label: 'Log out',
-        child: OutlinedButton(
-          onPressed: onLogout,
-          child: const Text('Log Out'),
-        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: colorScheme.primaryContainer,
+            child: Icon(
+              Icons.person_outlined,
+              color: colorScheme.onPrimaryContainer,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Signed in as', style: theme.textTheme.bodyMedium),
+                const SizedBox(height: 2),
+                Text(
+                  email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Semantics(
+            label: 'Log out',
+            child: OutlinedButton(
+              onPressed: onLogout,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                visualDensity: VisualDensity.compact,
+              ),
+              child: const Text('Log Out'),
+            ),
+          ),
+        ],
       ),
     );
   }

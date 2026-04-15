@@ -56,6 +56,17 @@ class OtpInputFieldState extends State<OtpInputField> {
   String get _currentValue =>
       _controllers.map((c) => c.text).join();
 
+  void _handleKeyEvent(int index, KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    if (event.logicalKey != LogicalKeyboardKey.backspace) return;
+    if (_controllers[index].text.isNotEmpty) return;
+    if (index == 0) return;
+    // Empty box + backspace: clear previous box and move focus back.
+    _controllers[index - 1].clear();
+    _focusNodes[index - 1].requestFocus();
+    widget.onChanged?.call(_currentValue);
+  }
+
   void _onChanged(int index, String value) {
     if (value.length > 1) {
       // User pasted a full OTP — distribute across all boxes.
@@ -109,47 +120,54 @@ class OtpInputFieldState extends State<OtpInputField> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(_length, (index) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: SizedBox(
-              width: 48,
-              height: 56,
-              child: TextField(
-                controller: _controllers[index],
-                focusNode: _focusNodes[index],
-                enabled: widget.enabled,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                maxLength: 1,
-                autofocus: index == 0,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: InputDecoration(
-                  counterText: '',
-                  contentPadding: EdgeInsets.zero,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: colorScheme.outline),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: colorScheme.outline),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: colorScheme.primary,
-                      width: 2,
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: SizedBox(
+                height: 56,
+                child: Focus(
+                  onKeyEvent: (_, event) {
+                    _handleKeyEvent(index, event);
+                    return KeyEventResult.ignored;
+                  },
+                  child: TextField(
+                    controller: _controllers[index],
+                    focusNode: _focusNodes[index],
+                  enabled: widget.enabled,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  maxLength: 1,
+                  autofocus: index == 0,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: InputDecoration(
+                    counterText: '',
+                    contentPadding: EdgeInsets.zero,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: colorScheme.outline),
                     ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: colorScheme.outline),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: colorScheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerHighest,
                   ),
-                  filled: true,
-                  fillColor: colorScheme.surfaceContainerHighest,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
+                  ),
+                  onChanged: (v) => _onChanged(index, v),
+                  ),
                 ),
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-                onChanged: (v) => _onChanged(index, v),
               ),
             ),
           );

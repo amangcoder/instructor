@@ -36,5 +36,28 @@ final notificationTapStreamProvider = StreamProvider<void>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef NotificationTapStreamRef = StreamProviderRef<void>;
+String _$planTriggerFiredStreamHash() =>
+    r'387d878a384a7b22c46b6ea5006ff6a931162e48';
+
+/// Broadcast stream of plan-trigger events (Android scheduled session fired
+/// and the user tapped the notification). On subscribe, emits any cold-start
+/// event that was buffered before the stream had a listener.
+///
+/// Copied from [planTriggerFiredStream].
+@ProviderFor(planTriggerFiredStream)
+final planTriggerFiredStreamProvider =
+    StreamProvider<PlanTriggerFiredEvent>.internal(
+  planTriggerFiredStream,
+  name: r'planTriggerFiredStreamProvider',
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$planTriggerFiredStreamHash,
+  dependencies: null,
+  allTransitiveDependencies: null,
+);
+
+@Deprecated('Will be removed in 3.0. Use Ref instead')
+// ignore: unused_element
+typedef PlanTriggerFiredStreamRef = StreamProviderRef<PlanTriggerFiredEvent>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

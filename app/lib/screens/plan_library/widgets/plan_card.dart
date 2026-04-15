@@ -219,7 +219,8 @@ class _PlanCardState extends State<PlanCard> {
     final bool isTtsReady =
         ttsStatus == 'completed' || ttsStatus == 'partial';
     final bool showActivateButton =
-        ttsStatus == 'none' && widget.onActivate != null;
+        (ttsStatus == 'none' || ttsStatus == 'failed') &&
+            widget.onActivate != null;
     final bool showTtsActionButton =
         showActivateButton || isTtsLoading || isTtsReady;
 

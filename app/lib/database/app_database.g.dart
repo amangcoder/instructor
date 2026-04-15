@@ -1988,6 +1988,1465 @@ class AppSettingsTableCompanion extends UpdateCompanion<AppSettingsTableData> {
   }
 }
 
+class $SessionCompletionsTableTable extends SessionCompletionsTable
+    with TableInfo<$SessionCompletionsTableTable, SessionCompletionsTableData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SessionCompletionsTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+      'user_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _planIdMeta = const VerificationMeta('planId');
+  @override
+  late final GeneratedColumn<String> planId = GeneratedColumn<String>(
+      'plan_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _completedAtMeta =
+      const VerificationMeta('completedAt');
+  @override
+  late final GeneratedColumn<DateTime> completedAt = GeneratedColumn<DateTime>(
+      'completed_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _durationMsMeta =
+      const VerificationMeta('durationMs');
+  @override
+  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
+      'duration_ms', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _clientIdMeta =
+      const VerificationMeta('clientId');
+  @override
+  late final GeneratedColumn<String> clientId = GeneratedColumn<String>(
+      'client_id', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'));
+  static const VerificationMeta _syncedAtMeta =
+      const VerificationMeta('syncedAt');
+  @override
+  late final GeneratedColumn<DateTime> syncedAt = GeneratedColumn<DateTime>(
+      'synced_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        userId,
+        planId,
+        completedAt,
+        durationMs,
+        clientId,
+        syncedAt,
+        createdAt
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'session_completions';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<SessionCompletionsTableData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(_userIdMeta,
+          userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta));
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('plan_id')) {
+      context.handle(_planIdMeta,
+          planId.isAcceptableOrUnknown(data['plan_id']!, _planIdMeta));
+    } else if (isInserting) {
+      context.missing(_planIdMeta);
+    }
+    if (data.containsKey('completed_at')) {
+      context.handle(
+          _completedAtMeta,
+          completedAt.isAcceptableOrUnknown(
+              data['completed_at']!, _completedAtMeta));
+    } else if (isInserting) {
+      context.missing(_completedAtMeta);
+    }
+    if (data.containsKey('duration_ms')) {
+      context.handle(
+          _durationMsMeta,
+          durationMs.isAcceptableOrUnknown(
+              data['duration_ms']!, _durationMsMeta));
+    } else if (isInserting) {
+      context.missing(_durationMsMeta);
+    }
+    if (data.containsKey('client_id')) {
+      context.handle(_clientIdMeta,
+          clientId.isAcceptableOrUnknown(data['client_id']!, _clientIdMeta));
+    } else if (isInserting) {
+      context.missing(_clientIdMeta);
+    }
+    if (data.containsKey('synced_at')) {
+      context.handle(_syncedAtMeta,
+          syncedAt.isAcceptableOrUnknown(data['synced_at']!, _syncedAtMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SessionCompletionsTableData map(Map<String, dynamic> data,
+      {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SessionCompletionsTableData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      userId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
+      planId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}plan_id'])!,
+      completedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}completed_at'])!,
+      durationMs: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}duration_ms'])!,
+      clientId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}client_id'])!,
+      syncedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}synced_at']),
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $SessionCompletionsTableTable createAlias(String alias) {
+    return $SessionCompletionsTableTable(attachedDatabase, alias);
+  }
+}
+
+class SessionCompletionsTableData extends DataClass
+    implements Insertable<SessionCompletionsTableData> {
+  /// Auto-increment primary key.
+  final int id;
+
+  /// User ID (string UUID from server) — identifies the user who completed the session.
+  /// Allows querying completions per user for streak calculation and sync.
+  final String userId;
+
+  /// Associated plan ID (UUID string from server).
+  /// Not a FK — plan may be deleted but completion persists for streak history.
+  final String planId;
+
+  /// UTC timestamp when the user finished the session.
+  final DateTime completedAt;
+
+  /// Session duration in milliseconds.
+  final int durationMs;
+
+  /// Client-generated UUID for idempotent server sync.
+  final String clientId;
+
+  /// Sync timestamp — null if not yet synced to server.
+  final DateTime? syncedAt;
+
+  /// Record creation timestamp.
+  final DateTime createdAt;
+  const SessionCompletionsTableData(
+      {required this.id,
+      required this.userId,
+      required this.planId,
+      required this.completedAt,
+      required this.durationMs,
+      required this.clientId,
+      this.syncedAt,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['user_id'] = Variable<String>(userId);
+    map['plan_id'] = Variable<String>(planId);
+    map['completed_at'] = Variable<DateTime>(completedAt);
+    map['duration_ms'] = Variable<int>(durationMs);
+    map['client_id'] = Variable<String>(clientId);
+    if (!nullToAbsent || syncedAt != null) {
+      map['synced_at'] = Variable<DateTime>(syncedAt);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  SessionCompletionsTableCompanion toCompanion(bool nullToAbsent) {
+    return SessionCompletionsTableCompanion(
+      id: Value(id),
+      userId: Value(userId),
+      planId: Value(planId),
+      completedAt: Value(completedAt),
+      durationMs: Value(durationMs),
+      clientId: Value(clientId),
+      syncedAt: syncedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncedAt),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory SessionCompletionsTableData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SessionCompletionsTableData(
+      id: serializer.fromJson<int>(json['id']),
+      userId: serializer.fromJson<String>(json['userId']),
+      planId: serializer.fromJson<String>(json['planId']),
+      completedAt: serializer.fromJson<DateTime>(json['completedAt']),
+      durationMs: serializer.fromJson<int>(json['durationMs']),
+      clientId: serializer.fromJson<String>(json['clientId']),
+      syncedAt: serializer.fromJson<DateTime?>(json['syncedAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'userId': serializer.toJson<String>(userId),
+      'planId': serializer.toJson<String>(planId),
+      'completedAt': serializer.toJson<DateTime>(completedAt),
+      'durationMs': serializer.toJson<int>(durationMs),
+      'clientId': serializer.toJson<String>(clientId),
+      'syncedAt': serializer.toJson<DateTime?>(syncedAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  SessionCompletionsTableData copyWith(
+          {int? id,
+          String? userId,
+          String? planId,
+          DateTime? completedAt,
+          int? durationMs,
+          String? clientId,
+          Value<DateTime?> syncedAt = const Value.absent(),
+          DateTime? createdAt}) =>
+      SessionCompletionsTableData(
+        id: id ?? this.id,
+        userId: userId ?? this.userId,
+        planId: planId ?? this.planId,
+        completedAt: completedAt ?? this.completedAt,
+        durationMs: durationMs ?? this.durationMs,
+        clientId: clientId ?? this.clientId,
+        syncedAt: syncedAt.present ? syncedAt.value : this.syncedAt,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  SessionCompletionsTableData copyWithCompanion(
+      SessionCompletionsTableCompanion data) {
+    return SessionCompletionsTableData(
+      id: data.id.present ? data.id.value : this.id,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      planId: data.planId.present ? data.planId.value : this.planId,
+      completedAt:
+          data.completedAt.present ? data.completedAt.value : this.completedAt,
+      durationMs:
+          data.durationMs.present ? data.durationMs.value : this.durationMs,
+      clientId: data.clientId.present ? data.clientId.value : this.clientId,
+      syncedAt: data.syncedAt.present ? data.syncedAt.value : this.syncedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SessionCompletionsTableData(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('planId: $planId, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('clientId: $clientId, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, userId, planId, completedAt, durationMs,
+      clientId, syncedAt, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SessionCompletionsTableData &&
+          other.id == this.id &&
+          other.userId == this.userId &&
+          other.planId == this.planId &&
+          other.completedAt == this.completedAt &&
+          other.durationMs == this.durationMs &&
+          other.clientId == this.clientId &&
+          other.syncedAt == this.syncedAt &&
+          other.createdAt == this.createdAt);
+}
+
+class SessionCompletionsTableCompanion
+    extends UpdateCompanion<SessionCompletionsTableData> {
+  final Value<int> id;
+  final Value<String> userId;
+  final Value<String> planId;
+  final Value<DateTime> completedAt;
+  final Value<int> durationMs;
+  final Value<String> clientId;
+  final Value<DateTime?> syncedAt;
+  final Value<DateTime> createdAt;
+  const SessionCompletionsTableCompanion({
+    this.id = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.planId = const Value.absent(),
+    this.completedAt = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.clientId = const Value.absent(),
+    this.syncedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  SessionCompletionsTableCompanion.insert({
+    this.id = const Value.absent(),
+    required String userId,
+    required String planId,
+    required DateTime completedAt,
+    required int durationMs,
+    required String clientId,
+    this.syncedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  })  : userId = Value(userId),
+        planId = Value(planId),
+        completedAt = Value(completedAt),
+        durationMs = Value(durationMs),
+        clientId = Value(clientId);
+  static Insertable<SessionCompletionsTableData> custom({
+    Expression<int>? id,
+    Expression<String>? userId,
+    Expression<String>? planId,
+    Expression<DateTime>? completedAt,
+    Expression<int>? durationMs,
+    Expression<String>? clientId,
+    Expression<DateTime>? syncedAt,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (userId != null) 'user_id': userId,
+      if (planId != null) 'plan_id': planId,
+      if (completedAt != null) 'completed_at': completedAt,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (clientId != null) 'client_id': clientId,
+      if (syncedAt != null) 'synced_at': syncedAt,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  SessionCompletionsTableCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? userId,
+      Value<String>? planId,
+      Value<DateTime>? completedAt,
+      Value<int>? durationMs,
+      Value<String>? clientId,
+      Value<DateTime?>? syncedAt,
+      Value<DateTime>? createdAt}) {
+    return SessionCompletionsTableCompanion(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      planId: planId ?? this.planId,
+      completedAt: completedAt ?? this.completedAt,
+      durationMs: durationMs ?? this.durationMs,
+      clientId: clientId ?? this.clientId,
+      syncedAt: syncedAt ?? this.syncedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (planId.present) {
+      map['plan_id'] = Variable<String>(planId.value);
+    }
+    if (completedAt.present) {
+      map['completed_at'] = Variable<DateTime>(completedAt.value);
+    }
+    if (durationMs.present) {
+      map['duration_ms'] = Variable<int>(durationMs.value);
+    }
+    if (clientId.present) {
+      map['client_id'] = Variable<String>(clientId.value);
+    }
+    if (syncedAt.present) {
+      map['synced_at'] = Variable<DateTime>(syncedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SessionCompletionsTableCompanion(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('planId: $planId, ')
+          ..write('completedAt: $completedAt, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('clientId: $clientId, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $StreakFreezesTableTable extends StreakFreezesTable
+    with TableInfo<$StreakFreezesTableTable, StreakFreezesTableData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $StreakFreezesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+      'user_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _frozenAtMeta =
+      const VerificationMeta('frozenAt');
+  @override
+  late final GeneratedColumn<DateTime> frozenAt = GeneratedColumn<DateTime>(
+      'frozen_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _expiresAtMeta =
+      const VerificationMeta('expiresAt');
+  @override
+  late final GeneratedColumn<DateTime> expiresAt = GeneratedColumn<DateTime>(
+      'expires_at', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _consumedAtMeta =
+      const VerificationMeta('consumedAt');
+  @override
+  late final GeneratedColumn<DateTime> consumedAt = GeneratedColumn<DateTime>(
+      'consumed_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, userId, frozenAt, expiresAt, consumedAt, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'streak_freezes';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<StreakFreezesTableData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(_userIdMeta,
+          userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta));
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('frozen_at')) {
+      context.handle(_frozenAtMeta,
+          frozenAt.isAcceptableOrUnknown(data['frozen_at']!, _frozenAtMeta));
+    } else if (isInserting) {
+      context.missing(_frozenAtMeta);
+    }
+    if (data.containsKey('expires_at')) {
+      context.handle(_expiresAtMeta,
+          expiresAt.isAcceptableOrUnknown(data['expires_at']!, _expiresAtMeta));
+    } else if (isInserting) {
+      context.missing(_expiresAtMeta);
+    }
+    if (data.containsKey('consumed_at')) {
+      context.handle(
+          _consumedAtMeta,
+          consumedAt.isAcceptableOrUnknown(
+              data['consumed_at']!, _consumedAtMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  StreakFreezesTableData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return StreakFreezesTableData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      userId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
+      frozenAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}frozen_at'])!,
+      expiresAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}expires_at'])!,
+      consumedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}consumed_at']),
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $StreakFreezesTableTable createAlias(String alias) {
+    return $StreakFreezesTableTable(attachedDatabase, alias);
+  }
+}
+
+class StreakFreezesTableData extends DataClass
+    implements Insertable<StreakFreezesTableData> {
+  /// Auto-increment primary key.
+  final int id;
+
+  /// User ID (string UUID from server) — identifies the user who owns this freeze.
+  /// Allows querying active freezes per user for the freeze availability check.
+  final String userId;
+
+  /// The date when this freeze was earned (UTC).
+  final DateTime frozenAt;
+
+  /// The date when this freeze expires if unused.
+  final DateTime expiresAt;
+
+  /// The date when this freeze was consumed (null if still available).
+  final DateTime? consumedAt;
+
+  /// Record creation timestamp.
+  final DateTime createdAt;
+  const StreakFreezesTableData(
+      {required this.id,
+      required this.userId,
+      required this.frozenAt,
+      required this.expiresAt,
+      this.consumedAt,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['user_id'] = Variable<String>(userId);
+    map['frozen_at'] = Variable<DateTime>(frozenAt);
+    map['expires_at'] = Variable<DateTime>(expiresAt);
+    if (!nullToAbsent || consumedAt != null) {
+      map['consumed_at'] = Variable<DateTime>(consumedAt);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  StreakFreezesTableCompanion toCompanion(bool nullToAbsent) {
+    return StreakFreezesTableCompanion(
+      id: Value(id),
+      userId: Value(userId),
+      frozenAt: Value(frozenAt),
+      expiresAt: Value(expiresAt),
+      consumedAt: consumedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(consumedAt),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory StreakFreezesTableData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return StreakFreezesTableData(
+      id: serializer.fromJson<int>(json['id']),
+      userId: serializer.fromJson<String>(json['userId']),
+      frozenAt: serializer.fromJson<DateTime>(json['frozenAt']),
+      expiresAt: serializer.fromJson<DateTime>(json['expiresAt']),
+      consumedAt: serializer.fromJson<DateTime?>(json['consumedAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'userId': serializer.toJson<String>(userId),
+      'frozenAt': serializer.toJson<DateTime>(frozenAt),
+      'expiresAt': serializer.toJson<DateTime>(expiresAt),
+      'consumedAt': serializer.toJson<DateTime?>(consumedAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  StreakFreezesTableData copyWith(
+          {int? id,
+          String? userId,
+          DateTime? frozenAt,
+          DateTime? expiresAt,
+          Value<DateTime?> consumedAt = const Value.absent(),
+          DateTime? createdAt}) =>
+      StreakFreezesTableData(
+        id: id ?? this.id,
+        userId: userId ?? this.userId,
+        frozenAt: frozenAt ?? this.frozenAt,
+        expiresAt: expiresAt ?? this.expiresAt,
+        consumedAt: consumedAt.present ? consumedAt.value : this.consumedAt,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  StreakFreezesTableData copyWithCompanion(StreakFreezesTableCompanion data) {
+    return StreakFreezesTableData(
+      id: data.id.present ? data.id.value : this.id,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      frozenAt: data.frozenAt.present ? data.frozenAt.value : this.frozenAt,
+      expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
+      consumedAt:
+          data.consumedAt.present ? data.consumedAt.value : this.consumedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('StreakFreezesTableData(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('frozenAt: $frozenAt, ')
+          ..write('expiresAt: $expiresAt, ')
+          ..write('consumedAt: $consumedAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, userId, frozenAt, expiresAt, consumedAt, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is StreakFreezesTableData &&
+          other.id == this.id &&
+          other.userId == this.userId &&
+          other.frozenAt == this.frozenAt &&
+          other.expiresAt == this.expiresAt &&
+          other.consumedAt == this.consumedAt &&
+          other.createdAt == this.createdAt);
+}
+
+class StreakFreezesTableCompanion
+    extends UpdateCompanion<StreakFreezesTableData> {
+  final Value<int> id;
+  final Value<String> userId;
+  final Value<DateTime> frozenAt;
+  final Value<DateTime> expiresAt;
+  final Value<DateTime?> consumedAt;
+  final Value<DateTime> createdAt;
+  const StreakFreezesTableCompanion({
+    this.id = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.frozenAt = const Value.absent(),
+    this.expiresAt = const Value.absent(),
+    this.consumedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  StreakFreezesTableCompanion.insert({
+    this.id = const Value.absent(),
+    required String userId,
+    required DateTime frozenAt,
+    required DateTime expiresAt,
+    this.consumedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  })  : userId = Value(userId),
+        frozenAt = Value(frozenAt),
+        expiresAt = Value(expiresAt);
+  static Insertable<StreakFreezesTableData> custom({
+    Expression<int>? id,
+    Expression<String>? userId,
+    Expression<DateTime>? frozenAt,
+    Expression<DateTime>? expiresAt,
+    Expression<DateTime>? consumedAt,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (userId != null) 'user_id': userId,
+      if (frozenAt != null) 'frozen_at': frozenAt,
+      if (expiresAt != null) 'expires_at': expiresAt,
+      if (consumedAt != null) 'consumed_at': consumedAt,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  StreakFreezesTableCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? userId,
+      Value<DateTime>? frozenAt,
+      Value<DateTime>? expiresAt,
+      Value<DateTime?>? consumedAt,
+      Value<DateTime>? createdAt}) {
+    return StreakFreezesTableCompanion(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      frozenAt: frozenAt ?? this.frozenAt,
+      expiresAt: expiresAt ?? this.expiresAt,
+      consumedAt: consumedAt ?? this.consumedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (frozenAt.present) {
+      map['frozen_at'] = Variable<DateTime>(frozenAt.value);
+    }
+    if (expiresAt.present) {
+      map['expires_at'] = Variable<DateTime>(expiresAt.value);
+    }
+    if (consumedAt.present) {
+      map['consumed_at'] = Variable<DateTime>(consumedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('StreakFreezesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('frozenAt: $frozenAt, ')
+          ..write('expiresAt: $expiresAt, ')
+          ..write('consumedAt: $consumedAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $PlanTriggersTableTable extends PlanTriggersTable
+    with TableInfo<$PlanTriggersTableTable, PlanTriggersTableData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PlanTriggersTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+      'id', aliasedName, false,
+      hasAutoIncrement: true,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('PRIMARY KEY AUTOINCREMENT'));
+  static const VerificationMeta _clientIdMeta =
+      const VerificationMeta('clientId');
+  @override
+  late final GeneratedColumn<String> clientId = GeneratedColumn<String>(
+      'client_id', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'));
+  static const VerificationMeta _serverIdMeta =
+      const VerificationMeta('serverId');
+  @override
+  late final GeneratedColumn<String> serverId = GeneratedColumn<String>(
+      'server_id', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+      'user_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _planIdMeta = const VerificationMeta('planId');
+  @override
+  late final GeneratedColumn<String> planId = GeneratedColumn<String>(
+      'plan_id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+      'title', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _startUtcMeta =
+      const VerificationMeta('startUtc');
+  @override
+  late final GeneratedColumn<DateTime> startUtc = GeneratedColumn<DateTime>(
+      'start_utc', aliasedName, false,
+      type: DriftSqlType.dateTime, requiredDuringInsert: true);
+  static const VerificationMeta _durationMinutesMeta =
+      const VerificationMeta('durationMinutes');
+  @override
+  late final GeneratedColumn<int> durationMinutes = GeneratedColumn<int>(
+      'duration_minutes', aliasedName, false,
+      type: DriftSqlType.int, requiredDuringInsert: true);
+  static const VerificationMeta _recurrenceMeta =
+      const VerificationMeta('recurrence');
+  @override
+  late final GeneratedColumn<String> recurrence = GeneratedColumn<String>(
+      'recurrence', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultValue: const Constant('none'));
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+      'updated_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  static const VerificationMeta _syncedAtMeta =
+      const VerificationMeta('syncedAt');
+  @override
+  late final GeneratedColumn<DateTime> syncedAt = GeneratedColumn<DateTime>(
+      'synced_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _deletedAtMeta =
+      const VerificationMeta('deletedAt');
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+      'deleted_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  @override
+  List<GeneratedColumn> get $columns => [
+        id,
+        clientId,
+        serverId,
+        userId,
+        planId,
+        title,
+        startUtc,
+        durationMinutes,
+        recurrence,
+        createdAt,
+        updatedAt,
+        syncedAt,
+        deletedAt
+      ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'plan_triggers';
+  @override
+  VerificationContext validateIntegrity(
+      Insertable<PlanTriggersTableData> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('client_id')) {
+      context.handle(_clientIdMeta,
+          clientId.isAcceptableOrUnknown(data['client_id']!, _clientIdMeta));
+    } else if (isInserting) {
+      context.missing(_clientIdMeta);
+    }
+    if (data.containsKey('server_id')) {
+      context.handle(_serverIdMeta,
+          serverId.isAcceptableOrUnknown(data['server_id']!, _serverIdMeta));
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(_userIdMeta,
+          userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta));
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('plan_id')) {
+      context.handle(_planIdMeta,
+          planId.isAcceptableOrUnknown(data['plan_id']!, _planIdMeta));
+    } else if (isInserting) {
+      context.missing(_planIdMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+          _titleMeta, title.isAcceptableOrUnknown(data['title']!, _titleMeta));
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('start_utc')) {
+      context.handle(_startUtcMeta,
+          startUtc.isAcceptableOrUnknown(data['start_utc']!, _startUtcMeta));
+    } else if (isInserting) {
+      context.missing(_startUtcMeta);
+    }
+    if (data.containsKey('duration_minutes')) {
+      context.handle(
+          _durationMinutesMeta,
+          durationMinutes.isAcceptableOrUnknown(
+              data['duration_minutes']!, _durationMinutesMeta));
+    } else if (isInserting) {
+      context.missing(_durationMinutesMeta);
+    }
+    if (data.containsKey('recurrence')) {
+      context.handle(
+          _recurrenceMeta,
+          recurrence.isAcceptableOrUnknown(
+              data['recurrence']!, _recurrenceMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    }
+    if (data.containsKey('synced_at')) {
+      context.handle(_syncedAtMeta,
+          syncedAt.isAcceptableOrUnknown(data['synced_at']!, _syncedAtMeta));
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(_deletedAtMeta,
+          deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PlanTriggersTableData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PlanTriggersTableData(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
+      clientId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}client_id'])!,
+      serverId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}server_id']),
+      userId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}user_id'])!,
+      planId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}plan_id'])!,
+      title: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}title'])!,
+      startUtc: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}start_utc'])!,
+      durationMinutes: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}duration_minutes'])!,
+      recurrence: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}recurrence'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
+      syncedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}synced_at']),
+      deletedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}deleted_at']),
+    );
+  }
+
+  @override
+  $PlanTriggersTableTable createAlias(String alias) {
+    return $PlanTriggersTableTable(attachedDatabase, alias);
+  }
+}
+
+class PlanTriggersTableData extends DataClass
+    implements Insertable<PlanTriggersTableData> {
+  /// Local auto-increment primary key. Separate from [clientId] so joins
+  /// and watches stay integer-keyed.
+  final int id;
+
+  /// Client-generated UUID — cross-device identity + idempotency key.
+  final String clientId;
+
+  /// Server-assigned UUID, null until first successful push.
+  final String? serverId;
+
+  /// User who owns the trigger (server UUID).
+  final String userId;
+
+  /// Plan to start when the trigger fires.
+  final String planId;
+
+  /// Display title captured at schedule time (plan name may change later).
+  final String title;
+
+  /// First-occurrence start time (UTC).
+  final DateTime startUtc;
+
+  /// Session duration for the scheduled plan.
+  final int durationMinutes;
+
+  /// Recurrence rule — one of 'none' | 'daily' | 'weekdays' | 'weekly'.
+  final String recurrence;
+
+  /// Record creation timestamp.
+  final DateTime createdAt;
+
+  /// Last local mutation timestamp — bumped on every edit so the server can
+  /// resolve concurrent updates via last-write-wins.
+  final DateTime updatedAt;
+
+  /// Last successful sync timestamp. Null or stale → row is dirty.
+  final DateTime? syncedAt;
+
+  /// Soft-delete tombstone. Non-null rows are hidden from UI but remain in
+  /// the table so their delete can be synced to other devices.
+  final DateTime? deletedAt;
+  const PlanTriggersTableData(
+      {required this.id,
+      required this.clientId,
+      this.serverId,
+      required this.userId,
+      required this.planId,
+      required this.title,
+      required this.startUtc,
+      required this.durationMinutes,
+      required this.recurrence,
+      required this.createdAt,
+      required this.updatedAt,
+      this.syncedAt,
+      this.deletedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['client_id'] = Variable<String>(clientId);
+    if (!nullToAbsent || serverId != null) {
+      map['server_id'] = Variable<String>(serverId);
+    }
+    map['user_id'] = Variable<String>(userId);
+    map['plan_id'] = Variable<String>(planId);
+    map['title'] = Variable<String>(title);
+    map['start_utc'] = Variable<DateTime>(startUtc);
+    map['duration_minutes'] = Variable<int>(durationMinutes);
+    map['recurrence'] = Variable<String>(recurrence);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || syncedAt != null) {
+      map['synced_at'] = Variable<DateTime>(syncedAt);
+    }
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    return map;
+  }
+
+  PlanTriggersTableCompanion toCompanion(bool nullToAbsent) {
+    return PlanTriggersTableCompanion(
+      id: Value(id),
+      clientId: Value(clientId),
+      serverId: serverId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(serverId),
+      userId: Value(userId),
+      planId: Value(planId),
+      title: Value(title),
+      startUtc: Value(startUtc),
+      durationMinutes: Value(durationMinutes),
+      recurrence: Value(recurrence),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      syncedAt: syncedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+    );
+  }
+
+  factory PlanTriggersTableData.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PlanTriggersTableData(
+      id: serializer.fromJson<int>(json['id']),
+      clientId: serializer.fromJson<String>(json['clientId']),
+      serverId: serializer.fromJson<String?>(json['serverId']),
+      userId: serializer.fromJson<String>(json['userId']),
+      planId: serializer.fromJson<String>(json['planId']),
+      title: serializer.fromJson<String>(json['title']),
+      startUtc: serializer.fromJson<DateTime>(json['startUtc']),
+      durationMinutes: serializer.fromJson<int>(json['durationMinutes']),
+      recurrence: serializer.fromJson<String>(json['recurrence']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      syncedAt: serializer.fromJson<DateTime?>(json['syncedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'clientId': serializer.toJson<String>(clientId),
+      'serverId': serializer.toJson<String?>(serverId),
+      'userId': serializer.toJson<String>(userId),
+      'planId': serializer.toJson<String>(planId),
+      'title': serializer.toJson<String>(title),
+      'startUtc': serializer.toJson<DateTime>(startUtc),
+      'durationMinutes': serializer.toJson<int>(durationMinutes),
+      'recurrence': serializer.toJson<String>(recurrence),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'syncedAt': serializer.toJson<DateTime?>(syncedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+    };
+  }
+
+  PlanTriggersTableData copyWith(
+          {int? id,
+          String? clientId,
+          Value<String?> serverId = const Value.absent(),
+          String? userId,
+          String? planId,
+          String? title,
+          DateTime? startUtc,
+          int? durationMinutes,
+          String? recurrence,
+          DateTime? createdAt,
+          DateTime? updatedAt,
+          Value<DateTime?> syncedAt = const Value.absent(),
+          Value<DateTime?> deletedAt = const Value.absent()}) =>
+      PlanTriggersTableData(
+        id: id ?? this.id,
+        clientId: clientId ?? this.clientId,
+        serverId: serverId.present ? serverId.value : this.serverId,
+        userId: userId ?? this.userId,
+        planId: planId ?? this.planId,
+        title: title ?? this.title,
+        startUtc: startUtc ?? this.startUtc,
+        durationMinutes: durationMinutes ?? this.durationMinutes,
+        recurrence: recurrence ?? this.recurrence,
+        createdAt: createdAt ?? this.createdAt,
+        updatedAt: updatedAt ?? this.updatedAt,
+        syncedAt: syncedAt.present ? syncedAt.value : this.syncedAt,
+        deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+      );
+  PlanTriggersTableData copyWithCompanion(PlanTriggersTableCompanion data) {
+    return PlanTriggersTableData(
+      id: data.id.present ? data.id.value : this.id,
+      clientId: data.clientId.present ? data.clientId.value : this.clientId,
+      serverId: data.serverId.present ? data.serverId.value : this.serverId,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      planId: data.planId.present ? data.planId.value : this.planId,
+      title: data.title.present ? data.title.value : this.title,
+      startUtc: data.startUtc.present ? data.startUtc.value : this.startUtc,
+      durationMinutes: data.durationMinutes.present
+          ? data.durationMinutes.value
+          : this.durationMinutes,
+      recurrence:
+          data.recurrence.present ? data.recurrence.value : this.recurrence,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      syncedAt: data.syncedAt.present ? data.syncedAt.value : this.syncedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanTriggersTableData(')
+          ..write('id: $id, ')
+          ..write('clientId: $clientId, ')
+          ..write('serverId: $serverId, ')
+          ..write('userId: $userId, ')
+          ..write('planId: $planId, ')
+          ..write('title: $title, ')
+          ..write('startUtc: $startUtc, ')
+          ..write('durationMinutes: $durationMinutes, ')
+          ..write('recurrence: $recurrence, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+      id,
+      clientId,
+      serverId,
+      userId,
+      planId,
+      title,
+      startUtc,
+      durationMinutes,
+      recurrence,
+      createdAt,
+      updatedAt,
+      syncedAt,
+      deletedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PlanTriggersTableData &&
+          other.id == this.id &&
+          other.clientId == this.clientId &&
+          other.serverId == this.serverId &&
+          other.userId == this.userId &&
+          other.planId == this.planId &&
+          other.title == this.title &&
+          other.startUtc == this.startUtc &&
+          other.durationMinutes == this.durationMinutes &&
+          other.recurrence == this.recurrence &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.syncedAt == this.syncedAt &&
+          other.deletedAt == this.deletedAt);
+}
+
+class PlanTriggersTableCompanion
+    extends UpdateCompanion<PlanTriggersTableData> {
+  final Value<int> id;
+  final Value<String> clientId;
+  final Value<String?> serverId;
+  final Value<String> userId;
+  final Value<String> planId;
+  final Value<String> title;
+  final Value<DateTime> startUtc;
+  final Value<int> durationMinutes;
+  final Value<String> recurrence;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> syncedAt;
+  final Value<DateTime?> deletedAt;
+  const PlanTriggersTableCompanion({
+    this.id = const Value.absent(),
+    this.clientId = const Value.absent(),
+    this.serverId = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.planId = const Value.absent(),
+    this.title = const Value.absent(),
+    this.startUtc = const Value.absent(),
+    this.durationMinutes = const Value.absent(),
+    this.recurrence = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.syncedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+  });
+  PlanTriggersTableCompanion.insert({
+    this.id = const Value.absent(),
+    required String clientId,
+    this.serverId = const Value.absent(),
+    required String userId,
+    required String planId,
+    required String title,
+    required DateTime startUtc,
+    required int durationMinutes,
+    this.recurrence = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.syncedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+  })  : clientId = Value(clientId),
+        userId = Value(userId),
+        planId = Value(planId),
+        title = Value(title),
+        startUtc = Value(startUtc),
+        durationMinutes = Value(durationMinutes);
+  static Insertable<PlanTriggersTableData> custom({
+    Expression<int>? id,
+    Expression<String>? clientId,
+    Expression<String>? serverId,
+    Expression<String>? userId,
+    Expression<String>? planId,
+    Expression<String>? title,
+    Expression<DateTime>? startUtc,
+    Expression<int>? durationMinutes,
+    Expression<String>? recurrence,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? syncedAt,
+    Expression<DateTime>? deletedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (clientId != null) 'client_id': clientId,
+      if (serverId != null) 'server_id': serverId,
+      if (userId != null) 'user_id': userId,
+      if (planId != null) 'plan_id': planId,
+      if (title != null) 'title': title,
+      if (startUtc != null) 'start_utc': startUtc,
+      if (durationMinutes != null) 'duration_minutes': durationMinutes,
+      if (recurrence != null) 'recurrence': recurrence,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (syncedAt != null) 'synced_at': syncedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+    });
+  }
+
+  PlanTriggersTableCompanion copyWith(
+      {Value<int>? id,
+      Value<String>? clientId,
+      Value<String?>? serverId,
+      Value<String>? userId,
+      Value<String>? planId,
+      Value<String>? title,
+      Value<DateTime>? startUtc,
+      Value<int>? durationMinutes,
+      Value<String>? recurrence,
+      Value<DateTime>? createdAt,
+      Value<DateTime>? updatedAt,
+      Value<DateTime?>? syncedAt,
+      Value<DateTime?>? deletedAt}) {
+    return PlanTriggersTableCompanion(
+      id: id ?? this.id,
+      clientId: clientId ?? this.clientId,
+      serverId: serverId ?? this.serverId,
+      userId: userId ?? this.userId,
+      planId: planId ?? this.planId,
+      title: title ?? this.title,
+      startUtc: startUtc ?? this.startUtc,
+      durationMinutes: durationMinutes ?? this.durationMinutes,
+      recurrence: recurrence ?? this.recurrence,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      syncedAt: syncedAt ?? this.syncedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (clientId.present) {
+      map['client_id'] = Variable<String>(clientId.value);
+    }
+    if (serverId.present) {
+      map['server_id'] = Variable<String>(serverId.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (planId.present) {
+      map['plan_id'] = Variable<String>(planId.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (startUtc.present) {
+      map['start_utc'] = Variable<DateTime>(startUtc.value);
+    }
+    if (durationMinutes.present) {
+      map['duration_minutes'] = Variable<int>(durationMinutes.value);
+    }
+    if (recurrence.present) {
+      map['recurrence'] = Variable<String>(recurrence.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (syncedAt.present) {
+      map['synced_at'] = Variable<DateTime>(syncedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanTriggersTableCompanion(')
+          ..write('id: $id, ')
+          ..write('clientId: $clientId, ')
+          ..write('serverId: $serverId, ')
+          ..write('userId: $userId, ')
+          ..write('planId: $planId, ')
+          ..write('title: $title, ')
+          ..write('startUtc: $startUtc, ')
+          ..write('durationMinutes: $durationMinutes, ')
+          ..write('recurrence: $recurrence, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1997,12 +3456,25 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ExecutionStateTableTable(this);
   late final $AppSettingsTableTable appSettingsTable =
       $AppSettingsTableTable(this);
+  late final $SessionCompletionsTableTable sessionCompletionsTable =
+      $SessionCompletionsTableTable(this);
+  late final $StreakFreezesTableTable streakFreezesTable =
+      $StreakFreezesTableTable(this);
+  late final $PlanTriggersTableTable planTriggersTable =
+      $PlanTriggersTableTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities =>
-      [plansTable, ttsCacheTable, executionStateTable, appSettingsTable];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+        plansTable,
+        ttsCacheTable,
+        executionStateTable,
+        appSettingsTable,
+        sessionCompletionsTable,
+        streakFreezesTable,
+        planTriggersTable
+      ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules(
         [
@@ -3342,6 +4814,704 @@ typedef $$AppSettingsTableTableProcessedTableManager = ProcessedTableManager<
     ),
     AppSettingsTableData,
     PrefetchHooks Function()>;
+typedef $$SessionCompletionsTableTableCreateCompanionBuilder
+    = SessionCompletionsTableCompanion Function({
+  Value<int> id,
+  required String userId,
+  required String planId,
+  required DateTime completedAt,
+  required int durationMs,
+  required String clientId,
+  Value<DateTime?> syncedAt,
+  Value<DateTime> createdAt,
+});
+typedef $$SessionCompletionsTableTableUpdateCompanionBuilder
+    = SessionCompletionsTableCompanion Function({
+  Value<int> id,
+  Value<String> userId,
+  Value<String> planId,
+  Value<DateTime> completedAt,
+  Value<int> durationMs,
+  Value<String> clientId,
+  Value<DateTime?> syncedAt,
+  Value<DateTime> createdAt,
+});
+
+class $$SessionCompletionsTableTableFilterComposer
+    extends Composer<_$AppDatabase, $SessionCompletionsTableTable> {
+  $$SessionCompletionsTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get planId => $composableBuilder(
+      column: $table.planId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get completedAt => $composableBuilder(
+      column: $table.completedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get durationMs => $composableBuilder(
+      column: $table.durationMs, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get clientId => $composableBuilder(
+      column: $table.clientId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get syncedAt => $composableBuilder(
+      column: $table.syncedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$SessionCompletionsTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $SessionCompletionsTableTable> {
+  $$SessionCompletionsTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get planId => $composableBuilder(
+      column: $table.planId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get completedAt => $composableBuilder(
+      column: $table.completedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get durationMs => $composableBuilder(
+      column: $table.durationMs, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get clientId => $composableBuilder(
+      column: $table.clientId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get syncedAt => $composableBuilder(
+      column: $table.syncedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$SessionCompletionsTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SessionCompletionsTableTable> {
+  $$SessionCompletionsTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get planId =>
+      $composableBuilder(column: $table.planId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get completedAt => $composableBuilder(
+      column: $table.completedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get durationMs => $composableBuilder(
+      column: $table.durationMs, builder: (column) => column);
+
+  GeneratedColumn<String> get clientId =>
+      $composableBuilder(column: $table.clientId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get syncedAt =>
+      $composableBuilder(column: $table.syncedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$SessionCompletionsTableTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $SessionCompletionsTableTable,
+    SessionCompletionsTableData,
+    $$SessionCompletionsTableTableFilterComposer,
+    $$SessionCompletionsTableTableOrderingComposer,
+    $$SessionCompletionsTableTableAnnotationComposer,
+    $$SessionCompletionsTableTableCreateCompanionBuilder,
+    $$SessionCompletionsTableTableUpdateCompanionBuilder,
+    (
+      SessionCompletionsTableData,
+      BaseReferences<_$AppDatabase, $SessionCompletionsTableTable,
+          SessionCompletionsTableData>
+    ),
+    SessionCompletionsTableData,
+    PrefetchHooks Function()> {
+  $$SessionCompletionsTableTableTableManager(
+      _$AppDatabase db, $SessionCompletionsTableTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SessionCompletionsTableTableFilterComposer(
+                  $db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SessionCompletionsTableTableOrderingComposer(
+                  $db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SessionCompletionsTableTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> userId = const Value.absent(),
+            Value<String> planId = const Value.absent(),
+            Value<DateTime> completedAt = const Value.absent(),
+            Value<int> durationMs = const Value.absent(),
+            Value<String> clientId = const Value.absent(),
+            Value<DateTime?> syncedAt = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+          }) =>
+              SessionCompletionsTableCompanion(
+            id: id,
+            userId: userId,
+            planId: planId,
+            completedAt: completedAt,
+            durationMs: durationMs,
+            clientId: clientId,
+            syncedAt: syncedAt,
+            createdAt: createdAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String userId,
+            required String planId,
+            required DateTime completedAt,
+            required int durationMs,
+            required String clientId,
+            Value<DateTime?> syncedAt = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+          }) =>
+              SessionCompletionsTableCompanion.insert(
+            id: id,
+            userId: userId,
+            planId: planId,
+            completedAt: completedAt,
+            durationMs: durationMs,
+            clientId: clientId,
+            syncedAt: syncedAt,
+            createdAt: createdAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$SessionCompletionsTableTableProcessedTableManager
+    = ProcessedTableManager<
+        _$AppDatabase,
+        $SessionCompletionsTableTable,
+        SessionCompletionsTableData,
+        $$SessionCompletionsTableTableFilterComposer,
+        $$SessionCompletionsTableTableOrderingComposer,
+        $$SessionCompletionsTableTableAnnotationComposer,
+        $$SessionCompletionsTableTableCreateCompanionBuilder,
+        $$SessionCompletionsTableTableUpdateCompanionBuilder,
+        (
+          SessionCompletionsTableData,
+          BaseReferences<_$AppDatabase, $SessionCompletionsTableTable,
+              SessionCompletionsTableData>
+        ),
+        SessionCompletionsTableData,
+        PrefetchHooks Function()>;
+typedef $$StreakFreezesTableTableCreateCompanionBuilder
+    = StreakFreezesTableCompanion Function({
+  Value<int> id,
+  required String userId,
+  required DateTime frozenAt,
+  required DateTime expiresAt,
+  Value<DateTime?> consumedAt,
+  Value<DateTime> createdAt,
+});
+typedef $$StreakFreezesTableTableUpdateCompanionBuilder
+    = StreakFreezesTableCompanion Function({
+  Value<int> id,
+  Value<String> userId,
+  Value<DateTime> frozenAt,
+  Value<DateTime> expiresAt,
+  Value<DateTime?> consumedAt,
+  Value<DateTime> createdAt,
+});
+
+class $$StreakFreezesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $StreakFreezesTableTable> {
+  $$StreakFreezesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get frozenAt => $composableBuilder(
+      column: $table.frozenAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get expiresAt => $composableBuilder(
+      column: $table.expiresAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get consumedAt => $composableBuilder(
+      column: $table.consumedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$StreakFreezesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $StreakFreezesTableTable> {
+  $$StreakFreezesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get frozenAt => $composableBuilder(
+      column: $table.frozenAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get expiresAt => $composableBuilder(
+      column: $table.expiresAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get consumedAt => $composableBuilder(
+      column: $table.consumedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$StreakFreezesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $StreakFreezesTableTable> {
+  $$StreakFreezesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get frozenAt =>
+      $composableBuilder(column: $table.frozenAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get expiresAt =>
+      $composableBuilder(column: $table.expiresAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get consumedAt => $composableBuilder(
+      column: $table.consumedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$StreakFreezesTableTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $StreakFreezesTableTable,
+    StreakFreezesTableData,
+    $$StreakFreezesTableTableFilterComposer,
+    $$StreakFreezesTableTableOrderingComposer,
+    $$StreakFreezesTableTableAnnotationComposer,
+    $$StreakFreezesTableTableCreateCompanionBuilder,
+    $$StreakFreezesTableTableUpdateCompanionBuilder,
+    (
+      StreakFreezesTableData,
+      BaseReferences<_$AppDatabase, $StreakFreezesTableTable,
+          StreakFreezesTableData>
+    ),
+    StreakFreezesTableData,
+    PrefetchHooks Function()> {
+  $$StreakFreezesTableTableTableManager(
+      _$AppDatabase db, $StreakFreezesTableTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$StreakFreezesTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$StreakFreezesTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$StreakFreezesTableTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> userId = const Value.absent(),
+            Value<DateTime> frozenAt = const Value.absent(),
+            Value<DateTime> expiresAt = const Value.absent(),
+            Value<DateTime?> consumedAt = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+          }) =>
+              StreakFreezesTableCompanion(
+            id: id,
+            userId: userId,
+            frozenAt: frozenAt,
+            expiresAt: expiresAt,
+            consumedAt: consumedAt,
+            createdAt: createdAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String userId,
+            required DateTime frozenAt,
+            required DateTime expiresAt,
+            Value<DateTime?> consumedAt = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+          }) =>
+              StreakFreezesTableCompanion.insert(
+            id: id,
+            userId: userId,
+            frozenAt: frozenAt,
+            expiresAt: expiresAt,
+            consumedAt: consumedAt,
+            createdAt: createdAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$StreakFreezesTableTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $StreakFreezesTableTable,
+    StreakFreezesTableData,
+    $$StreakFreezesTableTableFilterComposer,
+    $$StreakFreezesTableTableOrderingComposer,
+    $$StreakFreezesTableTableAnnotationComposer,
+    $$StreakFreezesTableTableCreateCompanionBuilder,
+    $$StreakFreezesTableTableUpdateCompanionBuilder,
+    (
+      StreakFreezesTableData,
+      BaseReferences<_$AppDatabase, $StreakFreezesTableTable,
+          StreakFreezesTableData>
+    ),
+    StreakFreezesTableData,
+    PrefetchHooks Function()>;
+typedef $$PlanTriggersTableTableCreateCompanionBuilder
+    = PlanTriggersTableCompanion Function({
+  Value<int> id,
+  required String clientId,
+  Value<String?> serverId,
+  required String userId,
+  required String planId,
+  required String title,
+  required DateTime startUtc,
+  required int durationMinutes,
+  Value<String> recurrence,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<DateTime?> syncedAt,
+  Value<DateTime?> deletedAt,
+});
+typedef $$PlanTriggersTableTableUpdateCompanionBuilder
+    = PlanTriggersTableCompanion Function({
+  Value<int> id,
+  Value<String> clientId,
+  Value<String?> serverId,
+  Value<String> userId,
+  Value<String> planId,
+  Value<String> title,
+  Value<DateTime> startUtc,
+  Value<int> durationMinutes,
+  Value<String> recurrence,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<DateTime?> syncedAt,
+  Value<DateTime?> deletedAt,
+});
+
+class $$PlanTriggersTableTableFilterComposer
+    extends Composer<_$AppDatabase, $PlanTriggersTableTable> {
+  $$PlanTriggersTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get clientId => $composableBuilder(
+      column: $table.clientId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get serverId => $composableBuilder(
+      column: $table.serverId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get planId => $composableBuilder(
+      column: $table.planId, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get title => $composableBuilder(
+      column: $table.title, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get startUtc => $composableBuilder(
+      column: $table.startUtc, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<int> get durationMinutes => $composableBuilder(
+      column: $table.durationMinutes,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get recurrence => $composableBuilder(
+      column: $table.recurrence, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get syncedAt => $composableBuilder(
+      column: $table.syncedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnFilters(column));
+}
+
+class $$PlanTriggersTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $PlanTriggersTableTable> {
+  $$PlanTriggersTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get clientId => $composableBuilder(
+      column: $table.clientId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get serverId => $composableBuilder(
+      column: $table.serverId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+      column: $table.userId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get planId => $composableBuilder(
+      column: $table.planId, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get title => $composableBuilder(
+      column: $table.title, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get startUtc => $composableBuilder(
+      column: $table.startUtc, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<int> get durationMinutes => $composableBuilder(
+      column: $table.durationMinutes,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get recurrence => $composableBuilder(
+      column: $table.recurrence, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get syncedAt => $composableBuilder(
+      column: $table.syncedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+      column: $table.deletedAt, builder: (column) => ColumnOrderings(column));
+}
+
+class $$PlanTriggersTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PlanTriggersTableTable> {
+  $$PlanTriggersTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get clientId =>
+      $composableBuilder(column: $table.clientId, builder: (column) => column);
+
+  GeneratedColumn<String> get serverId =>
+      $composableBuilder(column: $table.serverId, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get planId =>
+      $composableBuilder(column: $table.planId, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get startUtc =>
+      $composableBuilder(column: $table.startUtc, builder: (column) => column);
+
+  GeneratedColumn<int> get durationMinutes => $composableBuilder(
+      column: $table.durationMinutes, builder: (column) => column);
+
+  GeneratedColumn<String> get recurrence => $composableBuilder(
+      column: $table.recurrence, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get syncedAt =>
+      $composableBuilder(column: $table.syncedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+}
+
+class $$PlanTriggersTableTableTableManager extends RootTableManager<
+    _$AppDatabase,
+    $PlanTriggersTableTable,
+    PlanTriggersTableData,
+    $$PlanTriggersTableTableFilterComposer,
+    $$PlanTriggersTableTableOrderingComposer,
+    $$PlanTriggersTableTableAnnotationComposer,
+    $$PlanTriggersTableTableCreateCompanionBuilder,
+    $$PlanTriggersTableTableUpdateCompanionBuilder,
+    (
+      PlanTriggersTableData,
+      BaseReferences<_$AppDatabase, $PlanTriggersTableTable,
+          PlanTriggersTableData>
+    ),
+    PlanTriggersTableData,
+    PrefetchHooks Function()> {
+  $$PlanTriggersTableTableTableManager(
+      _$AppDatabase db, $PlanTriggersTableTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PlanTriggersTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PlanTriggersTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PlanTriggersTableTableAnnotationComposer(
+                  $db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            Value<String> clientId = const Value.absent(),
+            Value<String?> serverId = const Value.absent(),
+            Value<String> userId = const Value.absent(),
+            Value<String> planId = const Value.absent(),
+            Value<String> title = const Value.absent(),
+            Value<DateTime> startUtc = const Value.absent(),
+            Value<int> durationMinutes = const Value.absent(),
+            Value<String> recurrence = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
+            Value<DateTime?> syncedAt = const Value.absent(),
+            Value<DateTime?> deletedAt = const Value.absent(),
+          }) =>
+              PlanTriggersTableCompanion(
+            id: id,
+            clientId: clientId,
+            serverId: serverId,
+            userId: userId,
+            planId: planId,
+            title: title,
+            startUtc: startUtc,
+            durationMinutes: durationMinutes,
+            recurrence: recurrence,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            syncedAt: syncedAt,
+            deletedAt: deletedAt,
+          ),
+          createCompanionCallback: ({
+            Value<int> id = const Value.absent(),
+            required String clientId,
+            Value<String?> serverId = const Value.absent(),
+            required String userId,
+            required String planId,
+            required String title,
+            required DateTime startUtc,
+            required int durationMinutes,
+            Value<String> recurrence = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
+            Value<DateTime?> syncedAt = const Value.absent(),
+            Value<DateTime?> deletedAt = const Value.absent(),
+          }) =>
+              PlanTriggersTableCompanion.insert(
+            id: id,
+            clientId: clientId,
+            serverId: serverId,
+            userId: userId,
+            planId: planId,
+            title: title,
+            startUtc: startUtc,
+            durationMinutes: durationMinutes,
+            recurrence: recurrence,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            syncedAt: syncedAt,
+            deletedAt: deletedAt,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ));
+}
+
+typedef $$PlanTriggersTableTableProcessedTableManager = ProcessedTableManager<
+    _$AppDatabase,
+    $PlanTriggersTableTable,
+    PlanTriggersTableData,
+    $$PlanTriggersTableTableFilterComposer,
+    $$PlanTriggersTableTableOrderingComposer,
+    $$PlanTriggersTableTableAnnotationComposer,
+    $$PlanTriggersTableTableCreateCompanionBuilder,
+    $$PlanTriggersTableTableUpdateCompanionBuilder,
+    (
+      PlanTriggersTableData,
+      BaseReferences<_$AppDatabase, $PlanTriggersTableTable,
+          PlanTriggersTableData>
+    ),
+    PlanTriggersTableData,
+    PrefetchHooks Function()>;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3354,6 +5524,13 @@ class $AppDatabaseManager {
       $$ExecutionStateTableTableTableManager(_db, _db.executionStateTable);
   $$AppSettingsTableTableTableManager get appSettingsTable =>
       $$AppSettingsTableTableTableManager(_db, _db.appSettingsTable);
+  $$SessionCompletionsTableTableTableManager get sessionCompletionsTable =>
+      $$SessionCompletionsTableTableTableManager(
+          _db, _db.sessionCompletionsTable);
+  $$StreakFreezesTableTableTableManager get streakFreezesTable =>
+      $$StreakFreezesTableTableTableManager(_db, _db.streakFreezesTable);
+  $$PlanTriggersTableTableTableManager get planTriggersTable =>
+      $$PlanTriggersTableTableTableManager(_db, _db.planTriggersTable);
 }
 
 // **************************************************************************

@@ -18,11 +18,14 @@
 //   2. If authorized → createEvent() → success SnackBar → Navigator.pop().
 //   3. If denied    → AlertDialog with "Open Settings" button.
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/calendar_service.dart';
+import 'package:instructor/services/plan_trigger_service.dart';
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -163,19 +166,46 @@ class _CalendarEventSheetState extends ConsumerState<CalendarEventSheet> {
 
     setState(() => _isAdding = true);
 
-    final service = ref.read(calendarServiceProvider);
-
     try {
-      final authorized = await service.requestPermission();
+      final ok = defaultTargetPlatform == TargetPlatform.android
+          ? await _scheduleAndroidTrigger()
+          : await _addIosCalendarEvent();
 
       if (!mounted) return;
+      setState(() => _isAdding = false);
+      if (!ok) return;
 
-      if (!authorized) {
-        setState(() => _isAdding = false);
-        _showPermissionDeniedDialog();
-        return;
-      }
+      Navigator.of(context).pop();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Plan scheduled'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isAdding = false);
+      debugPrint('CalendarEventSheet: unexpected error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not schedule. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
+  /// iOS path — creates an EventKit calendar entry. Returns true on success.
+  Future<bool> _addIosCalendarEvent() async {
+    final service = ref.read(calendarServiceProvider);
+    final authorized = await service.requestPermission();
+    if (!mounted) return false;
+    if (!authorized) {
+      _showPermissionDeniedDialog();
+      return false;
+    }
+    try {
       await service.createEvent(
         title: widget.planName.isEmpty ? 'Plan Session' : widget.planName,
         durationMinutes: widget.planDuration.inMinutes.clamp(1, 1440),
@@ -183,47 +213,110 @@ class _CalendarEventSheetState extends ConsumerState<CalendarEventSheet> {
         recurrence: _recurrence,
         deepLink: _deepLink,
       );
-
-      if (!mounted) return;
-
-      // Pop the sheet first, then show SnackBar on the parent scaffold.
-      Navigator.of(context).pop();
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Added to Calendar'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      return true;
     } on PlatformException catch (e) {
-      if (!mounted) return;
-      setState(() => _isAdding = false);
-      debugPrint('CalendarEventSheet: PlatformException adding event: $e');
-      // Map known EventKit error codes to friendly strings.
-      final String friendlyMessage;
-      if (e.code == 'PERMISSION_DENIED' || e.code == '1') {
-        friendlyMessage = 'Calendar access was denied.';
-      } else {
-        friendlyMessage = 'Could not create event — please try again.';
-      }
+      debugPrint('CalendarEventSheet: PlatformException: $e');
+      if (!mounted) return false;
+      final msg = (e.code == 'PERMISSION_DENIED' || e.code == '1')
+          ? 'Calendar access was denied.'
+          : 'Could not create event — please try again.';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(friendlyMessage),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
       );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isAdding = false);
-      debugPrint('CalendarEventSheet: unexpected error adding event: $e');
+      return false;
+    }
+  }
+
+  /// Android path — schedules an exact alarm via PlanTriggerService so the
+  /// app auto-starts the plan at the selected time. Returns true on success.
+  Future<bool> _scheduleAndroidTrigger() async {
+    final planId = widget.planId;
+    if (planId == null || planId.isEmpty) {
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Could not add to calendar. Please try again.'),
+          content: Text('Plan has no ID — save the plan before scheduling.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
+      return false;
     }
+
+    final user = ref.read(authServiceProvider).getUser();
+    if (user == null) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to schedule plan sessions.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return false;
+    }
+
+    final PlanTriggerService triggers = ref.read(planTriggerServiceProvider);
+    final PlanTriggerScheduleResult result = await triggers.schedule(
+      id: _generateTriggerId(planId, _startDateTime),
+      userId: user.id,
+      planId: planId,
+      title: widget.planName.isEmpty ? 'Plan Session' : widget.planName,
+      start: _startDateTime,
+      durationMinutes: widget.planDuration.inMinutes.clamp(1, 1440),
+      recurrence: _recurrence,
+    );
+
+    if (!mounted) return false;
+    return switch (result) {
+      PlanTriggerScheduleResult.scheduled => true,
+      PlanTriggerScheduleResult.permissionRequired => () {
+          _showExactAlarmPermissionDialog();
+          return false;
+        }(),
+      PlanTriggerScheduleResult.unsupportedPlatform ||
+      PlanTriggerScheduleResult.failed =>
+        () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not schedule the plan trigger.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return false;
+        }(),
+    };
+  }
+
+  /// Deterministic trigger id — collapses repeated scheduling of the same
+  /// (plan, start) pair onto the same native alarm slot.
+  String _generateTriggerId(String planId, DateTime start) =>
+      'trg_${planId}_${start.millisecondsSinceEpoch}';
+
+  void _showExactAlarmPermissionDialog() {
+    final triggers = ref.read(planTriggerServiceProvider);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Allow Scheduled Sessions'),
+        content: const Text(
+          'Instructor needs permission to schedule exact alarms so it can '
+          'start your plan at the selected time.\n\n'
+          'Enable "Alarms & reminders" for Instructor in Settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Not Now'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await triggers.openExactAlarmSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showPermissionDeniedDialog() {

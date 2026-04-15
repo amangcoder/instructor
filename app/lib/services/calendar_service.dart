@@ -127,11 +127,14 @@ class CalendarService {
 
   // ── Settings ────────────────────────────────────────────────────────────────
 
-  /// Opens the iOS app-settings page so the user can grant calendar access.
+  /// Opens the native app-settings page so the user can grant calendar access.
   ///
-  /// No-op on non-iOS platforms.
+  /// No-op on platforms without a registered MethodChannel handler (e.g.
+  /// desktop/web).
   Future<void> openAppSettings() async {
-    if (!defaultTargetPlatform.isIOS) return;
+    if (!defaultTargetPlatform.isIOS && !defaultTargetPlatform.isAndroid) {
+      return;
+    }
     try {
       await _channel.invokeMethod<void>('openAppSettings');
     } on PlatformException catch (e) {
@@ -149,4 +152,5 @@ CalendarService calendarService(Ref ref) => CalendarService._();
 
 extension on TargetPlatform {
   bool get isIOS => this == TargetPlatform.iOS;
+  bool get isAndroid => this == TargetPlatform.android;
 }

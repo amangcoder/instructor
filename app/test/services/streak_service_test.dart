@@ -48,11 +48,13 @@ DateTime _day(int year, int month, int day) =>
 /// Records a completion for [planId] at [completedAt] in the given [repo].
 Future<void> _recordCompletion(
   SessionCompletionRepository repo, {
+  String userId = 'user-1',
   String planId = 'plan-1',
   required DateTime completedAt,
   int durationMs = 600000, // 10 minutes
 }) async {
   await repo.recordCompletion(
+    userId: userId,
     planId: planId,
     completedAt: completedAt,
     durationMs: durationMs,

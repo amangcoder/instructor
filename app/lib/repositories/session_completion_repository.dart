@@ -15,6 +15,7 @@
 /// ```dart
 /// final repository = SessionCompletionRepository(database);
 /// await repository.recordCompletion(
+///   userId: userId,
 ///   planId: planId,
 ///   completedAt: DateTime.now(),
 ///   durationMs: 600000,
@@ -83,6 +84,7 @@ class SessionCompletionRepository {
   /// Returns: the recorded completion record with generated ID.
   /// Throws: Any Drift database errors (logged and rethrown).
   Future<SessionCompletionRecord> recordCompletion({
+    required String userId,
     required String planId,
     required DateTime completedAt,
     required int durationMs,
@@ -92,13 +94,15 @@ class SessionCompletionRepository {
 
       debugPrint(
         '[SessionCompletionRepository] Recording completion: '
-        'planId=$planId, completedAt=$completedAt, durationMs=$durationMs',
+        'userId=$userId, planId=$planId, completedAt=$completedAt, '
+        'durationMs=$durationMs',
       );
 
       final id = await _database
           .into(_database.sessionCompletionsTable)
           .insert(
             SessionCompletionsTableCompanion.insert(
+              userId: userId,
               planId: planId,
               completedAt: completedAt,
               durationMs: durationMs,

@@ -1,5 +1,6 @@
 import 'dart:async' show Timer, unawaited;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,11 +17,13 @@ import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/services/plan_sharing_service.dart';
 import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/theme/app_branding.dart';
 import 'package:instructor/theme/gradient_button.dart';
 import 'package:instructor/widgets/active_session_dialog.dart';
-import 'package:instructor/widgets/share_plan_button.dart';
+import 'package:flutter/semantics.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'widgets/calendar_event_sheet.dart';
@@ -448,6 +451,117 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Share
+  // ─────────────────────────────────────────────────────────────────────────
+
+  bool _isSharing = false;
+
+  Future<void> _sharePlan() async {
+    if (_isSharing) return;
+    final planId = widget.planId;
+    if (planId == null || planId.isEmpty) return;
+    SemanticsService.announce('Generating share link', TextDirection.ltr);
+    setState(() => _isSharing = true);
+    try {
+      final service = ref.read(planSharingServiceProvider);
+      final shareUrl = await service.sharePlan(planId);
+      final displayName = _name.trim().isEmpty ? 'Untitled Plan' : _name.trim();
+      final desc = _description.trim();
+      final shareText = desc.isEmpty
+          ? '$displayName\n\n$shareUrl'
+          : '$displayName — $desc\n\n$shareUrl';
+      if (!mounted) return;
+      await Share.share(shareText, subject: displayName);
+    } on PlanSharingException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.userMessage),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to share plan. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Overflow menu
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildOverflowMenu() {
+    final hasSteps = _steps.isNotEmpty;
+    final canShare = widget.planId != null && widget.planId!.isNotEmpty;
+    final showCalendar = defaultTargetPlatform == TargetPlatform.iOS;
+
+    return PopupMenuButton<_OverflowAction>(
+      tooltip: 'More actions',
+      icon: const Icon(Icons.more_vert),
+      onSelected: (action) {
+        switch (action) {
+          case _OverflowAction.details:
+            _openMetadataSheet();
+          case _OverflowAction.calendar:
+            _openCalendarSheet();
+          case _OverflowAction.share:
+            _sharePlan();
+          case _OverflowAction.download:
+            _downloadVoices();
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          value: _OverflowAction.details,
+          child: ListTile(
+            leading: Icon(Icons.tune_outlined),
+            title: Text('Plan details'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        if (showCalendar)
+          const PopupMenuItem(
+            value: _OverflowAction.calendar,
+            child: ListTile(
+              leading: Icon(Icons.calendar_month_outlined),
+              title: Text('Add to calendar'),
+              contentPadding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        PopupMenuItem(
+          value: _OverflowAction.share,
+          enabled: canShare && !_isSharing,
+          child: const ListTile(
+            leading: Icon(Icons.ios_share_outlined),
+            title: Text('Share plan'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+        PopupMenuItem(
+          value: _OverflowAction.download,
+          enabled: hasSteps && !_isDownloading && !_downloadComplete,
+          child: const ListTile(
+            leading: Icon(Icons.download_outlined),
+            title: Text('Download voices'),
+            contentPadding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Download voices
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -656,61 +770,39 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         title: AppBranding.gradientTitle(fontSize: 18),
         centerTitle: false,
         actions: [
-          // Preview at 4x speed
+          // Preview at 4x speed — primary secondary action, always visible.
           if (_steps.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.play_circle_outline),
               tooltip: 'Preview at 4x speed',
               onPressed: _startPreview,
             ),
-          // Download all voices
-          if (_steps.isNotEmpty)
-            _isDownloading
-                ? Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        value: _downloadTotal > 0
-                            ? _downloadedCount / _downloadTotal
-                            : null,
-                      ),
-                    ),
-                  )
-                : IconButton(
-                    icon: Icon(
-                      _downloadComplete
-                          ? Icons.check_circle
-                          : Icons.download_outlined,
-                    ),
-                    tooltip: _downloadComplete
-                        ? 'Voices downloaded'
-                        : 'Download all voices',
-                    onPressed: _downloadComplete ? null : _downloadVoices,
-                  ),
-          // Share plan (only for existing saved plans)
-          if (widget.planId != null && widget.planId!.isNotEmpty)
-            SharePlanButton(
-              planId: widget.planId!,
-              planName: _name.trim().isEmpty ? 'Untitled Plan' : _name.trim(),
-              planDescription:
-                  _description.trim().isEmpty ? null : _description.trim(),
+          // Inline download progress/completion indicator.
+          // Stays visible while active so the user sees feedback even though
+          // the "Download voices" entry point lives in the overflow menu.
+          if (_isDownloading)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  value: _downloadTotal > 0
+                      ? _downloadedCount / _downloadTotal
+                      : null,
+                ),
+              ),
+            )
+          else if (_downloadComplete)
+            IconButton(
+              icon: Icon(Icons.check_circle, color: colorScheme.primary),
+              tooltip: 'Voices downloaded',
+              onPressed: null,
             ),
-          // Add to Calendar
-          IconButton(
-            icon: const Icon(Icons.calendar_month_outlined),
-            tooltip: 'Add to Calendar',
-            onPressed: _openCalendarSheet,
-          ),
-          // Edit metadata
-          IconButton(
-            icon: const Icon(Icons.tune_outlined),
-            tooltip: 'Plan details',
-            onPressed: _openMetadataSheet,
-          ),
-          // Save — gradient button (Stitch design)
+          // Overflow: secondary actions (M3 guideline — keep primary row to ≤3).
+          _buildOverflowMenu(),
+          // Save — gradient CTA, always visible.
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _isSaving
@@ -755,10 +847,12 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
                 ),
               ],
             ),
-          // ── Sticky duration header ───────────────────────────────────────
-          _DurationHeader(
+          // ── Sticky plan header ───────────────────────────────────────────
+          _PlanHeader(
+            name: _name,
             duration: _totalDuration,
             stepCount: _steps.length,
+            onEditMetadata: _openMetadataSheet,
             colorScheme: colorScheme,
             theme: theme,
           ),
@@ -914,63 +1008,83 @@ class _EditorListItem extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _DurationHeader
+// _PlanHeader
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Sticky header that shows the total computed duration of all steps.
-class _DurationHeader extends StatelessWidget {
-  const _DurationHeader({
+/// Sticky header showing the plan name and a steps·duration badge.
+///
+/// Tapping the name opens the metadata sheet — surfacing the most useful
+/// identity of the plan instead of a redundant "EDITING PLAN" eyebrow.
+class _PlanHeader extends StatelessWidget {
+  const _PlanHeader({
+    required this.name,
     required this.duration,
     required this.stepCount,
+    required this.onEditMetadata,
     required this.colorScheme,
     required this.theme,
   });
 
+  final String name;
   final Duration duration;
   final int stepCount;
+  final VoidCallback onEditMetadata;
   final ColorScheme colorScheme;
   final ThemeData theme;
 
   @override
   Widget build(BuildContext context) {
     final durationText = _formatDuration(duration);
+    final trimmed = name.trim();
+    final isPlaceholder = trimmed.isEmpty;
+    final displayName = isPlaceholder ? 'New plan' : trimmed;
+    final stepsLabel = '$stepCount ${stepCount == 1 ? 'step' : 'steps'}';
 
     return Semantics(
       label:
-          'Total duration: $durationText, $stepCount step${stepCount == 1 ? '' : 's'}',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        child: Row(
-          children: [
-            // "Editing Plan" label (Stitch: primary xs uppercase tracking-widest)
-            Text(
-              'EDITING PLAN',
-              style: GoogleFonts.manrope(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 2,
-                color: colorScheme.primary.withValues(alpha: 0.7),
-              ),
-            ),
-            const Spacer(),
-            // Step count badge
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(9999),
-              ),
-              child: Text(
-                '$stepCount Steps · $durationText',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: colorScheme.primary.withValues(alpha: 0.8),
+          '$displayName, $stepsLabel, total duration $durationText. Tap to edit plan details.',
+      button: true,
+      child: InkWell(
+        onTap: onEditMetadata,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 14, 16, 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  displayName,
+                  style: GoogleFonts.manrope(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: isPlaceholder
+                        ? colorScheme.onSurface.withValues(alpha: 0.45)
+                        : colorScheme.onSurface,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(9999),
+                ),
+                child: Text(
+                  '$stepsLabel · $durationText',
+                  style: GoogleFonts.manrope(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.primary.withValues(alpha: 0.85),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -992,6 +1106,8 @@ class _DurationHeader extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum _StepAction { duplicate, delete, startFromHere }
+
+enum _OverflowAction { details, calendar, share, download }
 
 /// Returns a deep copy of [step] with a freshly generated ID (and new IDs for
 /// any nested children of a [RepeatStep]).

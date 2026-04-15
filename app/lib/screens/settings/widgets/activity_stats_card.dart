@@ -24,28 +24,40 @@ class ActivityStatsCard extends ConsumerWidget {
     final planCount = plansAsync.valueOrNull?.length ?? 0;
     final streakAsync = ref.watch(currentStreakProvider);
     final completedTodayAsync = ref.watch(completedTodayProvider);
+    final sessionCountAsync = ref.watch(totalSessionCountProvider);
+    final sessionCount = sessionCountAsync.valueOrNull;
     final colorScheme = Theme.of(context).colorScheme;
 
     return SettingsCard(
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _StatTile(value: '$planCount', label: 'Plans'),
-            _StatTile(
-              value: '—',
-              label: 'Sessions',
-              sublabel: Text(
-                'Start a session to track',
-                style: TextStyle(fontSize: 11, color: colorScheme.outline),
+            Expanded(child: _StatTile(value: '$planCount', label: 'Plans')),
+            Expanded(
+              child: _StatTile(
+                value: sessionCount == null ? '—' : '$sessionCount',
+                label: 'Sessions',
+                sublabel: sessionCount == null || sessionCount == 0
+                    ? Text(
+                        'Start a session to track',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.outline,
+                        ),
+                      )
+                    : null,
               ),
             ),
             // Streak tile is interactive — tap to open calendar
-            _StreakStatTile(
-              streakAsync: streakAsync,
-              completedTodayAsync: completedTodayAsync,
-              colorScheme: colorScheme,
-              onTap: () => _openStreakCalendarSheet(context),
+            Expanded(
+              child: _StreakStatTile(
+                streakAsync: streakAsync,
+                completedTodayAsync: completedTodayAsync,
+                colorScheme: colorScheme,
+                onTap: () => _openStreakCalendarSheet(context),
+              ),
             ),
           ],
         ),

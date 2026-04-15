@@ -24,7 +24,6 @@ import 'package:instructor/models/shared_plan_preview.dart';
 import 'package:instructor/models/shared_plan_step.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_sharing_service.dart';
-import 'package:instructor/theme/app_branding.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Screen
@@ -155,7 +154,7 @@ class _SharedPlanPreviewScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBranding.brandedAppBar(
+      appBar: AppBar(
         title: const Text('Shared Plan'),
       ),
       body: _buildBody(),
@@ -172,10 +171,10 @@ class _SharedPlanPreviewScreenState
   // ── Loading state ─────────────────────────────────────────────────────────
 
   Widget _buildLoadingState() {
-    return const Center(
+    return Center(
       child: Semantics(
         label: 'Loading shared plan',
-        child: CircularProgressIndicator(),
+        child: const CircularProgressIndicator(),
       ),
     );
   }

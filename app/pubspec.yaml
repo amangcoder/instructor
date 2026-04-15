@@ -33,6 +33,11 @@ dependencies:
 
   # ── Notifications ─────────────────────────────────────────────────────────
   flutter_local_notifications: ^18.0.1
+  # Required by flutter_local_notifications.zonedSchedule for plan-start
+  # triggers on iOS (no native AlarmManager equivalent) — see
+  # [PlanTriggerService].
+  timezone: ^0.9.4
+  flutter_timezone: ^3.0.1
 
   # ── TTS ───────────────────────────────────────────────────────────────────
   flutter_tts: ^4.1.0
@@ -65,9 +70,6 @@ dependencies:
 
   # ── Secure Storage (auth tokens) ─────────────────────────────────────────
   flutter_secure_storage: ^9.2.4
-
-  # ── Error Tracking ───────────────────────────────────────────────────────
-  sentry_flutter: ^8.0.0
 
   # ── Utilities ────────────────────────────────────────────────────────────
   uuid: ^4.4.2

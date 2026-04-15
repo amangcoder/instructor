@@ -14,6 +14,8 @@
 ///   4. **_FakeCalendarService** — a fake implementation used by widget tests.
 library calendar_service_test;
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:instructor/services/calendar_service.dart';
@@ -87,8 +89,6 @@ void main() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 ProviderContainer _makeContainer() {
   final container = ProviderContainer();

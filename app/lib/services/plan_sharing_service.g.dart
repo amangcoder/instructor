@@ -7,17 +7,16 @@ part of 'plan_sharing_service.dart';
 // **************************************************************************
 
 String _$planSharingServiceHash() =>
-    r'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+    r'2538115e733f0ba6c6f044fdd4596eeeae5e7a61';
 
 /// See also [planSharingService].
 @ProviderFor(planSharingService)
 final planSharingServiceProvider = Provider<PlanSharingService>.internal(
   planSharingService,
   name: r'planSharingServiceProvider',
-  debugGetCreateSourceHash:
-      const bool.fromEnvironment('dart.vm.product')
-          ? null
-          : _$planSharingServiceHash,
+  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
+      ? null
+      : _$planSharingServiceHash,
   dependencies: null,
   allTransitiveDependencies: null,
 );

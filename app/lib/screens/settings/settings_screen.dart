@@ -9,8 +9,6 @@ import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/theme/app_branding.dart';
 
-import 'package:instructor/widgets/profile_avatar_button.dart';
-
 import 'widgets/activity_stats_card.dart';
 import 'widgets/auth_section.dart';
 import 'widgets/battery_optimization_prompt.dart';
@@ -47,8 +45,10 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBranding.brandedAppBar(
         actions: [
           Builder(
-            builder: (builderContext) => ProfileAvatarButton(
-              onTap: () => Scaffold.of(builderContext).openEndDrawer(),
+            builder: (builderContext) => IconButton(
+              icon: const Icon(Icons.more_vert),
+              tooltip: 'More',
+              onPressed: () => Scaffold.of(builderContext).openEndDrawer(),
             ),
           ),
         ],
@@ -143,11 +143,12 @@ class _ThemeModeSelector extends ConsumerWidget {
       (value: ThemeMode.dark, label: 'Dark'),
     ];
 
-    return ListTile(
-      title: const Text('Appearance'),
-      subtitle: const Text('App colour scheme'),
-      trailing: DropdownButton<ThemeMode>(
+    return SettingsControlRow(
+      title: 'Appearance',
+      subtitle: 'App colour scheme',
+      control: DropdownButton<ThemeMode>(
         value: current,
+        isDense: true,
         underline: const SizedBox.shrink(),
         items: options
             .map(
@@ -186,10 +187,10 @@ class _VoiceSelector extends ConsumerWidget {
     final currentVoiceStr =
         ref.watch(rawVoiceSettingProvider).valueOrNull ?? 'aoede';
 
-    return ListTile(
-      title: const Text('Default TTS Voice'),
-      subtitle: const Text('Voice used for all Say steps'),
-      trailing: voicesAsync.when(
+    return SettingsControlRow(
+      title: 'Default TTS Voice',
+      subtitle: 'Voice used for all Say steps',
+      control: voicesAsync.when(
         data: (voices) {
           if (voices.isEmpty) return const Text('—');
           // Ensure current value is in list — if the stored voice
@@ -207,12 +208,16 @@ class _VoiceSelector extends ConsumerWidget {
           }
           return DropdownButton<String>(
             value: validId,
+            isDense: true,
             underline: const SizedBox.shrink(),
             items: voices
                 .map(
                   (v) => DropdownMenuItem(
                     value: v.id,
-                    child: Text(v.label),
+                    child: Text(
+                      v.label,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 )
                 .toList(),

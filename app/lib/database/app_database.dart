@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/tables/execution_state_table.dart';
+import 'package:instructor/database/tables/plan_triggers_table.dart';
 import 'package:instructor/database/tables/plans_table.dart';
 import 'package:instructor/database/tables/session_completions_table.dart';
 import 'package:instructor/database/tables/settings_table.dart';
@@ -38,6 +39,7 @@ part 'app_database.g.dart';
     AppSettingsTable,
     SessionCompletionsTable,
     StreakFreezesTable,
+    PlanTriggersTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -48,7 +50,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -206,9 +208,15 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(plansTable);
             await m.createTable(ttsCacheTable);
           }
-          if (from < 7) {
+          if (from == 6) {
             // v6 → v7: add library_id column to plans for duplicate detection.
             // NULL for all existing plans (they were not cloned from the library).
+            //
+            // Guarded on `from == 6` (not `from < 7`): when upgrading from any
+            // version < 6, the `from < 6` block above drops and recreates the
+            // plans table via `m.createTable(plansTable)`, which uses the
+            // current Drift schema — so `library_id` already exists and the
+            // ALTER would fail with "duplicate column name".
             await customStatement(
               'ALTER TABLE plans ADD COLUMN library_id TEXT',
             );
@@ -239,6 +247,19 @@ class AppDatabase extends _$AppDatabase {
             await customStatement(
               'CREATE INDEX IF NOT EXISTS idx_streak_freezes_user_id '
               'ON streak_freezes (user_id)',
+            );
+          }
+          if (from < 9) {
+            // v8 → v9: add plan_triggers table for scheduled auto-start
+            // triggers (Android AlarmManager / iOS notification fallback).
+            await m.createTable(planTriggersTable);
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_plan_triggers_user_updated '
+              'ON plan_triggers (user_id, updated_at)',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_plan_triggers_user_start '
+              'ON plan_triggers (user_id, start_utc)',
             );
           }
         },
