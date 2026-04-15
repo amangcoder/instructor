@@ -14,6 +14,7 @@ import 'package:instructor/screens/plan_generation/plan_generation_screen.dart';
 import 'package:instructor/screens/plan_generation/plan_review_screen.dart';
 import 'package:instructor/screens/plan_library/plan_library_screen.dart';
 import 'package:instructor/screens/settings/settings_screen.dart';
+import 'package:instructor/screens/shared_plan/shared_plan_preview_screen.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/widgets/bottom_nav_shell.dart';
 
@@ -40,6 +41,17 @@ abstract final class AppRoutes {
 
   /// Full path for the review step (sub-route of /generate-plan).
   static const String generatePlanReview = '/generate-plan/review';
+
+  // ── Plan Sharing ─────────────────────────────────────────────────────────
+
+  /// Route pattern for a shared plan deep link.
+  ///
+  /// The `:token` path parameter holds the share token extracted from the
+  /// Universal Link path `/s/:token`.
+  static const String sharedPlan = '/shared/:token';
+
+  /// Builds the concrete path for a given share [token].
+  static String sharedPlanPath(String token) => '/shared/$token';
 }
 
 /// Routes that require an authenticated user.
@@ -216,6 +228,15 @@ GoRouter router(Ref ref) {
         path: AppRoutes.onboarding,
         builder: (BuildContext context, GoRouterState state) =>
             const OnboardingScreen(),
+      ),
+
+      // ── Shared plan deep link ─────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.sharedPlan,
+        builder: (BuildContext context, GoRouterState state) {
+          final token = state.pathParameters['token'] ?? '';
+          return SharedPlanPreviewScreen(shareToken: token);
+        },
       ),
 
       // ── Auth routes ──────────────────────────────────────────────────────

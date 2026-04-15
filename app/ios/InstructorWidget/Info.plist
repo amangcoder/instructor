@@ -25,5 +25,8 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- TASK-014: Live Activity support in widget extension -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>

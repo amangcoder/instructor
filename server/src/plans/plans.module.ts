@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { PlansController } from './plans.controller';
 import { PlansService } from './plans.service';
+import { SharingController } from './sharing.controller';
+import { SharingService } from './sharing.service';
 import { AuthModule } from '../auth/auth.module';
 import { TtsModule } from '../tts/tts.module';
+import { UpstashRateLimiterModule } from '../ratelimit/upstash-ratelimit.module';
 
 @Module({
-  imports: [AuthModule, TtsModule],
-  controllers: [PlansController],
-  providers: [PlansService],
+  imports: [AuthModule, TtsModule, UpstashRateLimiterModule],
+  controllers: [PlansController, SharingController],
+  providers: [PlansService, SharingService],
 })
 export class PlansModule {}

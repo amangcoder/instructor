@@ -11,7 +11,9 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/tables/execution_state_table.dart';
 import 'package:instructor/database/tables/plans_table.dart';
+import 'package:instructor/database/tables/session_completions_table.dart';
 import 'package:instructor/database/tables/settings_table.dart';
+import 'package:instructor/database/tables/streak_freezes_table.dart';
 import 'package:instructor/database/tables/tts_cache_table.dart';
 import 'package:instructor/database/type_converters.dart';
 import 'package:instructor/models/plan_step.dart';
@@ -34,6 +36,8 @@ part 'app_database.g.dart';
     TtsCacheTable,
     ExecutionStateTable,
     AppSettingsTable,
+    SessionCompletionsTable,
+    StreakFreezesTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -44,7 +48,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -52,38 +56,10 @@ class AppDatabase extends _$AppDatabase {
           await m.createAll();
         },
         onUpgrade: (Migrator m, int from, int to) async {
-          if (from < 5) {
-            // v4 → v5: add is_user_created column to plans.
-            // SQLite ALTER TABLE applies the column default (true = 1) to all
-            // existing rows, so current user plans retain isUserCreated=true.
-            // Then mark the five built-in starter plan names as false so they
-            // appear in the "Starter Plans" section after the upgrade.
-            await customStatement(
-              'ALTER TABLE plans ADD COLUMN is_user_created INTEGER NOT NULL DEFAULT 1',
-            );
-            const starterPlanNames = [
-              '108 Surya Namaskar',
-              'Yoga Nidra',
-              'Full Body Strength Circuit',
-              'Morning Routine',
-              'Deep Work Session',
-            ];
-            for (final name in starterPlanNames) {
-              // Single-quote escape: replace ' with ''
-              final escaped = name.replaceAll("'", "''");
-              await customStatement(
-                "UPDATE plans SET is_user_created = 0 WHERE name = '$escaped'",
-              );
-            }
-          }
-          if (from < 3) {
-            // v2 → v3: add ambientAssetKey column to execution_state for
-            // crash-recovery ambient track identity persistence.
-            await m.addColumn(
-              executionStateTable,
-              executionStateTable.ambientAssetKey,
-            );
-          }
+          // ── Guards are ordered sequentially (ascending) ──────────────────
+          // CRITICAL: Migration guards must be in ascending order so that
+          // upgrading from any prior schema version applies all necessary
+          // migrations in the correct sequence.
           if (from < 2) {
             // v1 → v2: add provider and speechRate columns to tts_cache.
             await m.addColumn(ttsCacheTable, ttsCacheTable.provider);
@@ -117,12 +93,37 @@ class AppDatabase extends _$AppDatabase {
             // (OpenAI) and old voice IDs, so it's no longer valid.
             await customStatement('DELETE FROM tts_cache');
           }
-          if (from < 7) {
-            // v6 → v7: add library_id column to plans for duplicate detection.
-            // NULL for all existing plans (they were not cloned from the library).
-            await customStatement(
-              'ALTER TABLE plans ADD COLUMN library_id TEXT',
+          if (from < 3) {
+            // v2 → v3: add ambientAssetKey column to execution_state for
+            // crash-recovery ambient track identity persistence.
+            await m.addColumn(
+              executionStateTable,
+              executionStateTable.ambientAssetKey,
             );
+          }
+          if (from < 5) {
+            // v4 → v5: add is_user_created column to plans.
+            // SQLite ALTER TABLE applies the column default (true = 1) to all
+            // existing rows, so current user plans retain isUserCreated=true.
+            // Then mark the five built-in starter plan names as false so they
+            // appear in the "Starter Plans" section after the upgrade.
+            await customStatement(
+              'ALTER TABLE plans ADD COLUMN is_user_created INTEGER NOT NULL DEFAULT 1',
+            );
+            const starterPlanNames = [
+              '108 Surya Namaskar',
+              'Yoga Nidra',
+              'Full Body Strength Circuit',
+              'Morning Routine',
+              'Deep Work Session',
+            ];
+            for (final name in starterPlanNames) {
+              // Single-quote escape: replace ' with ''
+              final escaped = name.replaceAll("'", "''");
+              await customStatement(
+                "UPDATE plans SET is_user_created = 0 WHERE name = '$escaped'",
+              );
+            }
           }
           if (from < 6) {
             // ── Pre-migration plan capture (TASK-059) ──────────────────────
@@ -205,6 +206,41 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(plansTable);
             await m.createTable(ttsCacheTable);
           }
+          if (from < 7) {
+            // v6 → v7: add library_id column to plans for duplicate detection.
+            // NULL for all existing plans (they were not cloned from the library).
+            await customStatement(
+              'ALTER TABLE plans ADD COLUMN library_id TEXT',
+            );
+          }
+          if (from < 8) {
+            // v7 → v8: add session_completions and streak_freezes tables
+            // for streak tracking feature.
+            // Idempotent: CREATE TABLE IF NOT EXISTS prevents errors on re-entry.
+            // Uses Drift table definitions for type safety and consistency.
+            await m.createTable(sessionCompletionsTable);
+            await m.createTable(streakFreezesTable);
+
+            // Performance indexes for streak queries.
+            // These are created idempotently to ensure they exist regardless of
+            // which migration path was taken.
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_session_completions_user_id '
+              'ON session_completions (user_id)',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_session_completions_completed_at '
+              'ON session_completions (completed_at)',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_session_completions_synced_at '
+              'ON session_completions (synced_at)',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_streak_freezes_user_id '
+              'ON streak_freezes (user_id)',
+            );
+          }
         },
         beforeOpen: (OpeningDetails details) async {
           // Enable WAL mode for better concurrent read performance.
@@ -229,6 +265,30 @@ class AppDatabase extends _$AppDatabase {
           await customStatement(
             'CREATE INDEX IF NOT EXISTS idx_tts_cache_created_at '
             'ON tts_cache (created_at)',
+          );
+
+          // session_completions: index on user_id for querying completions per user.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_session_completions_user_id '
+            'ON session_completions (user_id)',
+          );
+
+          // session_completions: index on completed_at for streak date range queries.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_session_completions_completed_at '
+            'ON session_completions (completed_at)',
+          );
+
+          // session_completions: index on synced_at for unsynced records filter.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_session_completions_synced_at '
+            'ON session_completions (synced_at)',
+          );
+
+          // streak_freezes: index on user_id for querying active freezes per user.
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS idx_streak_freezes_user_id '
+            'ON streak_freezes (user_id)',
           );
         },
       );

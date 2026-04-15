@@ -155,12 +155,17 @@ export const plans = pgTable(
     ttsTotal: integer('tts_total').notNull().default(0),
     ttsCompleted: integer('tts_completed').notNull().default(0),
     voiceQuality: text('voice_quality').notNull().default('standard'), // standard | studio
+    // Plan sharing — optional share token for generating shareable links
+    shareToken: varchar('share_token', { length: 20 }).unique(),
+    shareTokenCreatedAt: timestamp('share_token_created_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // Plans are always queried by userId — this index makes list queries O(log n).
     index('idx_plans_user_id').on(table.userId),
+    // Share token queries are by token only (public endpoint: GET /api/plans/shared/:token)
+    index('idx_plans_share_token').on(table.shareToken),
   ],
 );
 
@@ -224,3 +229,64 @@ export const deletionRequests = pgTable('deletion_requests', {
 
 export type DeletionRequest = typeof deletionRequests.$inferSelect;
 export type NewDeletionRequest = typeof deletionRequests.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// session_completions
+//
+// Stores session completion records synced from client.
+// Used for cross-device streak consistency and completion history.
+// client_id is a UUID generated on the client to ensure idempotency —
+// the server uses ON CONFLICT (client_id) DO NOTHING to prevent duplicates.
+// ---------------------------------------------------------------------------
+
+export const sessionCompletions = pgTable(
+  'session_completions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id)
+      .notNull(),
+    planId: uuid('plan_id').notNull(), // No FK — plan may be deleted but completions persist for streak history
+    completedAt: timestamp('completed_at', { withTimezone: true }).notNull(),
+    durationMs: integer('duration_ms').notNull(),
+    clientId: uuid('client_id').unique().notNull(), // Idempotency key — prevents duplicate syncs
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Query by userId for cross-device streak queries
+    index('idx_session_completions_user_created').on(table.userId, table.createdAt),
+    // Query by planId for plan-specific completion history
+    index('idx_session_completions_plan_completed').on(table.planId, table.completedAt),
+  ],
+);
+
+export type SessionCompletion = typeof sessionCompletions.$inferSelect;
+export type NewSessionCompletion = typeof sessionCompletions.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// streak_freezes
+//
+// Streak freeze records — users have a max of 2 active freezes.
+// Replenished at 1 per 7 consecutive active days.
+// ---------------------------------------------------------------------------
+
+export const streakFreezes = pgTable(
+  'streak_freezes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id)
+      .notNull(),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Query active freezes by userId
+    index('idx_streak_freezes_user_id').on(table.userId),
+  ],
+);
+
+export type StreakFreeze = typeof streakFreezes.$inferSelect;
+export type NewStreakFreeze = typeof streakFreezes.$inferInsert;

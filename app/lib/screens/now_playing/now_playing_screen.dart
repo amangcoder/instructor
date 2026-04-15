@@ -10,6 +10,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/providers/execution_providers.dart';
 import 'package:instructor/providers/settings_providers.dart';
+import 'package:instructor/providers/streak_providers.dart';
 import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
@@ -20,6 +21,8 @@ import 'package:instructor/screens/now_playing/widgets/next_up_preview.dart';
 import 'package:instructor/screens/now_playing/widgets/session_gesture_detector.dart';
 import 'package:instructor/screens/now_playing/widgets/step_countdown_timer.dart';
 import 'package:instructor/screens/now_playing/widgets/tts_toggle.dart';
+import 'package:instructor/services/live_activity_channel.dart';
+import 'package:instructor/widgets/milestone_celebration.dart';
 
 /// Full-screen Now Playing view shown while a Plan is executing.
 ///
@@ -335,10 +338,30 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+
+      // End the Live Activity, showing the completed plan name and duration
+      // in the final dismissable state (REQ-023 / AC-022).
+      final liveActivity = ref.read(liveActivityChannelProvider);
+      await liveActivity.endActivity(
+        planName: state.plan.name,
+        durationMs: state.plan.totalDuration.inMilliseconds,
+      );
+
       await _showCompletionSummary(state);
       // Guard: the widget may have been disposed while the completion dialog was
       // visible (e.g. the user navigated to the library via another route). Skip
       // navigation when that happens to prevent operating on a dead element.
+      if (!mounted) return;
+
+      // ── Milestone celebration check ──────────────────────────────────────
+      // By the time the user dismisses the completion dialog the streak service
+      // has had time to recompute the new streak count.  We read the cached
+      // value synchronously so we don't re-subscribe to the stream here.
+      final streak = ref.read(cachedCurrentStreakProvider);
+      if (isMilestoneStreak(streak) && mounted) {
+        await showMilestoneCelebration(this.context, streak);
+      }
+
       if (!mounted) return;
       // Use this.context (the State's BuildContext) rather than the parameter
       // captured in the closure, which could be a stale reference after rebuild.

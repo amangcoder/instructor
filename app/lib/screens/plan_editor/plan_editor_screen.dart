@@ -20,8 +20,10 @@ import 'package:instructor/services/tts_service.dart';
 import 'package:instructor/theme/app_branding.dart';
 import 'package:instructor/theme/gradient_button.dart';
 import 'package:instructor/widgets/active_session_dialog.dart';
+import 'package:instructor/widgets/share_plan_button.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'widgets/calendar_event_sheet.dart';
 import 'widgets/plan_metadata_sheet.dart';
 import 'widgets/repeat_block_card.dart';
 import 'widgets/step_card.dart';
@@ -345,6 +347,19 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       _tags = List<String>.from(result.tags);
       _defaultVoice = result.defaultVoice;
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Calendar sheet
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<void> _openCalendarSheet() async {
+    await showCalendarEventSheet(
+      context,
+      planName: _name.trim().isEmpty ? 'Untitled Plan' : _name.trim(),
+      planDuration: _totalDuration,
+      planId: widget.planId,
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -675,6 +690,20 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
                         : 'Download all voices',
                     onPressed: _downloadComplete ? null : _downloadVoices,
                   ),
+          // Share plan (only for existing saved plans)
+          if (widget.planId != null && widget.planId!.isNotEmpty)
+            SharePlanButton(
+              planId: widget.planId!,
+              planName: _name.trim().isEmpty ? 'Untitled Plan' : _name.trim(),
+              planDescription:
+                  _description.trim().isEmpty ? null : _description.trim(),
+            ),
+          // Add to Calendar
+          IconButton(
+            icon: const Icon(Icons.calendar_month_outlined),
+            tooltip: 'Add to Calendar',
+            onPressed: _openCalendarSheet,
+          ),
           // Edit metadata
           IconButton(
             icon: const Icon(Icons.tune_outlined),

@@ -6,6 +6,16 @@
 	<string>Instructor needs camera access to take a profile photo.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Instructor needs photo library access to select a profile photo.</string>
+	<!-- TASK-012: Calendar integration for scheduling plan sessions -->
+	<key>NSCalendarsUsageDescription</key>
+	<string>Instructor can add your plan sessions to your calendar so you never miss a workout.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Instructor can add your plan sessions to your calendar so you never miss a workout.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Instructor can add your plan sessions to your calendar so you never miss a workout.</string>
+	<!-- TASK-014: Live Activity / Dynamic Island support -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

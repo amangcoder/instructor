@@ -9,6 +9,7 @@ import { TtsModule } from './tts/tts.module';
 import { PlansModule } from './plans/plans.module';
 import { LibraryModule } from './library/library.module';
 import { AdminModule } from './admin/admin.module';
+import { SyncModule } from './sync/sync.module';
 import { HealthController } from './health.controller';
 import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
@@ -29,6 +30,7 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
     PlansModule,
     LibraryModule,
     AdminModule,
+    SyncModule,
   ],
   controllers: [HealthController],
   providers: [

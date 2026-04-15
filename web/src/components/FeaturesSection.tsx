@@ -10,6 +10,11 @@ import FeatureCard from './FeatureCard';
  * - Tablet  (640px–1023px): 2-column grid
  * - Desktop (1024px+): 3-column grid
  *
+ * Layout Balance:
+ * - With 7 feature cards, the grid displays 2 full rows (6 cards) + 1 orphan card on row 3
+ * - The orphan card is centered on desktop (col-start-2) via `last:lg:col-start-2` class
+ * - On tablet and mobile, the orphan card flows naturally in the grid
+ *
  * Accessible:
  * - <section> landmark with aria-labelledby pointing to the section heading
  * - Proper heading hierarchy (h2 for section title)
@@ -49,7 +54,7 @@ export default function FeaturesSection() {
           aria-label="App features"
         >
           {FEATURES.map((feature) => (
-            <li key={feature.title}>
+            <li key={feature.title} className="last:lg:col-start-2">
               <FeatureCard feature={feature} />
             </li>
           ))}

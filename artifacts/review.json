@@ -1,0 +1,62 @@
+{
+  "verdict": "approve",
+  "issues": [
+    {
+      "severity": "major",
+      "file": "app/lib/services/live_activity_channel.dart",
+      "line": 127,
+      "description": "endActivity() lacked planName and durationMs parameters, so the native LiveActivityManager could not render the completed-state UI required by REQ-023/AC-022.",
+      "suggestion": "Fixed: updated signature to endActivity({required String planName, required int durationMs}) and passed both values to the native channel. Added call site in now_playing_screen.dart _handleCompletion using state.plan.name and state.plan.totalDuration.inMilliseconds."
+    },
+    {
+      "severity": "major",
+      "file": "app/lib/screens/settings/widgets/activity_stats_card.dart",
+      "line": 125,
+      "description": "The _StatTile Semantics node used excludeSemantics: true with only '$value $label', suppressing the sublabel ('Completed today ✓' / 'No session yet today') from the accessibility tree. Screen readers could not announce completion status.",
+      "suggestion": "Fixed: added optional semanticLabel parameter to _StatTile. _StreakStatTile now assembles a full label (e.g. '10 Streak, Completed today') from completedTodayAsync before excludeSemantics suppresses the child tree, and passes it as semanticLabel."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/screens/shared_plan/shared_plan_preview_screen.dart",
+      "line": 172,
+      "description": "Loading state rendered a bare CircularProgressIndicator with no Semantics label; screen readers announced only 'Progress indicator' with no context.",
+      "suggestion": "Fixed: wrapped with Semantics(label: 'Loading shared plan', child: CircularProgressIndicator())."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/widgets/share_plan_button.dart",
+      "line": 94,
+      "description": "Loading indicator Semantics label was 'Sharing in progress' — functional but low context.",
+      "suggestion": "Updated label to 'Sharing plan, please wait' to clearly describe the ongoing action."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/screens/plan_editor/widgets/calendar_event_sheet.dart",
+      "line": 148,
+      "description": "No validation that the combined _startDateTime was in the future. A user selecting today + a past time would create a calendar event in the past.",
+      "suggestion": "Fixed: added guard at top of _addToCalendar() that checks _startDateTime.isAfter(DateTime.now()) and shows a SnackBar if not."
+    },
+    {
+      "severity": "minor",
+      "file": "app/lib/screens/settings/widgets/streak_calendar_sheet.dart",
+      "line": 37,
+      "description": "Weekday header labels ('Su', 'Mo', etc.) had no semantic enhancement; screen readers announced abbreviated text without full day names.",
+      "suggestion": "Fixed: each header is now wrapped in Semantics(label: fullDayName) with ExcludeSemantics on the visual Text child, so VoiceOver/TalkBack announces 'Sunday', 'Monday', etc."
+    },
+    {
+      "severity": "nit",
+      "file": "app/lib/screens/plan_editor/widgets/calendar_event_sheet.dart",
+      "line": 261,
+      "description": "Drag handle Semantics node was missing excludeSemantics: true, unlike the StreakCalendarSheet pattern.",
+      "suggestion": "Fixed: added excludeSemantics: true to match the established pattern."
+    },
+    {
+      "severity": "nit",
+      "file": "app/lib/widgets/milestone_celebration.dart",
+      "line": 293,
+      "description": "Streak badge used hardcoded Colors.white for the flame icon and count text, which could produce low contrast on light-primary themes.",
+      "suggestion": "Fixed: changed both to colorScheme.onPrimary to respect the Material You theme contract."
+    }
+  ],
+  "summary": "All three blocking issues resolved: endActivity() now accepts planName/durationMs and is called on completion; the streak _StatTile semantic label now includes completion status before excludeSemantics suppresses the child tree; the shared plan loading state has a descriptive Semantics label. Minor and nit issues addressed: past-datetime validation added to calendar sheet, weekday headers have full-name semantic labels, share button loading state has a clearer label, drag handle excludeSemantics matches established pattern, and milestone badge uses colorScheme.onPrimary instead of hardcoded white. The web fallback page (web/app/s/[token]/page.tsx) and error message sanitisation were already correctly implemented."
+}

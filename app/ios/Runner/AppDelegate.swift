@@ -35,6 +35,10 @@ private let kAppGroup             = "group.com.layersiq.instructor"
   // Cached reference to the deep-link channel, set after engine is ready.
   private var deepLinkChannel: FlutterMethodChannel?
 
+  // Native feature managers
+  private let calendarManager = CalendarManager()
+  private let liveActivityManager = LiveActivityManager()
+
   // MARK: - Application lifecycle
 
   override func application(
@@ -82,6 +86,14 @@ private let kAppGroup             = "group.com.layersiq.instructor"
       pendingToggle = false
       deepLink.invokeMethod("togglePlayback", arguments: nil)
     }
+
+    // ── Calendar Channel (TASK-012) ───────────────────────────────────────────
+    // EventKit integration for scheduling plan sessions as calendar events.
+    calendarManager.register(messenger: messenger)
+
+    // ── Live Activity Channel (TASK-014) ──────────────────────────────────────
+    // ActivityKit integration for Dynamic Island and Lock Screen during session.
+    liveActivityManager.register(messenger: messenger)
   }
 
   // MARK: - Widget state write

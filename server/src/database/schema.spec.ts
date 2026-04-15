@@ -7,8 +7,8 @@
  */
 
 import { getTableName } from 'drizzle-orm';
-import { users, otpRecords, refreshTokens, syncMetadata } from './schema';
-import type { User, OtpRecord, RefreshToken, SyncMetadata } from './schema';
+import { users, otpRecords, refreshTokens, plans, sessionCompletions, streakFreezes } from './schema';
+import type { User, OtpRecord, RefreshToken, Plan, SessionCompletion, StreakFreeze } from './schema';
 
 // ---------------------------------------------------------------------------
 // users
@@ -138,38 +138,147 @@ describe('refresh_tokens table', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sync_metadata
+// plans
 // ---------------------------------------------------------------------------
 
-describe('sync_metadata table', () => {
+describe('plans table', () => {
   it('has correct table name', () => {
-    expect(getTableName(syncMetadata)).toBe('sync_metadata');
+    expect(getTableName(plans)).toBe('plans');
   });
 
   it('id column: UUID primary key', () => {
-    const col = syncMetadata.id;
+    const col = plans.id;
     expect(col.name).toBe('id');
     expect(col.primary).toBe(true);
+    expect(col.hasDefault).toBe(true);
   });
 
-  it('user_id column: UUID unique not null with FK reference to users', () => {
-    const col = syncMetadata.userId;
+  it('user_id column: UUID not null with FK reference to users', () => {
+    const col = plans.userId;
     expect(col.name).toBe('user_id');
-    expect(col.notNull).toBe(true);
-    expect(col.isUnique).toBe(true);
     expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
   });
 
-  it('last_sync_at column: timestamptz nullable', () => {
-    const col = syncMetadata.lastSyncAt;
-    expect(col.name).toBe('last_sync_at');
+  it('share_token column: varchar(20) nullable unique for plan sharing', () => {
+    const col = plans.shareToken;
+    expect(col.name).toBe('share_token');
     expect(col.notNull).toBe(false);
   });
 
-  it('size_bytes column: bigint nullable', () => {
-    const col = syncMetadata.sizeBytes;
-    expect(col.name).toBe('size_bytes');
+  it('share_token_created_at column: timestamptz nullable for share tracking', () => {
+    const col = plans.shareTokenCreatedAt;
+    expect(col.name).toBe('share_token_created_at');
     expect(col.notNull).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// session_completions
+// ---------------------------------------------------------------------------
+
+describe('session_completions table', () => {
+  it('has correct table name', () => {
+    expect(getTableName(sessionCompletions)).toBe('session_completions');
+  });
+
+  it('id column: UUID primary key with default random', () => {
+    const col = sessionCompletions.id;
+    expect(col.name).toBe('id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.primary).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('user_id column: UUID not null with FK reference to users', () => {
+    const col = sessionCompletions.userId;
+    expect(col.name).toBe('user_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('plan_id column: UUID not null (no FK — plan may be deleted but completion persists)', () => {
+    const col = sessionCompletions.planId;
+    expect(col.name).toBe('plan_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('completed_at column: timestamptz not null', () => {
+    const col = sessionCompletions.completedAt;
+    expect(col.name).toBe('completed_at');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('duration_ms column: integer not null', () => {
+    const col = sessionCompletions.durationMs;
+    expect(col.name).toBe('duration_ms');
+    expect(col.columnType).toBe('PgInteger');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('client_id column: UUID unique not null (idempotency key for sync)', () => {
+    const col = sessionCompletions.clientId;
+    expect(col.name).toBe('client_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('created_at column: timestamptz not null with default now', () => {
+    const col = sessionCompletions.createdAt;
+    expect(col.name).toBe('created_at');
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streak_freezes
+// ---------------------------------------------------------------------------
+
+describe('streak_freezes table', () => {
+  it('has correct table name', () => {
+    expect(getTableName(streakFreezes)).toBe('streak_freezes');
+  });
+
+  it('id column: UUID primary key with default random', () => {
+    const col = streakFreezes.id;
+    expect(col.name).toBe('id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.primary).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('user_id column: UUID not null with FK reference to users', () => {
+    const col = streakFreezes.userId;
+    expect(col.name).toBe('user_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('frozen_at column: timestamptz not null (when freeze was earned)', () => {
+    const col = streakFreezes.frozenAt;
+    expect(col.name).toBe('frozen_at');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('expires_at column: timestamptz not null (when freeze expires if unused)', () => {
+    const col = streakFreezes.expiresAt;
+    expect(col.name).toBe('expires_at');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('consumed_at column: timestamptz nullable (when freeze was consumed)', () => {
+    const col = streakFreezes.consumedAt;
+    expect(col.name).toBe('consumed_at');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('created_at column: timestamptz not null with default now', () => {
+    const col = streakFreezes.createdAt;
+    expect(col.name).toBe('created_at');
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
   });
 });
 
@@ -212,12 +321,39 @@ describe('TypeScript inferred types', () => {
     expect(_).toBeDefined();
   });
 
-  it('SyncMetadata type has required fields', () => {
-    const _: Pick<SyncMetadata, 'id' | 'userId' | 'lastSyncAt' | 'sizeBytes'> = {
+  it('Plan type has required fields', () => {
+    const _: Pick<Plan, 'id' | 'userId' | 'name' | 'planJson' | 'createdAt' | 'updatedAt'> = {
       id: '00000000-0000-0000-0000-000000000000',
       userId: '00000000-0000-0000-0000-000000000001',
-      lastSyncAt: null,
-      sizeBytes: null,
+      name: 'Test Plan',
+      planJson: '{}',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(_).toBeDefined();
+  });
+
+  it('SessionCompletion type has required fields', () => {
+    const _: Pick<SessionCompletion, 'id' | 'userId' | 'planId' | 'completedAt' | 'durationMs' | 'clientId' | 'createdAt'> = {
+      id: '00000000-0000-0000-0000-000000000000',
+      userId: '00000000-0000-0000-0000-000000000001',
+      planId: '00000000-0000-0000-0000-000000000002',
+      completedAt: new Date(),
+      durationMs: 3600000,
+      clientId: '00000000-0000-0000-0000-000000000003',
+      createdAt: new Date(),
+    };
+    expect(_).toBeDefined();
+  });
+
+  it('StreakFreeze type has required fields', () => {
+    const _: Pick<StreakFreeze, 'id' | 'userId' | 'frozenAt' | 'expiresAt' | 'consumedAt' | 'createdAt'> = {
+      id: '00000000-0000-0000-0000-000000000000',
+      userId: '00000000-0000-0000-0000-000000000001',
+      frozenAt: new Date(),
+      expiresAt: new Date(),
+      consumedAt: null,
+      createdAt: new Date(),
     };
     expect(_).toBeDefined();
   });

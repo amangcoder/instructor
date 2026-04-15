@@ -45,4 +45,12 @@ describe('FeaturesSection', () => {
     const items = container.querySelectorAll('li');
     expect(items.length).toBe(FEATURES.length);
   });
+
+  it('centers the last feature card on desktop (lg) using col-start-2', () => {
+    const { container } = render(<FeaturesSection />);
+    const items = container.querySelectorAll('li');
+    const lastItem = items[items.length - 1];
+    // Verify the centering class is applied to the last item
+    expect(lastItem?.className).toMatch(/last:lg:col-start-2/);
+  });
 });

@@ -1,18 +1,26 @@
-// InstructorWidget.swift — TASK-017
+// InstructorWidget.swift — TASK-017 + TASK-011
 // iOS WidgetKit home-screen and lock-screen widgets for Instructor.
 //
 // ## Overview
 //
-// The widget reads execution state from App Group UserDefaults
+// The widget reads execution state AND streak data from App Group UserDefaults
 // (group.com.layersiq.instructor) which Flutter writes via the
 // WidgetStateChannel MethodChannel.
 //
 // ## Supported Widget Families
 //
-//   • .systemSmall  — Plan name + status indicator (home screen)
-//   • .systemMedium — Plan name + step text + progress bar (home screen)
-//   • .accessoryRectangular — Step text + play/pause (lock screen, iOS 16+)
-//   • .accessoryCircular    — Status icon (lock screen, iOS 16+)
+//   • .systemSmall  — Plan name + status indicator + streak badge (home screen)
+//   • .systemMedium — Plan name + step text + progress bar + streak (home screen)
+//   • .accessoryRectangular — Step text + play/pause, or streak when idle (lock screen, iOS 16+)
+//   • .accessoryCircular    — Status icon or streak flame (lock screen, iOS 16+)
+//
+// ## StreakOnlySmallWidget
+//
+//   A separate small widget (added in TASK-011) that shows only streak data:
+//   • Current streak count with flame emoji
+//   • "Done today ✓" when the user completed today
+//   • "Start a session" when they haven't completed today
+//   Deep-links to the app root so the user can begin a session.
 //
 // ## Timeline Refresh
 //
@@ -28,13 +36,15 @@ import SwiftUI
 
 let kAppGroup = "group.com.layersiq.instructor"
 
-// MARK: - Deep-link URL
+// MARK: - Deep-link URLs
 
 let kTogglePlaybackURL = URL(string: "instructor://toggle-playback")!
+let kOpenAppURL        = URL(string: "instructor://open")!
 
 // MARK: - UserDefaults keys
 
 private enum UDKey {
+  // Playback
   static let planName         = "instructor_plan_name"
   static let stepText         = "instructor_step_text"
   static let nextStepText     = "instructor_next_step_text"
@@ -42,6 +52,11 @@ private enum UDKey {
   static let stepDurationMs   = "instructor_step_duration_ms"
   static let elapsedMs        = "instructor_elapsed_ms"
   static let updatedAt        = "instructor_updated_at"
+
+  // Streak (TASK-011)
+  static let streakCount       = "instructor_streak_count"
+  static let completedToday    = "instructor_completed_today"
+  static let streakFreezeCount = "instructor_streak_freeze_count"
 }
 
 // MARK: - Shared state model
@@ -55,6 +70,11 @@ struct InstructorWidgetState {
   let elapsedMs: Int
   let updatedAt: Date
 
+  // Streak fields (TASK-011)
+  let streakCount: Int
+  let completedToday: Bool
+  let streakFreezeCount: Int
+
   enum PlaybackStatus {
     case playing, paused, stopped
   }
@@ -66,7 +86,10 @@ struct InstructorWidgetState {
     status: .playing,
     stepDurationMs: 30_000,
     elapsedMs: 8_000,
-    updatedAt: Date()
+    updatedAt: Date(),
+    streakCount: 7,
+    completedToday: false,
+    streakFreezeCount: 1
   )
 
   static let empty = InstructorWidgetState(
@@ -76,7 +99,10 @@ struct InstructorWidgetState {
     status: .stopped,
     stepDurationMs: 0,
     elapsedMs: 0,
-    updatedAt: Date()
+    updatedAt: Date(),
+    streakCount: 0,
+    completedToday: false,
+    streakFreezeCount: 0
   )
 
   /// Read current state from the shared App Group UserDefaults.
@@ -105,7 +131,10 @@ struct InstructorWidgetState {
       status: playbackStatus,
       stepDurationMs: defaults.integer(forKey: UDKey.stepDurationMs),
       elapsedMs: defaults.integer(forKey: UDKey.elapsedMs),
-      updatedAt: updatedAt
+      updatedAt: updatedAt,
+      streakCount: defaults.integer(forKey: UDKey.streakCount),
+      completedToday: defaults.bool(forKey: UDKey.completedToday),
+      streakFreezeCount: defaults.integer(forKey: UDKey.streakFreezeCount)
     )
   }
 
@@ -126,6 +155,11 @@ struct InstructorWidgetState {
   /// True when a plan is actively running or paused.
   var hasActivePlan: Bool {
     !planName.isEmpty && status != .stopped
+  }
+
+  /// Streak label: "🔥 7" or "🔥 0" when no streak.
+  var streakLabel: String {
+    streakCount > 0 ? "🔥 \(streakCount)" : "🔥 0"
   }
 }
 
@@ -171,6 +205,7 @@ private extension Color {
   static let instructorText       = Color.white
   static let instructorSubtext    = Color.white.opacity(0.7)
   static let instructorProgress   = Color(red: 0.35, green: 0.68, blue: 1.0)
+  static let streakOrange         = Color(red: 1.0,  green: 0.55, blue: 0.0)  // #FF8C00
 }
 
 // MARK: - Shared icon helper
@@ -180,6 +215,35 @@ private func statusIcon(for status: InstructorWidgetState.PlaybackStatus) -> Str
   case .playing: return "play.fill"
   case .paused:  return "pause.fill"
   case .stopped: return "stop.fill"
+  }
+}
+
+// MARK: - Streak badge view (shared between small and medium)
+
+/// Compact streak indicator: "🔥 7" in orange, shown in a corner of the widget.
+private struct StreakBadge: View {
+  let streakCount: Int
+  let completedToday: Bool
+
+  var body: some View {
+    HStack(spacing: 2) {
+      Text("🔥")
+        .font(.system(size: 10))
+      Text("\(streakCount)")
+        .font(.system(size: 10, weight: .bold).monospacedDigit())
+        .foregroundColor(.streakOrange)
+      if completedToday {
+        Image(systemName: "checkmark.circle.fill")
+          .font(.system(size: 9))
+          .foregroundColor(Color(red: 0.2, green: 0.8, blue: 0.2))
+      }
+    }
+    .padding(.horizontal, 5)
+    .padding(.vertical, 2)
+    .background(
+      Capsule()
+        .fill(Color.white.opacity(0.10))
+    )
   }
 }
 
@@ -201,7 +265,7 @@ struct SmallWidgetView: View {
         )
 
         VStack(alignment: .leading, spacing: 6) {
-          // Status icon + plan name row
+          // Header row: status icon + streak badge
           HStack(spacing: 4) {
             Image(systemName: statusIcon(for: state.status))
               .font(.system(size: 10, weight: .bold))
@@ -210,12 +274,20 @@ struct SmallWidgetView: View {
               .font(.system(size: 9, weight: .semibold))
               .foregroundColor(.instructorSubtext)
               .lineLimit(1)
+
+            Spacer()
+
+            // Streak badge — always visible
+            StreakBadge(
+              streakCount: state.streakCount,
+              completedToday: state.completedToday
+            )
           }
 
           Spacer()
 
-          // Step text
-          Text(state.stepText)
+          // Step text or plan name
+          Text(state.hasActivePlan ? state.stepText : state.planName.isEmpty ? "Start a session" : state.stepText)
             .font(.system(size: 13, weight: .semibold))
             .foregroundColor(.instructorText)
             .lineLimit(3)
@@ -274,6 +346,14 @@ struct MediumWidgetView: View {
                 .font(.system(size: 9, weight: .bold))
                 .tracking(1)
                 .foregroundColor(.instructorSubtext)
+
+              Spacer()
+
+              // Streak badge in the header
+              StreakBadge(
+                streakCount: state.streakCount,
+                completedToday: state.completedToday
+              )
             }
 
             // Plan name
@@ -363,14 +443,30 @@ struct AccessoryRectangularView: View {
     let state = entry.state
     Link(destination: kTogglePlaybackURL) {
       HStack(spacing: 6) {
-        Image(systemName: statusIcon(for: state.status))
-          .font(.system(size: 12, weight: .bold))
-        VStack(alignment: .leading, spacing: 1) {
-          Text(state.stepText)
-            .font(.system(size: 12, weight: .semibold))
-            .lineLimit(2)
-          if !state.planName.isEmpty {
-            Text(state.planName)
+        if state.hasActivePlan {
+          // Active plan: show status icon + step info
+          Image(systemName: statusIcon(for: state.status))
+            .font(.system(size: 12, weight: .bold))
+          VStack(alignment: .leading, spacing: 1) {
+            Text(state.stepText)
+              .font(.system(size: 12, weight: .semibold))
+              .lineLimit(2)
+            if !state.planName.isEmpty {
+              Text(state.planName)
+                .font(.system(size: 10))
+                .opacity(0.7)
+                .lineLimit(1)
+            }
+          }
+        } else {
+          // Idle: show streak instead
+          Text("🔥")
+            .font(.system(size: 14))
+          VStack(alignment: .leading, spacing: 1) {
+            Text("\(state.streakCount) day streak")
+              .font(.system(size: 12, weight: .semibold))
+              .lineLimit(1)
+            Text(state.completedToday ? "Done today ✓" : "Start a session")
               .font(.system(size: 10))
               .opacity(0.7)
               .lineLimit(1)
@@ -392,8 +488,18 @@ struct AccessoryCircularView: View {
     Link(destination: kTogglePlaybackURL) {
       ZStack {
         AccessoryWidgetBackground()
-        Image(systemName: statusIcon(for: entry.state.status))
-          .font(.system(size: 16, weight: .bold))
+        if entry.state.hasActivePlan {
+          Image(systemName: statusIcon(for: entry.state.status))
+            .font(.system(size: 16, weight: .bold))
+        } else {
+          // Show streak count in circular widget when idle
+          VStack(spacing: 0) {
+            Text("🔥")
+              .font(.system(size: 10))
+            Text("\(entry.state.streakCount)")
+              .font(.system(size: 12, weight: .bold).monospacedDigit())
+          }
+        }
       }
     }
   }
@@ -433,7 +539,7 @@ struct InstructorWidget: Widget {
       }
     }
     .configurationDisplayName("Instructor")
-    .description("See your active plan step and control playback.")
+    .description("See your active plan step, control playback, and track your streak.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }
@@ -449,7 +555,7 @@ struct InstructorLockScreenWidget: Widget {
       InstructorLockScreenEntryView(entry: entry)
     }
     .configurationDisplayName("Instructor Status")
-    .description("Shows current step on your lock screen.")
+    .description("Shows current step on your lock screen. Shows streak when idle.")
     .supportedFamilies([.accessoryRectangular, .accessoryCircular])
   }
 }
@@ -468,5 +574,179 @@ struct InstructorLockScreenEntryView: View {
     default:
       AccessoryRectangularView(entry: entry)
     }
+  }
+}
+
+// ============================================================================
+// MARK: - StreakOnlySmallWidget (TASK-011)
+// ============================================================================
+//
+// A dedicated small widget that shows only streak data — useful for users
+// who want habit-tracking on their home screen without the playback controls.
+//
+//   • Current streak count with flame emoji (large, centred)
+//   • "Done today ✓" badge when completedToday == true
+//   • "Start a session" prompt when completedToday == false
+//   • Deep-links to the app root (kOpenAppURL)
+//
+// Data source: same App Group UserDefaults as InstructorWidget; reads only the
+// three streak keys (instructor_streak_count, instructor_completed_today,
+// instructor_streak_freeze_count).
+//
+// Timeline refresh: same policy as InstructorWidget (1-minute expiry +
+// WidgetCenter.reloadAllTimelines() triggered by Flutter on every write).
+
+// MARK: StreakOnlyWidgetState
+
+struct StreakOnlyWidgetState {
+  let streakCount: Int
+  let completedToday: Bool
+  let streakFreezeCount: Int
+
+  static let placeholder = StreakOnlyWidgetState(
+    streakCount: 7,
+    completedToday: false,
+    streakFreezeCount: 1
+  )
+
+  static let empty = StreakOnlyWidgetState(
+    streakCount: 0,
+    completedToday: false,
+    streakFreezeCount: 0
+  )
+
+  /// Read streak state from the shared App Group UserDefaults.
+  static func fromUserDefaults() -> StreakOnlyWidgetState {
+    guard let defaults = UserDefaults(suiteName: kAppGroup) else {
+      return .empty
+    }
+    return StreakOnlyWidgetState(
+      streakCount: defaults.integer(forKey: UDKey.streakCount),
+      completedToday: defaults.bool(forKey: UDKey.completedToday),
+      streakFreezeCount: defaults.integer(forKey: UDKey.streakFreezeCount)
+    )
+  }
+}
+
+// MARK: StreakOnlyEntry
+
+struct StreakOnlyEntry: TimelineEntry {
+  let date: Date
+  let state: StreakOnlyWidgetState
+}
+
+// MARK: StreakOnlyTimelineProvider
+
+struct StreakOnlyTimelineProvider: TimelineProvider {
+  typealias Entry = StreakOnlyEntry
+
+  func placeholder(in context: Context) -> StreakOnlyEntry {
+    StreakOnlyEntry(date: Date(), state: .placeholder)
+  }
+
+  func getSnapshot(in context: Context, completion: @escaping (StreakOnlyEntry) -> Void) {
+    let state = context.isPreview ? .placeholder : StreakOnlyWidgetState.fromUserDefaults()
+    completion(StreakOnlyEntry(date: Date(), state: state))
+  }
+
+  func getTimeline(in context: Context, completion: @escaping (Timeline<StreakOnlyEntry>) -> Void) {
+    let state = StreakOnlyWidgetState.fromUserDefaults()
+    let now = Date()
+    let entry = StreakOnlyEntry(date: now, state: state)
+    let nextRefresh = Calendar.current.date(byAdding: .minute, value: 1, to: now)!
+    let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
+    completion(timeline)
+  }
+}
+
+// MARK: StreakOnlySmallWidgetView
+
+struct StreakOnlySmallWidgetView: View {
+  let entry: StreakOnlyEntry
+
+  var body: some View {
+    let state = entry.state
+    Link(destination: kOpenAppURL) {
+      ZStack {
+        // Dark blue-black gradient background
+        LinearGradient(
+          colors: [Color(red: 0.08, green: 0.10, blue: 0.18),
+                   Color(red: 0.05, green: 0.07, blue: 0.13)],
+          startPoint: .topLeading,
+          endPoint: .bottomTrailing
+        )
+
+        VStack(spacing: 8) {
+          // App label
+          Text("INSTRUCTOR")
+            .font(.system(size: 8, weight: .bold))
+            .tracking(1.2)
+            .foregroundColor(.white.opacity(0.5))
+
+          Spacer()
+
+          // Flame + streak count (prominent)
+          VStack(spacing: 2) {
+            Text("🔥")
+              .font(.system(size: 28))
+            Text("\(state.streakCount)")
+              .font(.system(size: 32, weight: .black).monospacedDigit())
+              .foregroundColor(.streakOrange)
+          }
+
+          // Streak sub-label
+          Text(state.streakCount == 1 ? "day streak" : "day streak")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.white.opacity(0.6))
+
+          Spacer()
+
+          // Today status badge
+          if state.completedToday {
+            HStack(spacing: 4) {
+              Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(Color(red: 0.2, green: 0.8, blue: 0.2))
+              Text("Done today")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+              Capsule()
+                .fill(Color.white.opacity(0.10))
+            )
+          } else {
+            Text("Start a session")
+              .font(.system(size: 10, weight: .medium))
+              .foregroundColor(.instructorAccent)
+              .multilineTextAlignment(.center)
+          }
+        }
+        .padding(12)
+      }
+    }
+    .widgetURL(kOpenAppURL)
+  }
+}
+
+// MARK: StreakOnlySmallWidget
+
+struct StreakOnlySmallWidget: Widget {
+  let kind: String = "StreakOnlySmallWidget"
+
+  var body: some WidgetConfiguration {
+    StaticConfiguration(kind: kind, provider: StreakOnlyTimelineProvider()) { entry in
+      if #available(iOSApplicationExtension 17.0, *) {
+        StreakOnlySmallWidgetView(entry: entry)
+          .containerBackground(.fill.tertiary, for: .widget)
+      } else {
+        StreakOnlySmallWidgetView(entry: entry)
+      }
+    }
+    .configurationDisplayName("Streak")
+    .description("Track your daily practice streak. Tap to start a session.")
+    .supportedFamilies([.systemSmall])
   }
 }

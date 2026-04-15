@@ -35,7 +35,7 @@ import { drizzle } from 'drizzle-orm/neon-http';
 import { and, asc, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { deletionRequests, libraryPlans, otpRecords, plans, refreshTokens, ttsJobs, users } from './schema';
+import { deletionRequests, libraryPlans, otpRecords, plans, refreshTokens, sessionCompletions, ttsJobs, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 
 // ── Typed result shapes returned to callers ────────────────────────────────
@@ -85,6 +85,8 @@ export interface PlanRecord {
   ttsCompleted: number;
   voiceQuality: string;
   sourceLibraryPlanId: string | null;
+  shareToken: string | null;
+  shareTokenCreatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -98,6 +100,8 @@ export interface PlanSummaryRecord {
   ttsTotal: number;
   ttsCompleted: number;
   voiceQuality: string;
+  shareToken: string | null;
+  shareTokenCreatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -732,6 +736,8 @@ export class DatabaseService {
           ttsTotal: plans.ttsTotal,
           ttsCompleted: plans.ttsCompleted,
           voiceQuality: plans.voiceQuality,
+          shareToken: plans.shareToken,
+          shareTokenCreatedAt: plans.shareTokenCreatedAt,
           createdAt: plans.createdAt,
           updatedAt: plans.updatedAt,
         })
@@ -749,6 +755,8 @@ export class DatabaseService {
       ttsTotal: row.ttsTotal,
       ttsCompleted: row.ttsCompleted,
       voiceQuality: row.voiceQuality,
+      shareToken: row.shareToken ?? null,
+      shareTokenCreatedAt: row.shareTokenCreatedAt ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
@@ -1081,6 +1089,8 @@ export class DatabaseService {
       ttsCompleted: row.ttsCompleted,
       voiceQuality: row.voiceQuality,
       sourceLibraryPlanId: row.sourceLibraryPlanId ?? null,
+      shareToken: row.shareToken ?? null,
+      shareTokenCreatedAt: row.shareTokenCreatedAt ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -1103,6 +1113,163 @@ export class DatabaseService {
       createdAt: row.createdAt,
       completedAt: row.completedAt ?? null,
     };
+  }
+
+  // ── Plan sharing ───────────────────────────────────────────────────────────
+
+  /**
+   * Update a plan's share token.
+   * Sets both share_token and share_token_created_at.
+   */
+  async updatePlanShareToken(planId: string, shareToken: string): Promise<void> {
+    if (this.noop) return;
+
+    await this.withRetry(() =>
+      this.db!
+        .update(plans)
+        .set({
+          shareToken,
+          shareTokenCreatedAt: new Date(),
+        })
+        .where(eq(plans.id, planId)),
+    );
+  }
+
+  /**
+   * Get a shared plan by share token (no auth required).
+   * Returns plan metadata and steps for the public shared endpoint.
+   */
+  async getSharedPlan(
+    shareToken: string,
+  ): Promise<{
+    name: string;
+    description?: string;
+    steps?: unknown[];
+    stepCount: number;
+    estimatedDurationMs: number;
+  } | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select({ planJson: plans.planJson, name: plans.name })
+        .from(plans)
+        .where(eq(plans.shareToken, shareToken))
+        .limit(1),
+    );
+
+    if (rows.length === 0) return null;
+
+    const { planJson, name } = rows[0];
+    try {
+      const parsed = JSON.parse(planJson) as {
+        description?: string;
+        steps?: unknown[];
+        estimatedDurationMs?: number;
+      };
+      return {
+        name,
+        description: parsed.description,
+        steps: parsed.steps,
+        stepCount: Array.isArray(parsed.steps) ? parsed.steps.length : 0,
+        estimatedDurationMs: parsed.estimatedDurationMs ?? 0,
+      };
+    } catch {
+      return {
+        name,
+        stepCount: 0,
+        estimatedDurationMs: 0,
+      };
+    }
+  }
+
+  /**
+   * Revoke a plan's share token (set it to NULL).
+   * Only the plan owner can revoke.
+   */
+  async revokePlanShareToken(userId: string, planId: string): Promise<boolean> {
+    if (this.noop) return true;
+
+    const result = await this.withRetry(() =>
+      this.db!
+        .update(plans)
+        .set({
+          shareToken: null,
+          shareTokenCreatedAt: null,
+        })
+        .where(and(eq(plans.id, planId), eq(plans.userId, userId))),
+    );
+
+    return result.rowCount > 0;
+  }
+
+  // ── Session completions ────────────────────────────────────────────────────
+
+  /**
+   * Upsert session completions (idempotent via client_id).
+   * Returns the count of completions successfully synced.
+   */
+  async upsertSessionCompletions(
+    userId: string,
+    completions: Array<{
+      planId: string;
+      completedAt: Date;
+      durationMs: number;
+      clientId: string;
+    }>,
+  ): Promise<number> {
+    if (this.noop) return 0;
+    if (completions.length === 0) return 0;
+
+    const rows = completions.map((c) => ({
+      userId,
+      planId: c.planId,
+      completedAt: c.completedAt,
+      durationMs: c.durationMs,
+      clientId: c.clientId,
+    }));
+
+    await this.withRetry(() =>
+      this.db!.insert(sessionCompletions).values(rows).onConflictDoNothing(),
+    );
+
+    // Return the count of rows we attempted to insert
+    // (some may have been skipped due to client_id conflicts)
+    return completions.length;
+  }
+
+  /**
+   * Get session completions for a user since a given timestamp.
+   */
+  async getSessionCompletions(
+    userId: string,
+    since?: Date,
+  ): Promise<
+    Array<{
+      id: string;
+      planId: string;
+      completedAt: Date;
+      durationMs: number;
+    }>
+  > {
+    if (this.noop) return [];
+
+    const whereConditions = since
+      ? and(eq(sessionCompletions.userId, userId), gt(sessionCompletions.completedAt, since))
+      : eq(sessionCompletions.userId, userId);
+
+    return await this.withRetry(() =>
+      this.db!
+        .select({
+          id: sessionCompletions.id,
+          planId: sessionCompletions.planId,
+          completedAt: sessionCompletions.completedAt,
+          durationMs: sessionCompletions.durationMs,
+        })
+        .from(sessionCompletions)
+        .where(whereConditions)
+        .orderBy(sessionCompletions.completedAt),
+    );
   }
 
   private countSteps(planJson: string): number {
