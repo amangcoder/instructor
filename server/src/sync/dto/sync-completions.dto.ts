@@ -19,7 +19,8 @@
  *   - Returns array of completions: { id, planId, completedAt, durationMs }
  */
 
-import { IsUUID, IsISO8601, IsNumber, IsArray, IsOptional, ValidateNested, Type } from 'class-validator';
+import { IsUUID, IsISO8601, IsNumber, IsArray, IsOptional, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CompletionDto {
   /**
@@ -27,20 +28,20 @@ export class CompletionDto {
    * Note: planId is not an FK — plan may be deleted but completion persists.
    */
   @IsUUID()
-  planId: string;
+  planId!: string;
 
   /**
    * Completion timestamp (ISO 8601 string, e.g., "2026-04-15T12:30:45.000Z").
    * Server converts to Date when storing.
    */
   @IsISO8601()
-  completedAt: string;
+  completedAt!: string;
 
   /**
    * Session duration in milliseconds.
    */
   @IsNumber()
-  durationMs: number;
+  durationMs!: number;
 
   /**
    * Client-generated UUID for idempotency (optional).
@@ -59,7 +60,7 @@ export class UploadCompletionsDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CompletionDto)
-  completions: CompletionDto[];
+  completions!: CompletionDto[];
 }
 
 export class UploadCompletionsResponseDto {
@@ -67,34 +68,34 @@ export class UploadCompletionsResponseDto {
    * Number of completions successfully synced.
    * May be less than the request size due to idempotency (duplicate clientIds).
    */
-  syncedCount: number;
+  syncedCount!: number;
 }
 
 export class CompletionResponseDto {
   /**
    * Server-generated UUID for this completion record.
    */
-  id: string;
+  id!: string;
 
   /**
    * Associated plan ID.
    */
-  planId: string;
+  planId!: string;
 
   /**
    * Completion timestamp (ISO 8601 string).
    */
-  completedAt: string;
+  completedAt!: string;
 
   /**
    * Session duration in milliseconds.
    */
-  durationMs: number;
+  durationMs!: number;
 }
 
 export class GetCompletionsResponseDto {
   /**
    * Array of session completions for the user (since the optional timestamp).
    */
-  completions: CompletionResponseDto[];
+  completions!: CompletionResponseDto[];
 }

@@ -20,8 +20,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { randomInt, createHmac, createHash, timingSafeEqual } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { DatabaseService } from '../database/database.service';
 import { SESEmailService } from '../email/ses-email.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
@@ -57,9 +56,6 @@ export interface AuthResult {
 }
 
 // ── Service ──────────────────────────────────────────────────────────────────
-
-/** Presigned URL TTL — 7 days (AWS SigV4 maximum). */
-const PHOTO_PRESIGN_TTL_SEC = 604_800;
 
 /** S3 key prefix for profile photos. */
 const AVATAR_PREFIX = 'avatars';
@@ -185,10 +181,7 @@ export class AuthService {
         email: user.email,
         name: user.name ?? null,
         username: user.username ?? null,
-        // resolvePhotoUrl converts the stored S3 key into a fresh presigned URL.
-        // The DB stores the key (avatars/…), not the URL, so returning the raw
-        // value would break Image.network on the client.
-        photoUrl: await this.resolvePhotoUrl(user.photoUrl ?? null),
+        photoUrl: this.resolvePhotoUrl(user.photoUrl ?? null),
       },
     };
   }
@@ -272,7 +265,7 @@ export class AuthService {
       email: user.email,
       name: user.name ?? null,
       username: user.username ?? null,
-      photoUrl: await this.resolvePhotoUrl(user.photoUrl ?? null),
+      photoUrl: this.resolvePhotoUrl(user.photoUrl ?? null),
     };
   }
 
@@ -302,11 +295,7 @@ export class AuthService {
 
     await this.db.updateUserProfile(userId, { photoUrl: s3Key });
 
-    const photoUrl = await getSignedUrl(
-      this.s3,
-      new GetObjectCommand({ Bucket: this.bucket, Key: s3Key }),
-      { expiresIn: PHOTO_PRESIGN_TTL_SEC },
-    );
+    const photoUrl = this.buildPublicPhotoUrl(s3Key)!;
 
     this.logger.log(`Profile photo uploaded: userId=${userId}, key=${s3Key}`);
     return { photoUrl };
@@ -337,21 +326,19 @@ export class AuthService {
   // ── Private: photo URL resolution ────────────────────────────────────────
 
   /**
-   * If the stored value is an S3 key (starts with 'avatars/'), generate a
-   * presigned GET URL. Otherwise returns the value unchanged (null or plain URL).
+   * If the stored value is an S3 key (starts with 'avatars/'), return the
+   * public virtual-hosted S3 URL. Otherwise returns the value unchanged.
+   * Public read access is granted via bucket policy (ACLs disabled on bucket).
    */
-  private async resolvePhotoUrl(raw: string | null): Promise<string | null> {
+  private resolvePhotoUrl(raw: string | null): string | null {
     if (!raw || !raw.startsWith(`${AVATAR_PREFIX}/`)) return raw;
-    if (!this.s3 || !this.bucket) return null;
-    try {
-      return await getSignedUrl(
-        this.s3,
-        new GetObjectCommand({ Bucket: this.bucket, Key: raw }),
-        { expiresIn: PHOTO_PRESIGN_TTL_SEC },
-      );
-    } catch {
-      return null;
-    }
+    return this.buildPublicPhotoUrl(raw);
+  }
+
+  private buildPublicPhotoUrl(s3Key: string): string | null {
+    if (!this.bucket) return null;
+    const region = process.env.AWS_REGION ?? 'ap-south-1';
+    return `https://${this.bucket}.s3.${region}.amazonaws.com/${s3Key}`;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

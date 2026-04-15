@@ -19,17 +19,17 @@
 
 export class SharedPlanResponseDto {
   /** Plan name / title */
-  name: string;
+  name!: string;
 
   /** Optional plan description */
   description?: string;
 
   /** Full step array for preview */
-  steps: unknown[];
+  steps!: unknown[];
 
   /** Count of steps */
-  stepCount: number;
+  stepCount!: number;
 
   /** Total estimated duration in milliseconds */
-  estimatedDurationMs: number;
+  estimatedDurationMs!: number;
 }

@@ -28,10 +28,10 @@ import {
   NotFoundException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { SharingService } from './sharing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { requireUser } from '../auth/decode-token.util';
+import type { JwtPayload } from '../auth/auth.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 import { SharedPlanResponseDto } from './dto/shared-plan-response.dto';
 
@@ -53,7 +53,7 @@ export class SharingController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async generateShareToken(@Req() req: Request, @Param('id') planId: string) {
-    const userId = requireUser(req).sub;
+    const userId = ((req as any).user as JwtPayload).sub;
 
     if (!planId || planId.trim().length === 0) {
       throw new BadRequestException('Plan ID is required');
@@ -87,7 +87,7 @@ export class SharingController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async revokeShareToken(@Req() req: Request, @Param('id') planId: string) {
-    const userId = requireUser(req).sub;
+    const userId = ((req as any).user as JwtPayload).sub;
 
     if (!planId || planId.trim().length === 0) {
       throw new BadRequestException('Plan ID is required');

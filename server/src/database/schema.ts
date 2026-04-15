@@ -290,3 +290,42 @@ export const streakFreezes = pgTable(
 
 export type StreakFreeze = typeof streakFreezes.$inferSelect;
 export type NewStreakFreeze = typeof streakFreezes.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// plan_triggers
+//
+// Scheduled auto-start triggers for plans. Created when a user adds a plan
+// to their calendar — the trigger fires the plan session at startUtc (with
+// optional recurrence). client_id is a UUID from the device for idempotency
+// and cross-device sync; the client stores native alarm/event identifiers
+// locally and does not sync them.
+//
+// Soft-deletes via deleted_at so tombstones propagate to other devices.
+// ---------------------------------------------------------------------------
+
+export const planTriggers = pgTable(
+  'plan_triggers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id)
+      .notNull(),
+    planId: uuid('plan_id').notNull(), // No FK — plan may be a local library plan not in server plans table
+    clientId: uuid('client_id').unique().notNull(), // Idempotency + device-local correlation
+    startUtc: timestamp('start_utc', { withTimezone: true }).notNull(),
+    durationMinutes: integer('duration_minutes').notNull(),
+    recurrence: text('recurrence').notNull().default('none'), // none | daily | weekdays | weekly
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    // Sync pulls: WHERE user_id = ? AND updated_at > ?
+    index('idx_plan_triggers_user_updated').on(table.userId, table.updatedAt),
+    // Upcoming triggers lookup: WHERE user_id = ? AND deleted_at IS NULL AND start_utc > NOW()
+    index('idx_plan_triggers_user_start').on(table.userId, table.startUtc),
+  ],
+);
+
+export type PlanTrigger = typeof planTriggers.$inferSelect;
+export type NewPlanTrigger = typeof planTriggers.$inferInsert;

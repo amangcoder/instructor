@@ -10,6 +10,7 @@ import { PlansModule } from './plans/plans.module';
 import { LibraryModule } from './library/library.module';
 import { AdminModule } from './admin/admin.module';
 import { SyncModule } from './sync/sync.module';
+import { AppVersionModule } from './app-version/app-version.module';
 import { HealthController } from './health.controller';
 import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
@@ -31,6 +32,7 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
     LibraryModule,
     AdminModule,
     SyncModule,
+    AppVersionModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -25,10 +25,10 @@ import {
   BadRequestException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { SyncService } from './sync.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { requireUser } from '../auth/decode-token.util';
+import type { JwtPayload } from '../auth/auth.service';
 import {
   UploadCompletionsDto,
   UploadCompletionsResponseDto,
@@ -59,7 +59,7 @@ export class SyncController {
     @Req() req: Request,
     @Body() dto: UploadCompletionsDto,
   ): Promise<UploadCompletionsResponseDto> {
-    const userId = requireUser(req).sub;
+    const userId = ((req as any).user as JwtPayload).sub;
 
     if (!dto.completions || !Array.isArray(dto.completions)) {
       throw new BadRequestException('completions array is required');
@@ -95,7 +95,7 @@ export class SyncController {
     @Req() req: Request,
     @Query('since') since?: string,
   ): Promise<GetCompletionsResponseDto> {
-    const userId = requireUser(req).sub;
+    const userId = ((req as any).user as JwtPayload).sub;
 
     // Validate and convert since parameter if provided
     let sinceDate: Date | undefined;
