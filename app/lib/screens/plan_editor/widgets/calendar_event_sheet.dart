@@ -18,6 +18,8 @@
 //   2. If authorized → createEvent() → success SnackBar → Navigator.pop().
 //   3. If denied    → AlertDialog with "Open Settings" button.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +28,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/calendar_service.dart';
 import 'package:instructor/services/plan_trigger_service.dart';
+import 'package:instructor/services/plan_trigger_sync_service.dart';
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -264,6 +267,21 @@ class _CalendarEventSheetState extends ConsumerState<CalendarEventSheet> {
       durationMinutes: widget.planDuration.inMinutes.clamp(1, 1440),
       recurrence: _recurrence,
     );
+
+    // Best-effort backend push so other devices arm the same trigger.
+    // The row is in Drift either way, so a missed push will retry on the
+    // next foreground sync cycle in [InstructorApp].
+    if (result == PlanTriggerScheduleResult.scheduled) {
+      unawaited(
+        ref
+            .read(planTriggerSyncServiceProvider)
+            .push(user.id)
+            .catchError((Object e) {
+          debugPrint('[CalendarEventSheet] trigger push failed: $e');
+          return 0;
+        }),
+      );
+    }
 
     if (!mounted) return false;
     return switch (result) {

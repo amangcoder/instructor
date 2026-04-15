@@ -7,8 +7,10 @@ import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/screens/force_update/force_update_screen.dart';
 import 'package:instructor/services/app_version_service.dart';
+import 'package:instructor/services/auth_service.dart';
 import 'package:instructor/services/notification_tap_channel.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
+import 'package:instructor/services/plan_trigger_sync_service.dart';
 import 'package:instructor/theme/app_theme.dart';
 
 /// Root application widget.
@@ -33,7 +35,8 @@ class InstructorApp extends ConsumerStatefulWidget {
   ConsumerState<InstructorApp> createState() => _InstructorAppState();
 }
 
-class _InstructorAppState extends ConsumerState<InstructorApp> {
+class _InstructorAppState extends ConsumerState<InstructorApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -41,6 +44,43 @@ class _InstructorAppState extends ConsumerState<InstructorApp> {
     // before the first frame is rendered.
     ref.read(notificationTapStreamProvider);
     ref.read(planTriggerFiredStreamProvider);
+
+    // Observe lifecycle so we can run a plan-trigger sync cycle every time
+    // the app returns to the foreground (catches edits made on another
+    // device while this one was backgrounded).
+    WidgetsBinding.instance.addObserver(this);
+
+    // Initial sync after bootstrap. Defer one frame so providers settle and
+    // the auth state is populated.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncTriggers());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _syncTriggers();
+    }
+  }
+
+  /// One-shot push + pull cycle for plan triggers. No-op when signed out.
+  /// Failures are swallowed and logged — sync is best-effort.
+  Future<void> _syncTriggers() async {
+    final user = ref.read(authServiceProvider).getUser();
+    if (user == null) return;
+    final sync = ref.read(planTriggerSyncServiceProvider);
+    try {
+      await sync.push(user.id);
+      await sync.pull(user.id);
+    } catch (e) {
+      debugPrint('[PlanTriggerSync] cycle failed: $e');
+    }
   }
 
   /// Navigates to `/now-playing` unless the current route is already there

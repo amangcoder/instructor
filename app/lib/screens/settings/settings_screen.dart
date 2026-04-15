@@ -15,6 +15,7 @@ import 'widgets/battery_optimization_prompt.dart';
 import 'widgets/personalization_card.dart';
 import 'widgets/profile_header.dart';
 import 'widgets/profile_sidebar.dart';
+import 'widgets/scheduled_triggers_card.dart';
 import 'widgets/shared_settings_widgets.dart';
 
 /// App settings screen — Profile-first layout.
@@ -62,6 +63,9 @@ class SettingsScreen extends ConsumerWidget {
           // ── My Activity ───────────────────────────────────────────────
           const SectionHeader(title: 'My Activity'),
           const ActivityStatsCard(),
+
+          // ── Scheduled Sessions (renders only when the user has any) ─────
+          const ScheduledTriggersCard(),
 
           // ── For You ───────────────────────────────────────────────────
           const SectionHeader(title: 'For You'),

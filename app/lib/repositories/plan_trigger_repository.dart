@@ -24,7 +24,11 @@ class PlanTriggerRepository {
 
   // ── Create / update / delete ─────────────────────────────────────────────
 
-  /// Inserts or replaces a trigger by [clientId]. Returns the row id.
+  /// Inserts or updates a trigger by [clientId]. Returns the row id.
+  ///
+  /// Conflict target is `client_id` (the cross-device identity), NOT the
+  /// auto-increment primary key — re-upserting the same trigger with a new
+  /// payload must update in place rather than throw a UNIQUE violation.
   Future<int> upsert({
     required String clientId,
     required String userId,
@@ -36,19 +40,24 @@ class PlanTriggerRepository {
     String? serverId,
   }) {
     final now = DateTime.now();
-    return _db.into(_db.planTriggersTable).insertOnConflictUpdate(
-          PlanTriggersTableCompanion.insert(
-            clientId: clientId,
-            userId: userId,
-            planId: planId,
-            title: title,
-            startUtc: startUtc,
-            durationMinutes: durationMinutes,
-            recurrence: Value(recurrence),
-            serverId: Value(serverId),
-            updatedAt: Value(now),
-            // syncedAt intentionally left null so the row is picked up on the
-            // next push cycle.
+    final companion = PlanTriggersTableCompanion.insert(
+      clientId: clientId,
+      userId: userId,
+      planId: planId,
+      title: title,
+      startUtc: startUtc,
+      durationMinutes: durationMinutes,
+      recurrence: Value(recurrence),
+      serverId: Value(serverId),
+      updatedAt: Value(now),
+      // syncedAt intentionally left null so the row is picked up on the
+      // next push cycle.
+    );
+    return _db.into(_db.planTriggersTable).insert(
+          companion,
+          onConflict: DoUpdate(
+            (_) => companion,
+            target: [_db.planTriggersTable.clientId],
           ),
         );
   }

@@ -500,7 +500,8 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   Widget _buildOverflowMenu() {
     final hasSteps = _steps.isNotEmpty;
     final canShare = widget.planId != null && widget.planId!.isNotEmpty;
-    final showCalendar = defaultTargetPlatform == TargetPlatform.iOS;
+    final showCalendar = defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
 
     return PopupMenuButton<_OverflowAction>(
       tooltip: 'More actions',

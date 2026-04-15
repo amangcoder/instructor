@@ -2,7 +2,7 @@ name: instructor
 description: A personal, push-only life conductor app. Create and run time-sequenced Plans with voice instructions, notifications, and ambient audio.
 publish_to: 'none'
 
-version: 1.0.4+5
+version: 1.0.6+7
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
