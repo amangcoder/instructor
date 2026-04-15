@@ -36,6 +36,28 @@ function createMockDatabaseService() {
         durationMs: 900000,
       },
     ]),
+    upsertPlanTriggers: jest.fn().mockImplementation(
+      (_userId: string, rows: unknown[]) =>
+        Promise.resolve(
+          rows.map((r, i) => ({
+            id: `trigger-uuid-${i}`,
+            ...(r as object),
+          })),
+        ),
+    ),
+    getPlanTriggers: jest.fn().mockResolvedValue([
+      {
+        id: 'trigger-uuid-1',
+        clientId: 'client-trigger-1',
+        planId: 'plan-uuid-001',
+        title: 'Yoga Flow',
+        startUtc: new Date('2026-04-20T08:00:00.000Z'),
+        durationMinutes: 30,
+        recurrence: 'daily',
+        deletedAt: null,
+        updatedAt: new Date('2026-04-15T10:00:00.000Z'),
+      },
+    ]),
     withRetry: jest.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
   };
 }
@@ -214,6 +236,90 @@ describe('SyncService', () => {
       await service.getCompletions('user-abc');
 
       expect(dbService.getSessionCompletions).toHaveBeenCalledWith(
+        'user-abc',
+        undefined,
+      );
+    });
+  });
+
+  // ─── uploadPlanTriggers ────────────────────────────────────────────────
+
+  describe('uploadPlanTriggers', () => {
+    const baseTrigger = {
+      clientId: 'client-trigger-1',
+      planId: 'plan-uuid-001',
+      title: 'Yoga Flow',
+      startUtc: '2026-04-20T08:00:00.000Z',
+      durationMinutes: 30,
+      recurrence: 'daily' as const,
+      updatedAt: '2026-04-15T10:00:00.000Z',
+    };
+
+    it('returns empty triggers list when input is empty', async () => {
+      const result = await service.uploadPlanTriggers('user-abc', []);
+
+      expect(result).toEqual({ triggers: [] });
+      expect(dbService.upsertPlanTriggers).not.toHaveBeenCalled();
+    });
+
+    it('forwards rows to upsertPlanTriggers and parses ISO timestamps to Date', async () => {
+      await service.uploadPlanTriggers('user-abc', [baseTrigger]);
+
+      expect(dbService.upsertPlanTriggers).toHaveBeenCalledTimes(1);
+      const [, dbRows] = dbService.upsertPlanTriggers.mock.calls[0];
+      expect(dbRows).toHaveLength(1);
+      expect((dbRows as Array<{ startUtc: Date }>)[0].startUtc).toBeInstanceOf(Date);
+      expect((dbRows as Array<{ updatedAt: Date }>)[0].updatedAt).toBeInstanceOf(Date);
+      expect((dbRows as Array<{ deletedAt: Date | null }>)[0].deletedAt).toBeNull();
+    });
+
+    it('passes deletedAt tombstones through as Date', async () => {
+      await service.uploadPlanTriggers('user-abc', [
+        { ...baseTrigger, deletedAt: '2026-04-15T11:00:00.000Z' },
+      ]);
+
+      const [, dbRows] = dbService.upsertPlanTriggers.mock.calls[0];
+      expect((dbRows as Array<{ deletedAt: Date | null }>)[0].deletedAt).toBeInstanceOf(Date);
+    });
+
+    it('returns server-authoritative shape with ISO strings', async () => {
+      const result = await service.uploadPlanTriggers('user-abc', [baseTrigger]);
+
+      expect(result.triggers).toHaveLength(1);
+      const t = result.triggers[0];
+      expect(t.id).toBe('trigger-uuid-0');
+      expect(t.clientId).toBe('client-trigger-1');
+      expect(typeof t.startUtc).toBe('string');
+      expect(typeof t.updatedAt).toBe('string');
+      expect(t.deletedAt).toBeNull();
+    });
+  });
+
+  // ─── getPlanTriggers ───────────────────────────────────────────────────
+
+  describe('getPlanTriggers', () => {
+    it('returns server triggers serialized with ISO strings', async () => {
+      const result = await service.getPlanTriggers('user-abc');
+
+      expect(result.triggers).toHaveLength(1);
+      const t = result.triggers[0];
+      expect(t.id).toBe('trigger-uuid-1');
+      expect(t.startUtc).toBe('2026-04-20T08:00:00.000Z');
+      expect(t.recurrence).toBe('daily');
+      expect(t.deletedAt).toBeNull();
+    });
+
+    it('forwards since filter to the database layer', async () => {
+      const since = new Date('2026-04-10T00:00:00.000Z');
+      await service.getPlanTriggers('user-abc', { since });
+
+      expect(dbService.getPlanTriggers).toHaveBeenCalledWith('user-abc', since);
+    });
+
+    it('handles missing since parameter (returns all)', async () => {
+      await service.getPlanTriggers('user-abc');
+
+      expect(dbService.getPlanTriggers).toHaveBeenCalledWith(
         'user-abc',
         undefined,
       );

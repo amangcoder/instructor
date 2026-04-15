@@ -312,6 +312,7 @@ export const planTriggers = pgTable(
       .notNull(),
     planId: uuid('plan_id').notNull(), // No FK — plan may be a local library plan not in server plans table
     clientId: uuid('client_id').unique().notNull(), // Idempotency + device-local correlation
+    title: text('title').notNull(), // Captured at schedule time — plan name may drift later
     startUtc: timestamp('start_utc', { withTimezone: true }).notNull(),
     durationMinutes: integer('duration_minutes').notNull(),
     recurrence: text('recurrence').notNull().default('none'), // none | daily | weekdays | weekly

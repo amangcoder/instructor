@@ -28,6 +28,13 @@ import {
   GetCompletionsResponseDto,
   CompletionResponseDto,
 } from './dto/sync-completions.dto';
+import {
+  GetTriggersResponseDto,
+  TriggerDto,
+  TriggerRecurrence,
+  TriggerResponseDto,
+  UploadTriggersResponseDto,
+} from './dto/sync-triggers.dto';
 
 /** Input shape for a single completion when calling uploadCompletions. */
 export interface CompletionInput {
@@ -108,5 +115,87 @@ export class SyncService {
     );
 
     return { completions: response };
+  }
+
+  // ── Plan triggers ──────────────────────────────────────────────────────────
+
+  /**
+   * Upsert plan triggers from the client and return the server-authoritative
+   * view of every accepted row (post last-write-wins reconciliation).
+   *
+   * The response lets the client stamp each local row with the server id +
+   * updated_at in one round-trip, avoiding a follow-up GET.
+   */
+  async uploadPlanTriggers(
+    userId: string,
+    triggers: TriggerDto[],
+  ): Promise<UploadTriggersResponseDto> {
+    if (!triggers || triggers.length === 0) {
+      return { triggers: [] };
+    }
+
+    const dbRows = triggers.map((t) => ({
+      clientId: t.clientId,
+      planId: t.planId,
+      title: t.title,
+      startUtc: new Date(t.startUtc),
+      durationMinutes: t.durationMinutes,
+      recurrence: t.recurrence,
+      deletedAt: t.deletedAt ? new Date(t.deletedAt) : null,
+      updatedAt: new Date(t.updatedAt),
+    }));
+
+    const merged = await this.db.upsertPlanTriggers(userId, dbRows);
+
+    this.logger.debug(
+      `Plan triggers uploaded: userId=${userId}, count=${merged.length}`,
+    );
+
+    return {
+      triggers: merged.map((r) => this.toTriggerResponse(r)),
+    };
+  }
+
+  /**
+   * Fetch plan triggers changed since the optional timestamp, including
+   * tombstones (deletedAt set) so clients can propagate cancellations.
+   */
+  async getPlanTriggers(
+    userId: string,
+    options: GetCompletionsOptions = {},
+  ): Promise<GetTriggersResponseDto> {
+    const rows = await this.db.getPlanTriggers(userId, options.since);
+
+    this.logger.debug(
+      `Plan triggers retrieved: userId=${userId}, count=${rows.length}, since=${options.since?.toISOString() || 'all'}`,
+    );
+
+    return {
+      triggers: rows.map((r) => this.toTriggerResponse(r)),
+    };
+  }
+
+  private toTriggerResponse(r: {
+    id: string;
+    clientId: string;
+    planId: string;
+    title: string;
+    startUtc: Date;
+    durationMinutes: number;
+    recurrence: string;
+    deletedAt: Date | null;
+    updatedAt: Date;
+  }): TriggerResponseDto {
+    return {
+      id: r.id,
+      clientId: r.clientId,
+      planId: r.planId,
+      title: r.title,
+      startUtc: r.startUtc.toISOString(),
+      durationMinutes: r.durationMinutes,
+      recurrence: r.recurrence as TriggerRecurrence,
+      deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
+      updatedAt: r.updatedAt.toISOString(),
+    };
   }
 }

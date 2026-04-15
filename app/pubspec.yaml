@@ -94,6 +94,9 @@ dev_dependencies:
   # ── App Icon Generation ────────────────────────────────────────────────
   flutter_launcher_icons: ^0.14.3
 
+  # ── Splash Screen Generation ──────────────────────────────────────────
+  flutter_native_splash: ^2.4.3
+
   # ── Code Generation ──────────────────────────────────────────────────────
   build_runner: ^2.4.13
   drift_dev: ^2.22.0
@@ -122,3 +125,14 @@ flutter_launcher_icons:
   adaptive_icon_background: "#5B6BE8"
   adaptive_icon_foreground: "assets/images/logo.png"
   remove_alpha_ios: true
+
+# ── Splash screen generation (run: dart run flutter_native_splash:create) ──
+flutter_native_splash:
+  color: "#5B6BE8"
+  image: "assets/images/logo.png"
+  android_12:
+    color: "#5B6BE8"
+    image: "assets/images/logo.png"
+  android: true
+  ios: true
+  web: false

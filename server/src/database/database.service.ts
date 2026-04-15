@@ -35,7 +35,7 @@ import { drizzle } from 'drizzle-orm/neon-http';
 import { and, asc, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { deletionRequests, libraryPlans, otpRecords, plans, refreshTokens, sessionCompletions, ttsJobs, users } from './schema';
+import { deletionRequests, libraryPlans, otpRecords, planTriggers, plans, refreshTokens, sessionCompletions, ttsJobs, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 
 // ── Typed result shapes returned to callers ────────────────────────────────
@@ -1269,6 +1269,154 @@ export class DatabaseService {
         .from(sessionCompletions)
         .where(whereConditions)
         .orderBy(sessionCompletions.completedAt),
+    );
+  }
+
+  // ── plan_triggers ──────────────────────────────────────────────────────────
+
+  /**
+   * Upsert a batch of plan-trigger rows by (user_id, client_id).
+   *
+   * Last-write-wins on updatedAt: if the incoming row is older than what's
+   * already stored, the row is left untouched. This lets two devices push
+   * stale edits without clobbering more recent local changes.
+   *
+   * Returns the server-authoritative view of every incoming row (post-merge),
+   * so the client can record each row's server id + updated_at and clear
+   * its dirty flag.
+   */
+  async upsertPlanTriggers(
+    userId: string,
+    triggers: Array<{
+      clientId: string;
+      planId: string;
+      title: string;
+      startUtc: Date;
+      durationMinutes: number;
+      recurrence: string;
+      deletedAt: Date | null;
+      updatedAt: Date;
+    }>,
+  ): Promise<
+    Array<{
+      id: string;
+      clientId: string;
+      planId: string;
+      title: string;
+      startUtc: Date;
+      durationMinutes: number;
+      recurrence: string;
+      deletedAt: Date | null;
+      updatedAt: Date;
+    }>
+  > {
+    if (this.noop || triggers.length === 0) return [];
+
+    const rows = triggers.map((t) => ({
+      userId,
+      clientId: t.clientId,
+      planId: t.planId,
+      title: t.title,
+      startUtc: t.startUtc,
+      durationMinutes: t.durationMinutes,
+      recurrence: t.recurrence,
+      deletedAt: t.deletedAt,
+      updatedAt: t.updatedAt,
+    }));
+
+    // onConflictDoUpdate with a WHERE clause enforces last-write-wins: we only
+    // overwrite when the incoming updatedAt is strictly newer than the stored
+    // value. For a fresh insert the conflict clause is unused.
+    await this.withRetry(() =>
+      this.db!
+        .insert(planTriggers)
+        .values(rows)
+        .onConflictDoUpdate({
+          target: planTriggers.clientId,
+          set: {
+            planId: sql`EXCLUDED.plan_id`,
+            title: sql`EXCLUDED.title`,
+            startUtc: sql`EXCLUDED.start_utc`,
+            durationMinutes: sql`EXCLUDED.duration_minutes`,
+            recurrence: sql`EXCLUDED.recurrence`,
+            deletedAt: sql`EXCLUDED.deleted_at`,
+            updatedAt: sql`EXCLUDED.updated_at`,
+          },
+          setWhere: sql`${planTriggers.updatedAt} < EXCLUDED.updated_at`,
+        }),
+    );
+
+    // Read back the final server-authoritative rows. Returning these lets the
+    // client write back serverId + updatedAt in a single round-trip instead of
+    // issuing a second GET.
+    const clientIds = triggers.map((t) => t.clientId);
+    const merged = await this.withRetry(() =>
+      this.db!
+        .select({
+          id: planTriggers.id,
+          clientId: planTriggers.clientId,
+          planId: planTriggers.planId,
+          title: planTriggers.title,
+          startUtc: planTriggers.startUtc,
+          durationMinutes: planTriggers.durationMinutes,
+          recurrence: planTriggers.recurrence,
+          deletedAt: planTriggers.deletedAt,
+          updatedAt: planTriggers.updatedAt,
+        })
+        .from(planTriggers)
+        .where(
+          and(
+            eq(planTriggers.userId, userId),
+            sql`${planTriggers.clientId} = ANY(${clientIds})`,
+          ),
+        ),
+    );
+
+    return merged;
+  }
+
+  /**
+   * Fetch plan triggers for a user changed since the optional timestamp,
+   * including tombstones so clients can propagate deletes.
+   */
+  async getPlanTriggers(
+    userId: string,
+    since?: Date,
+  ): Promise<
+    Array<{
+      id: string;
+      clientId: string;
+      planId: string;
+      title: string;
+      startUtc: Date;
+      durationMinutes: number;
+      recurrence: string;
+      deletedAt: Date | null;
+      updatedAt: Date;
+    }>
+  > {
+    if (this.noop) return [];
+
+    const whereCond = since
+      ? and(eq(planTriggers.userId, userId), gt(planTriggers.updatedAt, since))
+      : eq(planTriggers.userId, userId);
+
+    return await this.withRetry(() =>
+      this.db!
+        .select({
+          id: planTriggers.id,
+          clientId: planTriggers.clientId,
+          planId: planTriggers.planId,
+          title: planTriggers.title,
+          startUtc: planTriggers.startUtc,
+          durationMinutes: planTriggers.durationMinutes,
+          recurrence: planTriggers.recurrence,
+          deletedAt: planTriggers.deletedAt,
+          updatedAt: planTriggers.updatedAt,
+        })
+        .from(planTriggers)
+        .where(whereCond)
+        .orderBy(asc(planTriggers.updatedAt)),
     );
   }
 
