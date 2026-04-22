@@ -186,7 +186,7 @@ export const GEMINI_VOICE_MAP: Record<string, string> = {
 };
 
 /** Maps Gemini + ElevenLabs voice IDs → nearest Kokoro equivalent. */
-const KOKORO_VOICE_MAP: Record<string, string> = {
+export const KOKORO_VOICE_MAP: Record<string, string> = {
   // Gemini → Kokoro
   aoede: 'af_heart',
   leda: 'af_bella',

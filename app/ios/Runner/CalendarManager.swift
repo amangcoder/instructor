@@ -133,9 +133,17 @@ class CalendarManager: NSObject {
         let recurrenceString = args["recurrenceRule"] as? String ?? "none"
         let deepLink = args["deepLink"] as? String ?? ""
 
-        // Check authorization status
+        // Check authorization status (EKAuthorizationStatus added .fullAccess /
+        // .writeOnly in iOS 17; legacy .authorized still used on iOS 16 and for
+        // pre-iOS-17 grants that haven't migrated).
         let status = EKEventStore.authorizationStatus(for: .event)
-        guard status == .authorized || status == .fullAccess else {
+        let authorized: Bool
+        if #available(iOS 17.0, *) {
+            authorized = status == .fullAccess || status == .writeOnly || status == .authorized
+        } else {
+            authorized = status == .authorized
+        }
+        guard authorized else {
             result(FlutterError(
                 code: "NOT_AUTHORIZED",
                 message: "Calendar access not authorized. Current status: \(status.rawValue)",
@@ -249,9 +257,3 @@ class CalendarManager: NSObject {
     }
 }
 
-// MARK: - Authorization status extension for iOS 17+ compatibility
-
-@available(iOS 17.0, *)
-private extension EKAuthorizationStatus {
-    static var fullAccess: EKAuthorizationStatus { .fullAccess }
-}

@@ -17,8 +17,10 @@ import type { Request } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { TtsService } from './tts.service';
 import { TtsPregenService } from './tts-pregen.service';
+import { TtsBatchPregenService } from './tts-batch-pregen.service';
 import { ProviderRegistryService } from './providers/provider-registry.service';
 import { SynthesizeDto } from './dto/synthesize.dto';
+import { BatchPregenDto } from './dto/batch-pregen.dto';
 import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { JwtPayload } from '../auth/auth.service';
@@ -40,6 +42,7 @@ export class TtsController {
   constructor(
     private readonly ttsService: TtsService,
     private readonly ttsPregenService: TtsPregenService,
+    private readonly ttsBatchPregenService: TtsBatchPregenService,
     private readonly providerRegistry: ProviderRegistryService,
     private readonly jwt: JwtService,
   ) {}
@@ -200,6 +203,35 @@ export class TtsController {
     this.logger.log(`GET /tts/audio-urls/${planId}`);
     const urls = await this.ttsPregenService.getAudioUrls(planId);
     return { urls };
+  }
+
+  /**
+   * POST /api/tts/batch-pregen
+   * Starts batch TTS pre-generation for a plan: groups all SayStep texts that
+   * share the same Gemini voice + locale into a single API call, then slices the
+   * audio into per-step cache files.  Reduces Gemini API calls from N → 1 per group.
+   *
+   * Requires JWT authentication.
+   */
+  @Post('batch-pregen')
+  @UseGuards(JwtAuthGuard)
+  async startBatchPregen(
+    @Body() dto: BatchPregenDto,
+    @Req() _req: Request,
+  ) {
+    const provider = dto.provider ?? process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+    this.logger.log(
+      `POST /tts/batch-pregen — planId=${dto.planId}, provider=${provider}, locale=${dto.locale}`,
+    );
+    await this.ttsBatchPregenService.startBatchPregen(
+      dto.planId,
+      dto.planJson,
+      dto.voiceId,
+      dto.locale,
+      provider,
+      dto.speechRate ?? '1.0',
+    );
+    return { status: 'processing' };
   }
 
   // ── Auth helper ───────────────────────────────────────────────────────────

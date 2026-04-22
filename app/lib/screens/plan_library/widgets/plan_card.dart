@@ -222,7 +222,10 @@ class _PlanCardState extends State<PlanCard> {
         (ttsStatus == 'none' || ttsStatus == 'failed') &&
             widget.onActivate != null;
     final bool showTtsActionButton =
-        showActivateButton || isTtsLoading || isTtsReady;
+        showActivateButton || _isActivating || isTtsLoading || isTtsReady;
+    final double? ttsProgress = isTtsLoading && widget.plan.ttsTotal > 0
+        ? widget.plan.ttsCompleted / widget.plan.ttsTotal
+        : null;
 
     return Semantics(
       button: true,
@@ -355,24 +358,55 @@ class _PlanCardState extends State<PlanCard> {
                               ? (widget.onPlayWithAiVoice ?? widget.onPlay)
                               : _handleActivate,
                       style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 40),
+                        minimumSize: const Size(0, 44),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 0),
+                            horizontal: 16, vertical: 8),
                       ),
                       child: isTtsLoading
-                          ? Row(
+                          ? Column(
                               mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color:
+                                            colorScheme.onSecondaryContainer,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Text('Loading Instructor Voice'),
+                                    if (ttsProgress != null) ...[
+                                      const Spacer(),
+                                      Text(
+                                        '${(ttsProgress * 100).round()}%',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: colorScheme
+                                              .onSecondaryContainer
+                                              .withValues(alpha: 0.7),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: LinearProgressIndicator(
+                                    value: ttsProgress,
+                                    minHeight: 3,
+                                    backgroundColor: colorScheme
+                                        .onSecondaryContainer
+                                        .withValues(alpha: 0.2),
                                     color: colorScheme.onSecondaryContainer,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                const Text('Loading Instructor Voice'),
                               ],
                             )
                           : isTtsReady
@@ -381,8 +415,8 @@ class _PlanCardState extends State<PlanCard> {
                                   children: [
                                     Icon(Icons.play_circle_outline,
                                         size: 16,
-                                        color: colorScheme
-                                            .onSecondaryContainer),
+                                        color:
+                                            colorScheme.onSecondaryContainer,),
                                     const SizedBox(width: 6),
                                     const Text('Play with AI Voice'),
                                   ],
@@ -431,7 +465,6 @@ class _PlanCardState extends State<PlanCard> {
                       letterSpacing: -0.3,
                     ),
                   ),
-                  // Round play button
                   Semantics(
                     button: true,
                     label: 'Play ${widget.plan.name}',

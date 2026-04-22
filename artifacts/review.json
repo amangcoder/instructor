@@ -3,60 +3,60 @@
   "issues": [
     {
       "severity": "major",
-      "file": "app/lib/services/live_activity_channel.dart",
-      "line": 127,
-      "description": "endActivity() lacked planName and durationMs parameters, so the native LiveActivityManager could not render the completed-state UI required by REQ-023/AC-022.",
-      "suggestion": "Fixed: updated signature to endActivity({required String planName, required int durationMs}) and passed both values to the native channel. Added call site in now_playing_screen.dart _handleCompletion using state.plan.name and state.plan.totalDuration.inMilliseconds."
+      "file": "web/app/admin/(dashboard)/overview/page.tsx",
+      "line": 60,
+      "description": "Default range was '30d', violating AC-001 which requires the Overview page to show 'count of session completions in the last 7 days' on initial load. Fixed: changed fallback to '7d'.",
+      "suggestion": "Fixed — `const range = params.range ?? '7d';`"
     },
     {
       "severity": "major",
-      "file": "app/lib/screens/settings/widgets/activity_stats_card.dart",
-      "line": 125,
-      "description": "The _StatTile Semantics node used excludeSemantics: true with only '$value $label', suppressing the sublabel ('Completed today ✓' / 'No session yet today') from the accessibility tree. Screen readers could not announce completion status.",
-      "suggestion": "Fixed: added optional semanticLabel parameter to _StatTile. _StreakStatTile now assembles a full label (e.g. '10 Streak, Completed today') from completedTodayAsync before excludeSemantics suppresses the child tree, and passes it as semanticLabel."
+      "file": "web/src/components/admin/AppVersionForm.tsx",
+      "line": 300,
+      "description": "iOS and Android validation error divs lacked role='alert', so dynamically injected errors were invisible to screen readers (WCAG 2.1 SC 4.1.3). Fixed: added role='alert' to both platform error containers.",
+      "suggestion": "Fixed — both platform error divs now carry role='alert'."
     },
     {
       "severity": "minor",
-      "file": "app/lib/screens/shared_plan/shared_plan_preview_screen.dart",
-      "line": 172,
-      "description": "Loading state rendered a bare CircularProgressIndicator with no Semantics label; screen readers announced only 'Progress indicator' with no context.",
-      "suggestion": "Fixed: wrapped with Semantics(label: 'Loading shared plan', child: CircularProgressIndicator())."
+      "file": "web/src/components/admin/AppVersionForm.tsx",
+      "line": 45,
+      "description": "A custom compareVersions function duplicated server-side logic, risking divergence from AppVersionService.compareVersions. Fixed: removed the local function and its usage in validatePlatform; version ordering is now validated exclusively by the backend.",
+      "suggestion": "Fixed — validatePlatform now only checks for empty fields; server returns 422 on ordering violations."
     },
     {
       "severity": "minor",
-      "file": "app/lib/widgets/share_plan_button.dart",
-      "line": 94,
-      "description": "Loading indicator Semantics label was 'Sharing in progress' — functional but low context.",
-      "suggestion": "Updated label to 'Sharing plan, please wait' to clearly describe the ongoing action."
+      "file": "web/src/components/admin/DeletionRequestsTable.tsx",
+      "line": 234,
+      "description": "'Mark as Processed' button used min-h-[36px], below the project's established 44px touch-target minimum. Fixed: changed to min-h-[44px].",
+      "suggestion": "Fixed — min-h-[44px] now consistent with all other admin interactive elements."
     },
     {
       "severity": "minor",
-      "file": "app/lib/screens/plan_editor/widgets/calendar_event_sheet.dart",
-      "line": 148,
-      "description": "No validation that the combined _startDateTime was in the future. A user selecting today + a past time would create a calendar event in the past.",
-      "suggestion": "Fixed: added guard at top of _addToCalendar() that checks _startDateTime.isAfter(DateTime.now()) and shows a SnackBar if not."
+      "file": "web/src/components/admin/TtsHealthBanner.tsx",
+      "line": 191,
+      "description": "aria-live region was conditionally rendered; most screen readers do not announce live regions inserted into the DOM after page load. Fixed: the region is always rendered, its text content toggled instead.",
+      "suggestion": "Fixed — `<span aria-live='polite'>{loading ? 'Loading...' : ''}</span>` is always present in the DOM."
     },
     {
       "severity": "minor",
-      "file": "app/lib/screens/settings/widgets/streak_calendar_sheet.dart",
-      "line": 37,
-      "description": "Weekday header labels ('Su', 'Mo', etc.) had no semantic enhancement; screen readers announced abbreviated text without full day names.",
-      "suggestion": "Fixed: each header is now wrapped in Semantics(label: fullDayName) with ExcludeSemantics on the visual Text child, so VoiceOver/TalkBack announces 'Sunday', 'Monday', etc."
+      "file": "web/app/admin/(dashboard)/deletion-requests/page.tsx",
+      "line": 91,
+      "description": "CsvExportButton filename lacked an ISO 8601 date suffix required by AC-006. Fixed: appended the current date at the call site.",
+      "suggestion": "Fixed — filename={`deletion_requests_export_${new Date().toISOString().slice(0,10)}`}"
     },
     {
       "severity": "nit",
-      "file": "app/lib/screens/plan_editor/widgets/calendar_event_sheet.dart",
-      "line": 261,
-      "description": "Drag handle Semantics node was missing excludeSemantics: true, unlike the StreakCalendarSheet pattern.",
-      "suggestion": "Fixed: added excludeSemantics: true to match the established pattern."
+      "file": "web/src/components/admin/ProcessConfirmModal.tsx",
+      "line": 140,
+      "description": "Error div had both role='alert' (implies aria-live='assertive') and aria-live='polite', creating conflicting semantics that can cause double-announcement in some screen readers. Fixed: removed redundant aria-live='polite'.",
+      "suggestion": "Fixed — only role='alert' retained."
     },
     {
       "severity": "nit",
-      "file": "app/lib/widgets/milestone_celebration.dart",
-      "line": 293,
-      "description": "Streak badge used hardcoded Colors.white for the flame icon and count text, which could produce low contrast on light-primary themes.",
-      "suggestion": "Fixed: changed both to colorScheme.onPrimary to respect the Material You theme contract."
+      "file": "web/src/components/admin/DeletionRequestsTable.tsx",
+      "line": 118,
+      "description": "Debounce effect suppressed react-hooks/exhaustive-deps for pathname, router, and searchParams. If navigation occurred while the 300ms timer was pending, the stale closure would push a URL update to the old route. Fixed: refs track the latest navigation objects so the callback always reads current values.",
+      "suggestion": "Fixed — pathnameRef, routerRef, searchParamsRef kept current via separate effects; exhaustive-deps eslint suppression removed."
     }
   ],
-  "summary": "All three blocking issues resolved: endActivity() now accepts planName/durationMs and is called on completion; the streak _StatTile semantic label now includes completion status before excludeSemantics suppresses the child tree; the shared plan loading state has a descriptive Semantics label. Minor and nit issues addressed: past-datetime validation added to calendar sheet, weekday headers have full-name semantic labels, share button loading state has a clearer label, drag handle excludeSemantics matches established pattern, and milestone badge uses colorScheme.onPrimary instead of hardcoded white. The web fallback page (web/app/s/[token]/page.tsx) and error message sanitisation were already correctly implemented."
+  "summary": "All 8 issues from the prior review cycle have been resolved: the default range now correctly defaults to '7d' per AC-001, both platform error divs carry role='alert' for screen-reader accessibility, the duplicate compareVersions function is removed, touch targets are consistent at 44px, the aria-live loading region is always present in the DOM, the CSV export filename includes an ISO 8601 date, the conflicting ARIA attributes on the modal error div are cleaned up, and the debounce closure is hardened against stale navigation refs."
 }

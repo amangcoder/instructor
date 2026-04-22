@@ -46,6 +46,7 @@ export interface UserRecord {
   name: string | null;
   username: string | null;
   photoUrl: string | null;
+  role: string;
   createdAt: Date;
 }
 
@@ -213,6 +214,20 @@ export class DatabaseService {
     );
   }
 
+  // ── Direct DB access ──────────────────────────────────────────────────────
+
+  /**
+   * Returns the underlying Drizzle database instance for direct query access.
+   * Intended for use by AdminAnalyticsService which needs complex aggregation
+   * queries that don't fit the method-per-operation pattern.
+   *
+   * @throws Error if the service is running in noop mode (DATABASE_URL not set).
+   */
+  getDb(): NeonHttpDatabase<typeof schema> {
+    if (this.noop) throw new Error('Database not configured');
+    return this.db!;
+  }
+
   // ── Cold-start retry ──────────────────────────────────────────────────────
 
   /**
@@ -246,7 +261,7 @@ export class DatabaseService {
 
     if (rows.length === 0) return null;
     const row = rows[0];
-    return { id: row.id, email: row.email, name: row.name ?? null, username: row.username ?? null, photoUrl: row.photoUrl ?? null, createdAt: row.createdAt };
+    return { id: row.id, email: row.email, name: row.name ?? null, username: row.username ?? null, photoUrl: row.photoUrl ?? null, role: row.role, createdAt: row.createdAt };
   }
 
   /** Fetch a user by email address. Returns null if not found. */
@@ -259,7 +274,7 @@ export class DatabaseService {
 
     if (rows.length === 0) return null;
     const row = rows[0];
-    return { id: row.id, email: row.email, name: row.name ?? null, username: row.username ?? null, photoUrl: row.photoUrl ?? null, createdAt: row.createdAt };
+    return { id: row.id, email: row.email, name: row.name ?? null, username: row.username ?? null, photoUrl: row.photoUrl ?? null, role: row.role, createdAt: row.createdAt };
   }
 
   /**
@@ -882,6 +897,86 @@ export class DatabaseService {
 
     this.logger.log(`Library plan created: id=${rows[0].id}, name="${data.name}"`);
     return { id: rows[0].id };
+  }
+
+  async listAllLibraryPlans(): Promise<LibraryPlanRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(libraryPlans)
+        .orderBy(asc(libraryPlans.sortOrder), asc(libraryPlans.createdAt)),
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      category: row.category,
+      tags: row.tags,
+      defaultVoice: row.defaultVoice,
+      planJson: row.planJson,
+      locale: row.locale,
+      isPublished: row.isPublished,
+      sortOrder: row.sortOrder,
+    }));
+  }
+
+  async updateLibraryPlan(
+    id: string,
+    data: Partial<{
+      name: string;
+      description: string;
+      category: string;
+      tags: string;
+      defaultVoice: string;
+      planJson: string;
+      locale: string;
+      isPublished: boolean;
+      sortOrder: number;
+    }>,
+  ): Promise<LibraryPlanRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .update(libraryPlans)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(libraryPlans.id, id))
+        .returning(),
+    );
+
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    this.logger.log(`Library plan updated: id=${id}`);
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      category: row.category,
+      tags: row.tags,
+      defaultVoice: row.defaultVoice,
+      planJson: row.planJson,
+      locale: row.locale,
+      isPublished: row.isPublished,
+      sortOrder: row.sortOrder,
+    };
+  }
+
+  async deleteLibraryPlan(id: string): Promise<boolean> {
+    if (this.noop) return false;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .delete(libraryPlans)
+        .where(eq(libraryPlans.id, id))
+        .returning({ id: libraryPlans.id }),
+    );
+
+    const deleted = rows.length > 0;
+    if (deleted) this.logger.log(`Library plan deleted: id=${id}`);
+    return deleted;
   }
 
   // ── TTS jobs ───────────────────────────────────────────────────────────────

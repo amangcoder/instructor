@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -479,11 +481,23 @@ class ApiPlanRepository implements PlanRepository {
     required String locale,
     required String speechRate,
   }) async {
-    // 1. Trigger server-side TTS pre-generation with the user's settings
-    // so cache keys match runtime requests.
-    await _api.activatePlan(id, voice: voice, locale: locale, speechRate: speechRate);
+    // 1. Fetch the full plan (including steps) to build planJson for batch-pregen.
+    final planRow = await (_db.select(_db.plansTable)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    if (planRow == null) throw ArgumentError('Plan $id not found in local cache');
+    final planJson = jsonEncode(_rowToPlan(planRow).toJson());
 
-    // 2. Optimistically update local cache: mark active, set status to pending.
+    // 2. Trigger batch TTS pre-generation — provider is determined by the backend.
+    await _api.startBatchPregen(
+      id,
+      planJson: planJson,
+      voiceId: voice,
+      locale: locale,
+      speechRate: speechRate,
+    );
+
+    // 4. Optimistically update local cache: mark active, set status to pending.
     await (_db.update(_db.plansTable)..where((t) => t.id.equals(id))).write(
       const PlansTableCompanion(
         isActive: Value(true),

@@ -55,6 +55,7 @@ import { AppModule } from './app.module';
 import { JsonLoggerService } from './common/json-logger.service';
 import { SESEmailService } from './email/ses-email.service';
 import { TtsPregenService } from './tts/tts-pregen.service';
+import { TtsBatchPregenService } from './tts/tts-batch-pregen.service';
 
 // ── Background task types ─────────────────────────────────────────────────────
 
@@ -68,6 +69,17 @@ export interface TtsPregenWorkerTask {
   task: 'ttsPregen';
   planId: string;
   jobIds: string[];
+}
+
+export interface TtsBatchPregenWorkerTask {
+  task: 'ttsBatchPregen';
+  planId: string;
+  groups: Array<{
+    voiceId: string;
+    locale: string;
+    provider: string;
+    jobIds: string[];  // ordered — matches concatenation order
+  }>;
 }
 
 // ── Module-level handler cache ────────────────────────────────────────────────
@@ -279,20 +291,28 @@ export const handler: Handler = async (
   // the event contains a `task` field instead of an API Gateway HTTP payload.
   // Handle these tasks directly without going through the HTTP adapter.
   if (event && typeof event === 'object' && 'task' in event) {
-    const taskEvent = event as SendOtpEmailTask | TtsPregenWorkerTask;
+    const taskEvent = event as SendOtpEmailTask | TtsPregenWorkerTask | TtsBatchPregenWorkerTask;
     if (taskEvent.task === 'sendOtpEmail') {
       const emailService = new SESEmailService();
       await emailService.sendOtpEmail(taskEvent.to, taskEvent.code);
       return { success: true };
     }
     if (taskEvent.task === 'ttsPregen') {
-      // Ensure the NestJS container is bootstrapped so we can resolve services.
       if (!cachedApp) {
         cachedHandler = await bootstrap();
       }
       const task = taskEvent as TtsPregenWorkerTask;
       const pregenService = cachedApp!.get(TtsPregenService);
       await pregenService.processJobs(task.planId, task.jobIds);
+      return { success: true };
+    }
+    if (taskEvent.task === 'ttsBatchPregen') {
+      if (!cachedApp) {
+        cachedHandler = await bootstrap();
+      }
+      const task = taskEvent as TtsBatchPregenWorkerTask;
+      const batchPregenService = cachedApp!.get(TtsBatchPregenService);
+      await batchPregenService.processTask(task);
       return { success: true };
     }
     console.error('[Lambda] Unknown background task:', (taskEvent as { task: string }).task);

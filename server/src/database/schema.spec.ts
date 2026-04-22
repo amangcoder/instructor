@@ -7,7 +7,7 @@
  */
 
 import { getTableName } from 'drizzle-orm';
-import { users, otpRecords, refreshTokens, plans, sessionCompletions, streakFreezes } from './schema';
+import { users, otpRecords, refreshTokens, plans, ttsJobs, sessionCompletions, streakFreezes } from './schema';
 import type { User, OtpRecord, RefreshToken, Plan, SessionCompletion, StreakFreeze } from './schema';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +33,14 @@ describe('users table', () => {
     expect(col.name).toBe('email');
     expect(col.notNull).toBe(true);
     expect(col.isUnique).toBe(true);
+  });
+
+  it('role column: text not null with default "user"', () => {
+    const col = users.role;
+    expect(col.name).toBe('role');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
   });
 
   it('created_at column: timestamptz not null with default now', () => {
@@ -283,16 +291,74 @@ describe('streak_freezes table', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Analytics indexes
+// ---------------------------------------------------------------------------
+
+describe('analytics indexes', () => {
+  /**
+   * Helper: collect index names from a Drizzle table's Symbol(drizzle:Indexes) metadata.
+   * Works for tables defined with the two-argument pgTable(..., (t) => [...]) form.
+   */
+  function getIndexNames(table: any): string[] {
+    // Drizzle stores table metadata under Symbol keys; indexes live in [Symbol.for('drizzle:Indexes')]
+    const sym = Object.getOwnPropertySymbols(table).find(
+      (s) => s.toString() === 'Symbol(drizzle:Indexes)',
+    );
+    if (!sym) return [];
+    const indexes = table[sym] as Record<string, { config: { name: string } }>;
+    return Object.values(indexes).map((idx) => idx.config.name);
+  }
+
+  it('users table has idx_users_created_at index', () => {
+    const names = getIndexNames(users);
+    expect(names).toContain('idx_users_created_at');
+  });
+
+  it('plans table has idx_plans_created_at index', () => {
+    const names = getIndexNames(plans);
+    expect(names).toContain('idx_plans_created_at');
+  });
+
+  it('plans table has idx_plans_user_created composite index (supersedes idx_plans_user_id)', () => {
+    const names = getIndexNames(plans);
+    expect(names).toContain('idx_plans_user_created');
+    // Old idx_plans_user_id must NOT be present (removed in favour of composite)
+    expect(names).not.toContain('idx_plans_user_id');
+  });
+
+  it('plans table has idx_plans_source_library partial composite index', () => {
+    const names = getIndexNames(plans);
+    expect(names).toContain('idx_plans_source_library');
+  });
+
+  it('tts_jobs table has idx_tts_jobs_created_provider_voice index', () => {
+    const names = getIndexNames(ttsJobs);
+    expect(names).toContain('idx_tts_jobs_created_provider_voice');
+  });
+
+  it('tts_jobs table has idx_tts_jobs_failed partial index', () => {
+    const names = getIndexNames(ttsJobs);
+    expect(names).toContain('idx_tts_jobs_failed');
+  });
+
+  it('session_completions table has idx_session_completions_user_completed index', () => {
+    const names = getIndexNames(sessionCompletions);
+    expect(names).toContain('idx_session_completions_user_completed');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // TypeScript type shape smoke tests
 // (These are compile-time checks — they would fail to compile if types changed)
 // ---------------------------------------------------------------------------
 
 describe('TypeScript inferred types', () => {
-  it('User type has required fields', () => {
+  it('User type has required fields including role', () => {
     // This assignment only compiles if User has exactly these fields
-    const _: Pick<User, 'id' | 'email' | 'createdAt'> = {
+    const _: Pick<User, 'id' | 'email' | 'role' | 'createdAt'> = {
       id: '00000000-0000-0000-0000-000000000000',
       email: 'test@example.com',
+      role: 'user',
       createdAt: new Date(),
     };
     expect(_).toBeDefined();

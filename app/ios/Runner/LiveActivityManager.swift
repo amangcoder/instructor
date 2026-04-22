@@ -84,7 +84,7 @@ class LiveActivityManager: NSObject {
     ///   - timeRemainingMs: Int
     ///   - status: String ("playing" | "paused")
     private func handleStart(arguments: Any?, result: @escaping FlutterResult) {
-        guard #available(iOS 16.1, *) else {
+        guard #available(iOS 16.2, *) else {
             // AC-023: No Live Activity attempted on iOS 15 or earlier
             result(nil)
             return
@@ -166,7 +166,7 @@ class LiveActivityManager: NSObject {
     /// Arguments same as startActivity's ContentState fields.
     /// REQ-021: Updates within 1 second of step transition.
     private func handleUpdate(arguments: Any?, result: @escaping FlutterResult) {
-        guard #available(iOS 16.1, *) else {
+        guard #available(iOS 16.2, *) else {
             result(nil)
             return
         }
@@ -230,7 +230,7 @@ class LiveActivityManager: NSObject {
 
     /// Ends the current activity if one exists.
     private func endCurrentActivity() {
-        guard #available(iOS 16.1, *) else { return }
+        guard #available(iOS 16.2, *) else { return }
 
         maxDurationTimer?.invalidate()
         maxDurationTimer = nil
@@ -267,7 +267,7 @@ class LiveActivityManager: NSObject {
     /// Schedules a restart at 7h50m to handle the 8-hour ActivityKit maximum.
     /// REQ-024: Handles 8-hour maximum gracefully by restarting.
     private func scheduleMaxDurationRestart(args: [String: Any]) {
-        guard #available(iOS 16.1, *) else { return }
+        guard #available(iOS 16.2, *) else { return }
 
         maxDurationTimer?.invalidate()
         maxDurationTimer = Timer.scheduledTimer(

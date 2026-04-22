@@ -17,6 +17,7 @@ import {
 import {
   ProviderRegistryService,
   GEMINI_VOICE_MAP,
+  KOKORO_VOICE_MAP,
 } from './providers/provider-registry.service';
 import { KokoroProxyService } from './providers/kokoro-proxy.service';
 import { ElevenLabsProxyService } from './providers/elevenlabs-proxy.service';
@@ -102,7 +103,7 @@ const HINDI_VOICE_FALLBACK: Record<string, string> = {
 const RETRYABLE_STATUSES = new Set([429, 500, 503]);
 
 const GEMINI_TTS_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-tts:generateContent';
 
 interface GeminiPart {
   inlineData?: { mimeType?: string; data: string };
@@ -386,12 +387,14 @@ export class TtsService {
     // Non-English locales bypass Kokoro (English-only) and go directly to Gemini.
     const skipValidation = provider === 'kokoro' && !!locale && NON_ENGLISH_LOCALES.has(locale);
 
-    // For Gemini provider: if a non-Gemini voice is sent (e.g. a Kokoro voice from
-    // the client), remap it to the nearest Gemini equivalent via GEMINI_VOICE_MAP.
+    // Remap foreign voices to the native voice for the requested provider.
     let effectiveVoice = rawVoice;
     if (provider === 'gemini' && !GEMINI_VOICES.has(rawVoice) && GEMINI_VOICE_MAP[rawVoice]) {
       effectiveVoice = GEMINI_VOICE_MAP[rawVoice];
       this.logger.log(`Voice remap for Gemini: ${rawVoice} → ${effectiveVoice}`);
+    } else if (provider === 'kokoro' && !KOKORO_VOICES.has(rawVoice) && KOKORO_VOICE_MAP[rawVoice]) {
+      effectiveVoice = KOKORO_VOICE_MAP[rawVoice];
+      this.logger.log(`Voice remap for Kokoro: ${rawVoice} → ${effectiveVoice}`);
     }
 
     // Validate voice is native to the requested provider.
@@ -404,7 +407,7 @@ export class TtsService {
     if (provider === 'kokoro') {
       if (locale && NON_ENGLISH_LOCALES.has(locale)) {
         // Kokoro does not support this locale — route to Gemini TTS instead.
-        const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'aoede';
+        const geminiVoice = GEMINI_VOICE_MAP[effectiveVoice] ?? 'aoede';
         this.logger.log(
           `Kokoro unsupported locale '${locale}' — routing to Gemini voice=${geminiVoice}`,
         );
@@ -417,16 +420,16 @@ export class TtsService {
         const effectiveLocale = isDevanagari ? 'hi' : locale;
 
         // Remap English voice to Hindi voice when Hindi locale is requested.
-        const kokoroVoice = (effectiveLocale === 'hi' && HINDI_VOICE_FALLBACK[rawVoice])
-          ? HINDI_VOICE_FALLBACK[rawVoice]
-          : rawVoice;
-        if (kokoroVoice !== rawVoice) {
-          this.logger.log(`Hindi voice remap: ${rawVoice} → ${kokoroVoice}`);
+        const kokoroVoice = (effectiveLocale === 'hi' && HINDI_VOICE_FALLBACK[effectiveVoice])
+          ? HINDI_VOICE_FALLBACK[effectiveVoice]
+          : effectiveVoice;
+        if (kokoroVoice !== effectiveVoice) {
+          this.logger.log(`Hindi voice remap: ${effectiveVoice} → ${kokoroVoice}`);
         }
         try {
           audio = await this.synthesizeKokoro(text, kokoroVoice, effectiveLocale ?? 'en-us');
         } catch (err: unknown) {
-          const geminiVoice = GEMINI_VOICE_MAP[rawVoice] ?? 'charon';
+          const geminiVoice = GEMINI_VOICE_MAP[effectiveVoice] ?? 'charon';
           this.logger.warn(
             `Kokoro failed (${err instanceof Error ? err.message : err}) — falling back to Gemini voice=${geminiVoice}`,
           );
@@ -452,6 +455,46 @@ export class TtsService {
     this.logger.log(`Cached — hash=${hash.slice(0, 12)}…, ${audio.length} bytes`);
 
     return audio;
+  }
+
+  // ── Batch pre-gen helpers (used by TtsBatchPregenService only) ───────────
+
+  /** Returns raw PCM bytes from a Gemini call (no WAV header). For batch pre-gen use only. */
+  async synthesizeGeminiRaw(text: string, voice: string, locale?: string): Promise<Buffer> {
+    const wav = await this.synthesizeGemini(text, voice, locale);
+    return wav.subarray(44); // strip standard 44-byte WAV header
+  }
+
+
+  /** Writes a completed WAV buffer to L1 (disk) + L2 (S3) under the given cache key. */
+  async writeToCacheByKey(cacheKey: string, audio: Buffer): Promise<void> {
+    await this.writeCache(cacheKey, audio);
+  }
+
+  /** Writes arbitrary bytes directly to S3 under a full key (no prefix added). No-op if S3 is not configured. */
+  async writeRawToS3(key: string, content: Buffer, contentType = 'application/octet-stream'): Promise<void> {
+    if (!this.s3 || !this.bucket) return;
+    try {
+      await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: content, ContentType: contentType }));
+    } catch (err: any) {
+      this.logger.warn(`writeRawToS3 failed for ${key}: ${err.message}`);
+    }
+  }
+
+  /** Returns the exact JSON body that will be sent to the Gemini TTS API. */
+  geminiTtsRequestBody(text: string, rawVoice: string, locale?: string): object {
+    const voiceName = rawVoice.charAt(0).toUpperCase() + rawVoice.slice(1);
+    const prompt = this.buildPrompt(text, locale);
+    return {
+      url: GEMINI_TTS_URL,
+      body: {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+        },
+      },
+    };
   }
 
   // ── Gemini TTS ────────────────────────────────────────────────────────────
@@ -504,7 +547,7 @@ export class TtsService {
             'x-goog-api-key': apiKey,
           },
           body: requestBody,
-          signal: AbortSignal.timeout(60_000),
+          signal: AbortSignal.timeout(600_000),
         });
       } catch (networkError) {
         const msg =
@@ -642,10 +685,15 @@ export class TtsService {
     if (!locale) return text;
     const descriptor = LOCALE_PROMPT_MAP[locale];
     if (!descriptor) return text;
-    if (NON_ENGLISH_LOCALES.has(locale)) {
-      return `Speak the following in ${descriptor}: ${text}`;
+    const prefix = NON_ENGLISH_LOCALES.has(locale)
+      ? `Speak the following in ${descriptor}: `
+      : `Say the following in ${descriptor}: `;
+    // When text is SSML, the locale instruction must sit inside <speak> so the
+    // root element remains valid SSML — placing it before <speak> breaks parsing.
+    if (text.trimStart().startsWith('<speak>')) {
+      return text.replace(/(<speak>)/, `$1${prefix}`);
     }
-    return `Say the following in ${descriptor}: ${text}`;
+    return `${prefix}${text}`;
   }
 
   /**

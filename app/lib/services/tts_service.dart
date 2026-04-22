@@ -304,12 +304,10 @@ class TTSServiceImpl implements TTSService {
     final storedLocale = await _currentLocale();
     final locale = _effectiveLocale(text, storedLocale);
     final speechRate = await _readSpeechRate();
+    final provider = await _readTtsProvider();
 
-    // Provider is determined server-side; use the default 'kokoro' value for
-    // the cache key to match the server-side key format.
-    const _kDefaultProvider = 'kokoro';
     final hash = fullParamCacheKey(
-      provider: _kDefaultProvider,
+      provider: provider,
       voice: voiceId,
       text: text,
       locale: locale.name,
@@ -355,6 +353,7 @@ class TTSServiceImpl implements TTSService {
       text: text,
       voiceId: voiceId,
       hash: hash,
+      provider: provider,
     );
     _inflight[hash] = future;
     try {
@@ -459,6 +458,18 @@ class TTSServiceImpl implements TTSService {
   /// before falling back to platform TTS.
   static const int _kMaxApiRetries = 2;
 
+  /// Reads the active TTS provider ID from [AppSettingsTable].
+  ///
+  /// Returns `'kokoro'` when the key is absent (e.g. before the first catalog
+  /// fetch). Updated by [activeProviderProvider] whenever the catalog resolves.
+  Future<String> _readTtsProvider() async {
+    final row = await (_db.select(_db.appSettingsTable)
+          ..where((t) => t.key.equals(AppSettingsKeys.ttsProvider)))
+        .getSingleOrNull();
+    final value = row?.value ?? '';
+    return value.isNotEmpty ? value : 'kokoro';
+  }
+
   /// Calls the backend TTS API and returns the audio file path.
   ///
   /// ### Fallback chain
@@ -471,6 +482,7 @@ class TTSServiceImpl implements TTSService {
     required String text,
     required String voiceId,
     required String hash,
+    required String provider,
   }) async {
     try {
       return await _renderAndSave(
@@ -478,6 +490,7 @@ class TTSServiceImpl implements TTSService {
         voiceId: voiceId,
         hash: hash,
         planId: null,
+        provider: provider,
       );
     } on TtsFallbackException catch (e) {
       // Backend is offline or timed out — fall back to on-device TTS.
@@ -512,6 +525,7 @@ class TTSServiceImpl implements TTSService {
     required String voiceId,
     required String hash,
     required String? planId,
+    required String provider,
   }) async {
     TtsApiException? lastApiError;
 
@@ -521,6 +535,7 @@ class TTSServiceImpl implements TTSService {
         final bytes = await _callBackendApi(
           text: text,
           voiceId: voiceId,
+          provider: provider,
         );
         debugPrint(
           'TTSService: received ${bytes.length} bytes from backend',
@@ -614,6 +629,7 @@ class TTSServiceImpl implements TTSService {
   Future<Uint8List> _callBackendApi({
     required String text,
     required String voiceId,
+    required String provider,
   }) async {
     assert(text.trim().isNotEmpty, 'text must not be empty');
     assert(voiceId.trim().isNotEmpty, 'voiceId must not be empty');
@@ -651,6 +667,7 @@ class TTSServiceImpl implements TTSService {
       'text': text,
       'voice': voiceId,
       'locale': locale.name,
+      'provider': provider,
     });
 
     var response = await _httpClient

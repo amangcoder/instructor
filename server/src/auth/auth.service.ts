@@ -39,6 +39,7 @@ const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export interface JwtPayload {
   sub: string;
   email: string;
+  role: string;
 }
 
 export interface UserProfile {
@@ -172,7 +173,7 @@ export class AuthService {
     }
 
     // Issue access token + refresh token.
-    const tokens = await this.issueTokens(user.id, user.email);
+    const tokens = await this.issueTokens(user.id, user.email, user.role ?? 'user');
     this.logger.log(`OTP verified for ${normalizedEmail}`);
     return {
       ...tokens,
@@ -229,7 +230,7 @@ export class AuthService {
     await this.db.revokeRefreshToken(record.userId, hashedToken);
 
     // Issue a fresh access token AND a new refresh token.
-    const tokens = await this.issueTokens(user.id, user.email);
+    const tokens = await this.issueTokens(user.id, user.email, user.role ?? 'user');
 
     this.logger.log(`Tokens rotated for user ${user.id}`);
     return tokens;
@@ -346,9 +347,10 @@ export class AuthService {
   private async issueTokens(
     userId: string,
     email: string,
+    role: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const accessToken = this.jwt.sign(
-      { sub: userId, email } satisfies JwtPayload,
+      { sub: userId, email, role } satisfies JwtPayload,
       { expiresIn: ACCESS_TOKEN_TTL },
     );
 

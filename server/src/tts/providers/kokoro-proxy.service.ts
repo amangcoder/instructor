@@ -16,7 +16,7 @@ export interface KokoroSynthesizeParams {
 export class KokoroProxyService {
   private readonly logger = new Logger(KokoroProxyService.name);
   private readonly kokoroUrl: string;
-  private readonly synthTimeoutMs = 30_000;
+  private readonly synthTimeoutMs = 120_000;
 
   constructor() {
     this.kokoroUrl =

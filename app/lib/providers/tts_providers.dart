@@ -7,6 +7,8 @@
 /// [rawVoiceSettingProvider] streams the raw persisted voice setting string.
 library tts_providers;
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -43,16 +45,24 @@ Future<List<TtsProviderConfig>> ttsProviderCatalog(Ref ref) async {
 /// Returns the [TtsProviderConfig] flagged [isActive] == true by the backend.
 /// Falls back to the kokoro entry from [kStaticVoiceCatalog] when the catalog
 /// hasn't loaded yet or no provider is flagged active.
+///
+/// Side-effect: persists the active provider ID to [AppSettingsKeys.ttsProvider]
+/// so that [TTSServiceImpl] can include it in cache keys and API requests
+/// without needing Riverpod access.
 @riverpod
 Future<TtsProviderConfig> activeProvider(Ref ref) async {
   final catalog = await ref.watch(ttsProviderCatalogProvider.future);
-  return catalog.firstWhere(
+  final provider = catalog.firstWhere(
     (p) => p.isActive,
     orElse: () => catalog.firstWhere(
       (p) => p.id == 'kokoro',
       orElse: () => catalog.first,
     ),
   );
+  unawaited(
+    ref.read(appSettingsProvider).write(AppSettingsKeys.ttsProvider, provider.id),
+  );
+  return provider;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,10 +84,15 @@ Future<List<TtsVoiceOption>> availableVoices(Ref ref) async {
 ///
 /// Used by the settings screen to display the currently selected voice
 /// without going through the [PlanVoice] enum.
+///
+/// Falls back to the active provider's [TtsProviderConfig.defaultVoice] when
+/// no voice is stored, so Gemini users get 'aoede' and Kokoro users get 'af_heart'.
 @riverpod
 Stream<String> rawVoiceSetting(Ref ref) {
   final settings = ref.watch(appSettingsProvider);
+  final fallback =
+      ref.watch(activeProviderProvider).valueOrNull?.defaultVoice ?? 'af_heart';
   return settings.watch(AppSettingsKeys.defaultVoice).map((raw) {
-    return raw?.isNotEmpty == true ? raw! : 'af_heart';
+    return raw?.isNotEmpty == true ? raw! : fallback;
   });
 }

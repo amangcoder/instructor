@@ -17,6 +17,7 @@
 
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -31,14 +32,23 @@ import { sql } from 'drizzle-orm';
 // users
 // ---------------------------------------------------------------------------
 
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: varchar('email').unique().notNull(),
-  name: varchar('name', { length: 100 }),
-  username: varchar('username', { length: 30 }).unique(),
-  photoUrl: text('photo_url'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: varchar('email').unique().notNull(),
+    name: varchar('name', { length: 100 }),
+    username: varchar('username', { length: 30 }).unique(),
+    photoUrl: text('photo_url'),
+    role: text('role').notNull().default('user'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check('users_role_check', sql`${table.role} IN ('user', 'admin')`),
+    // Analytics: daily signup trends and overview counts — range scan by createdAt
+    index('idx_users_created_at').on(table.createdAt),
+  ],
+);
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -162,10 +172,15 @@ export const plans = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // Plans are always queried by userId — this index makes list queries O(log n).
-    index('idx_plans_user_id').on(table.userId),
+    // Composite index on (userId, createdAt) supersedes the old idx_plans_user_id.
+    // Covers all per-user plan list queries and analytics time-range filtering.
+    index('idx_plans_user_created').on(table.userId, table.createdAt),
     // Share token queries are by token only (public endpoint: GET /api/plans/shared/:token)
     index('idx_plans_share_token').on(table.shareToken),
+    // Analytics: daily plan creation trends — range scan by createdAt across all users
+    index('idx_plans_created_at').on(table.createdAt),
+    // Analytics: funnel queries scoped to a library plan, with date filtering
+    index('idx_plans_source_library').on(table.sourceLibraryPlanId, table.createdAt).where(sql`${table.sourceLibraryPlanId} IS NOT NULL`),
   ],
 );
 
@@ -203,6 +218,10 @@ export const ttsJobs = pgTable(
   (table) => [
     index('idx_tts_jobs_plan_id').on(table.planId),
     index('idx_tts_jobs_plan_status').on(table.planId, table.status),
+    // Analytics: volume by provider/voice over time — leading createdAt for range scans
+    index('idx_tts_jobs_created_provider_voice').on(table.createdAt, table.provider, table.voiceId),
+    // Analytics: failure monitoring — partial index keeps it small; leading createdAt for range
+    index('idx_tts_jobs_failed').on(table.createdAt).where(sql`${table.status} = 'failed'`),
   ],
 );
 
@@ -216,16 +235,35 @@ export type NewTtsJob = typeof ttsJobs.$inferInsert;
 // Intentionally has NO foreign key to users — we never query the users table
 // during processing (email enumeration prevention). The admin reviews and
 // processes requests manually via the notification email.
+//
+// Admin-facing columns (added in TASK-000 migration):
+//   - status: 'pending' | 'processed' (default 'pending')
+//   - processedAt: timestamp when admin marked as processed (nullable)
+//   - ipAddress: IP of requester (nullable, for audit trail)
 // ---------------------------------------------------------------------------
 
-export const deletionRequests = pgTable('deletion_requests', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: varchar('email').notNull(),
-  scope: varchar('scope', { length: 50 }).notNull(),
-  reason: text('reason'),
-  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const deletionRequests = pgTable(
+  'deletion_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: varchar('email').notNull(),
+    scope: varchar('scope', { length: 50 }).notNull(),
+    reason: text('reason'),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    ipAddress: varchar('ip_address'),
+  },
+  (table) => [
+    // Partial index for efficient pending-request queries (sidebar badge count)
+    index('idx_deletion_requests_status')
+      .on(table.status)
+      .where(sql`${table.status} = 'pending'`),
+    // Index for activity feed queries (ORDER BY requested_at DESC)
+    index('idx_deletion_requests_created_at').on(table.createdAt),
+  ],
+);
 
 export type DeletionRequest = typeof deletionRequests.$inferSelect;
 export type NewDeletionRequest = typeof deletionRequests.$inferInsert;
@@ -257,6 +295,12 @@ export const sessionCompletions = pgTable(
     index('idx_session_completions_user_created').on(table.userId, table.createdAt),
     // Query by planId for plan-specific completion history
     index('idx_session_completions_plan_completed').on(table.planId, table.completedAt),
+    // Analytics: engagement/streak queries using PARTITION BY user_id window functions —
+    // userId MUST lead so PostgreSQL can seek per-partition without scanning all rows
+    index('idx_session_completions_user_completed').on(table.userId, table.completedAt),
+    // Analytics: DAU/WAU/MAU range scans — completedAt-only queries cannot use the
+    // user-leading composite index above; this standalone index serves them efficiently
+    index('idx_session_completions_completed_at').on(table.completedAt),
   ],
 );
 
@@ -330,3 +374,28 @@ export const planTriggers = pgTable(
 
 export type PlanTrigger = typeof planTriggers.$inferSelect;
 export type NewPlanTrigger = typeof planTriggers.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// app_version_config
+//
+// Admin-managed version configuration for iOS and Android minimum supported
+// and forced-update versions. A single row is maintained (created during
+// migration 0008_add_app_version_config).
+//
+// Used by: AppVersionAdminService (admin panel) to update version requirements.
+// NOT used by: AppVersionService.check() which reads from env vars only for
+// blast-radius protection (DB outage should not block app launches).
+// ---------------------------------------------------------------------------
+
+export const appVersionConfig = pgTable('app_version_config', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  iosMinVersion: varchar('ios_min_version', { length: 20 }),
+  androidMinVersion: varchar('android_min_version', { length: 20 }),
+  iosForceVersion: varchar('ios_force_version', { length: 20 }),
+  androidForceVersion: varchar('android_force_version', { length: 20 }),
+  forceUpdateEnabled: boolean('force_update_enabled').notNull().default(false),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type AppVersionConfig = typeof appVersionConfig.$inferSelect;
+export type NewAppVersionConfig = typeof appVersionConfig.$inferInsert;

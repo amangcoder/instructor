@@ -1,12 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CreateLibraryPlanDto } from './dto/create-library-plan.dto';
+import { UpdateLibraryPlanDto } from './dto/update-library-plan.dto';
 
 @Injectable()
 export class LibraryService {
   private readonly logger = new Logger(LibraryService.name);
 
   constructor(private readonly db: DatabaseService) {}
+
+  /**
+   * List all library plans regardless of publish status (admin only).
+   */
+  async getAllPlans() {
+    this.logger.log('getAllPlans — admin');
+    return this.db.listAllLibraryPlans();
+  }
 
   /**
    * List published library plans with optional filtering and pagination.
@@ -43,5 +52,23 @@ export class LibraryService {
       isPublished: dto.isPublished ?? false,
       sortOrder: dto.sortOrder ?? 0,
     });
+  }
+
+  /**
+   * Update an existing library plan (admin only).
+   * Returns null if not found.
+   */
+  async updatePlan(id: string, dto: UpdateLibraryPlanDto) {
+    this.logger.log(`updatePlan — id=${id}`);
+    return this.db.updateLibraryPlan(id, dto);
+  }
+
+  /**
+   * Delete a library plan (admin only).
+   * Returns true if deleted, false if not found.
+   */
+  async deletePlan(id: string): Promise<boolean> {
+    this.logger.log(`deletePlan — id=${id}`);
+    return this.db.deleteLibraryPlan(id);
   }
 }

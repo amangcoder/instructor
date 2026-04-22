@@ -15,8 +15,11 @@ global.fetch = mockFetch;
 // Timer setup for cooldown tests
 // ────────────────────────────────────────────────────────────────────────────
 
+let user: ReturnType<typeof userEvent.setup>;
+
 beforeEach(() => {
   jest.useFakeTimers();
+  user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime.bind(jest) });
   mockFetch.mockReset();
 });
 
@@ -92,7 +95,7 @@ describe('DeletionForm', () => {
       render(<DeletionForm />);
       const emailInput = screen.getByLabelText(/email address/i);
 
-      await userEvent.type(emailInput, 'invalid-email');
+      await user.type(emailInput, 'invalid-email');
       fireEvent.blur(emailInput);
 
       expect(
@@ -104,7 +107,7 @@ describe('DeletionForm', () => {
       render(<DeletionForm />);
       const emailInput = screen.getByLabelText(/email address/i);
 
-      await userEvent.type(emailInput, 'user@');
+      await user.type(emailInput, 'user@');
       fireEvent.blur(emailInput);
 
       expect(
@@ -116,14 +119,14 @@ describe('DeletionForm', () => {
       render(<DeletionForm />);
       const emailInput = screen.getByLabelText(/email address/i);
 
-      await userEvent.type(emailInput, 'bad');
+      await user.type(emailInput, 'bad');
       fireEvent.blur(emailInput);
       expect(
         await screen.findByText('Please enter a valid email address'),
       ).toBeInTheDocument();
 
-      await userEvent.clear(emailInput);
-      await userEvent.type(emailInput, 'valid@example.com');
+      await user.clear(emailInput);
+      await user.type(emailInput, 'valid@example.com');
       expect(
         screen.queryByText('Please enter a valid email address'),
       ).not.toBeInTheDocument();
@@ -133,7 +136,7 @@ describe('DeletionForm', () => {
       render(<DeletionForm />);
       const emailInput = screen.getByLabelText(/email address/i);
 
-      await userEvent.type(emailInput, 'notvalid');
+      await user.type(emailInput, 'notvalid');
       fireEvent.blur(emailInput);
 
       await waitFor(() =>
@@ -148,7 +151,7 @@ describe('DeletionForm', () => {
     it('prevents submission when email is invalid', async () => {
       render(<DeletionForm />);
 
-      await userEvent.type(screen.getByLabelText(/email address/i), 'bad-email');
+      await user.type(screen.getByLabelText(/email address/i), 'bad-email');
       fireEvent.click(screen.getByRole('radio', { name: /full account deletion/i }));
       fireEvent.click(screen.getByRole('button', { name: /submit/i }));
 
@@ -161,7 +164,7 @@ describe('DeletionForm', () => {
     it('prevents submission when no scope is selected', async () => {
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -173,7 +176,7 @@ describe('DeletionForm', () => {
     it('prevents submission when selective scope is chosen but no items selected', async () => {
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -225,7 +228,7 @@ describe('DeletionForm', () => {
       mockSuccessResponse();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -247,7 +250,7 @@ describe('DeletionForm', () => {
       render(<DeletionForm />);
 
       const emailInput = screen.getByLabelText(/email address/i);
-      await userEvent.type(emailInput, 'user@example.com');
+      await user.type(emailInput, 'user@example.com');
       fireEvent.click(screen.getByRole('radio', { name: /full account deletion/i }));
 
       await act(async () => {
@@ -268,7 +271,7 @@ describe('DeletionForm', () => {
       mockSuccessResponse();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -292,7 +295,7 @@ describe('DeletionForm', () => {
       mockSuccessResponse();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -318,12 +321,12 @@ describe('DeletionForm', () => {
       mockSuccessResponse();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'test@example.com',
       );
       fireEvent.click(screen.getByRole('radio', { name: /full account deletion/i }));
-      await userEvent.type(screen.getByLabelText(/reason/i), 'Leaving the app');
+      await user.type(screen.getByLabelText(/reason/i), 'Leaving the app');
 
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: /submit/i }));
@@ -353,7 +356,7 @@ describe('DeletionForm', () => {
       mockErrorResponse('Service temporarily unavailable');
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -372,7 +375,7 @@ describe('DeletionForm', () => {
       mockNetworkError();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -391,7 +394,7 @@ describe('DeletionForm', () => {
       mockErrorResponse();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -411,7 +414,7 @@ describe('DeletionForm', () => {
       render(<DeletionForm />);
 
       const emailInput = screen.getByLabelText(/email address/i);
-      await userEvent.type(emailInput, 'user@example.com');
+      await user.type(emailInput, 'user@example.com');
       fireEvent.click(screen.getByRole('radio', { name: /full account deletion/i }));
 
       await act(async () => {
@@ -454,7 +457,7 @@ describe('DeletionForm', () => {
       mockSuccessResponse();
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -477,7 +480,7 @@ describe('DeletionForm', () => {
       mockErrorResponse('Failed');
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
@@ -506,7 +509,7 @@ describe('DeletionForm', () => {
 
       render(<DeletionForm />);
 
-      await userEvent.type(
+      await user.type(
         screen.getByLabelText(/email address/i),
         'user@example.com',
       );
