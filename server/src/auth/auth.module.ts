@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { OtpCleanupService } from './otp-cleanup.service';
 
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, OtpCleanupService],
   exports: [JwtModule, AuthService],
 })
 export class AuthModule {}

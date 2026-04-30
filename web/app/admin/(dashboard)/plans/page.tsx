@@ -192,6 +192,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
               <StatCard
                 title="Plan Completion Rate"
                 value={Math.round(planCompletionRate * 10) / 10}
+                valueLabel={`${planCompletionRate.toFixed(1)}%`}
               />
               <StatCard
                 title="Total Created"
@@ -203,7 +204,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
               />
             </div>
             <div className="rounded-xl bg-surface-container shadow-sm p-6 mb-6">
-              <ChartErrorBoundary>
+              <ChartErrorBoundary key={range}>
                 <FunnelChart data={funnelStages} />
               </ChartErrorBoundary>
             </div>
@@ -268,7 +269,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
               <p className="text-sm font-medium text-on-surface-variant mb-4">
                 Plans per User Distribution
               </p>
-              <ChartErrorBoundary>
+              <ChartErrorBoundary key={range}>
                 <DistributionBarChart
                   data={usageData.series}
                   xKey="bucket"

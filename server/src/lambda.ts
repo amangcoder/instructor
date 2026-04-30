@@ -53,34 +53,21 @@ import { ValidationPipe } from '@nestjs/common';
 
 import { AppModule } from './app.module';
 import { JsonLoggerService } from './common/json-logger.service';
+import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { SESEmailService } from './email/ses-email.service';
 import { TtsPregenService } from './tts/tts-pregen.service';
 import { TtsBatchPregenService } from './tts/tts-batch-pregen.service';
+import type { SendOtpEmailTask } from './common/email-task.types';
+import type {
+  TtsPregenWorkerTask,
+  TtsBatchPregenWorkerTask,
+} from './worker-dispatch/worker-task.interface';
 
 // ── Background task types ─────────────────────────────────────────────────────
 
-export interface SendOtpEmailTask {
-  task: 'sendOtpEmail';
-  to: string;
-  code: string;
-}
-
-export interface TtsPregenWorkerTask {
-  task: 'ttsPregen';
-  planId: string;
-  jobIds: string[];
-}
-
-export interface TtsBatchPregenWorkerTask {
-  task: 'ttsBatchPregen';
-  planId: string;
-  groups: Array<{
-    voiceId: string;
-    locale: string;
-    provider: string;
-    jobIds: string[];  // ordered — matches concatenation order
-  }>;
-}
+// Re-export types from their canonical locations for backward compatibility.
+export type { SendOtpEmailTask } from './common/email-task.types';
+export type { TtsPregenWorkerTask, TtsBatchPregenWorkerTask } from './worker-dispatch/worker-task.interface';
 
 // ── Module-level handler cache ────────────────────────────────────────────────
 // Persists for the lifetime of the Lambda execution environment.
@@ -198,13 +185,16 @@ async function bootstrap(): Promise<Handler> {
     abortOnError: false,
   });
 
-  // ── 3. Global pipes ────────────────────────────────────────────────────────
+  // ── 3. Global pipes + filters ───────────────────────────────────────────────
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,  // Strip request body properties not declared in DTOs.
       transform: true,  // Auto-coerce plain objects to DTO class instances.
     }),
   );
+
+  // Standardise all error responses into { statusCode, error, message, requestId }.
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // ── 4. Global prefix ───────────────────────────────────────────────────────
   // All routes are prefixed with /api (e.g., /api/auth/request-otp).

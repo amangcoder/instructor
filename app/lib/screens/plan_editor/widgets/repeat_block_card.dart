@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
-import 'package:instructor/data/audio_assets.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/theme/step_colors.dart';
 
 import 'step_card.dart';
+import 'step_editors/step_editors.dart';
 import 'step_insert_button.dart';
 import 'step_type_picker.dart';
 
@@ -507,24 +507,8 @@ class _NestedRepeatHint extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Factory helpers (shared between RepeatBlockCard and plan_editor_screen)
+// Helper functions
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Creates a default [PlanStep] for [type] with [id].
-PlanStep defaultStepForType(StepType type, String id) => switch (type) {
-      StepType.say => PlanStep.say(id: id, text: ''),
-      StepType.notify =>
-        PlanStep.notify(id: id, title: '', body: ''),
-      StepType.play =>
-        PlanStep.play(id: id, audioAssetKey: kAmbientRain),
-      StepType.wait =>
-        PlanStep.wait(id: id, duration: const Duration(seconds: 30)),
-      StepType.repeat =>
-        PlanStep.repeat(id: id, count: 3, children: const []),
-      StepType.count =>
-        PlanStep.count(id: id, from: 1, to: 10),
-      StepType.stopAudio => PlanStep.stopAudio(id: id),
-    };
 
 /// Returns a deep copy of [step] with a freshly generated ID (and new IDs for
 /// any nested children).

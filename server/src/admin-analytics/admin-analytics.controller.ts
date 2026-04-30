@@ -106,7 +106,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('users/signups')
-  getUserSignups(@Query('range') range?: string): Promise<SignupsResponse> {
+  async getUserSignups(
+    @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<SignupsResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getUserSignups(validateRange(range));
   }
 
@@ -116,9 +120,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('users/activation')
-  getUserActivation(
+  async getUserActivation(
     @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
   ): Promise<ActivationResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getUserActivation(validateRange(range));
   }
 
@@ -128,7 +134,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('plans/funnel')
-  getPlanFunnel(@Query('range') range?: string): Promise<FunnelResponse> {
+  async getPlanFunnel(
+    @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<FunnelResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getPlanFunnel(validateRange(range));
   }
 
@@ -138,7 +148,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('plans/usage')
-  getPlanUsage(@Query('range') range?: string): Promise<PlanUsageResponse> {
+  async getPlanUsage(
+    @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<PlanUsageResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getPlanUsage(validateRange(range));
   }
 
@@ -148,7 +162,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('tts/volume')
-  getTtsVolume(@Query('range') range?: string): Promise<TtsVolumeResponse> {
+  async getTtsVolume(
+    @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<TtsVolumeResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getTtsVolume(validateRange(range));
   }
 
@@ -158,7 +176,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('tts/errors')
-  getTtsErrors(@Query('range') range?: string): Promise<TtsErrorsResponse> {
+  async getTtsErrors(
+    @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<TtsErrorsResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getTtsErrors(validateRange(range));
   }
 
@@ -168,7 +190,10 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('engagement/streaks')
-  getEngagementStreaks(): Promise<StreaksResponse> {
+  async getEngagementStreaks(
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<StreaksResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getEngagementStreaks();
   }
 
@@ -178,9 +203,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('library')
-  getLibraryConversions(
+  async getLibraryConversions(
     @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
   ): Promise<LibraryResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.analyticsService.getLibraryConversions(validateRange(range));
   }
 
@@ -190,7 +217,10 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('engagement/retention')
-  getRetention(): Promise<RetentionResponse> {
+  async getRetention(
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<RetentionResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.retentionService.getRetention();
   }
 
@@ -200,9 +230,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('engagement/active-users')
-  getActiveUsers(
+  async getActiveUsers(
     @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
   ): Promise<ActiveUsersResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.retentionService.getActiveUsers(validateRange(range));
   }
 
@@ -212,7 +244,10 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('tts/health')
-  getTtsHealth(): Promise<TtsHealthResponse> {
+  async getTtsHealth(
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<TtsHealthResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.ttsHealthService.getTtsHealth();
   }
 
@@ -222,9 +257,11 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('library/categories')
-  getLibraryCategories(
+  async getLibraryCategories(
     @Query('range') range?: string,
+    @Req() req?: Request & { user?: JwtPayload },
   ): Promise<LibraryCategoryResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.libraryCategoryService.getLibraryCategories(validateRange(range));
   }
 
@@ -241,7 +278,10 @@ export class AdminAnalyticsController {
   // -------------------------------------------------------------------------
 
   @Get('overview/activity')
-  getRecentActivity(): Promise<ActivityFeedResponse> {
+  async getRecentActivity(
+    @Req() req?: Request & { user?: JwtPayload },
+  ): Promise<ActivityFeedResponse> {
+    if (req) await this.enforceRateLimit(req);
     return this.activityFeedService.getRecentActivity();
   }
 }

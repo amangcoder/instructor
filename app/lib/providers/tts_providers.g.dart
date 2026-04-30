@@ -30,11 +30,15 @@ final ttsProviderCatalogProvider =
 // ignore: unused_element
 typedef TtsProviderCatalogRef
     = AutoDisposeFutureProviderRef<List<TtsProviderConfig>>;
-String _$activeProviderHash() => r'9383dccc866c6d64851bbabcd0edb0ae76fd3974';
+String _$activeProviderHash() => r'ca171f5972fa4b67b63c2055de295471c35927f4';
 
 /// Returns the [TtsProviderConfig] flagged [isActive] == true by the backend.
 /// Falls back to the kokoro entry from [kStaticVoiceCatalog] when the catalog
 /// hasn't loaded yet or no provider is flagged active.
+///
+/// Side-effect: persists the active provider ID to [AppSettingsKeys.ttsProvider]
+/// so that [TTSServiceImpl] can include it in cache keys and API requests
+/// without needing Riverpod access.
 ///
 /// Copied from [activeProvider].
 @ProviderFor(activeProvider)
@@ -72,12 +76,15 @@ final availableVoicesProvider =
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef AvailableVoicesRef = AutoDisposeFutureProviderRef<List<TtsVoiceOption>>;
-String _$rawVoiceSettingHash() => r'3a8f03c4037ea30f92ff60ad9459a49661404e87';
+String _$rawVoiceSettingHash() => r'9dddc7620f22849311e0e68c7105efeed51c11d7';
 
 /// Reactive stream of the raw voice setting string (e.g. 'aoede', 'af_bella').
 ///
 /// Used by the settings screen to display the currently selected voice
 /// without going through the [PlanVoice] enum.
+///
+/// Falls back to the active provider's [TtsProviderConfig.defaultVoice] when
+/// no voice is stored, so Gemini users get 'aoede' and Kokoro users get 'af_heart'.
 ///
 /// Copied from [rawVoiceSetting].
 @ProviderFor(rawVoiceSetting)

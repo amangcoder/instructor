@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -9,6 +7,7 @@ import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/services/plan_api_service.dart';
+import 'plan_repository_mixin.dart';
 
 const _uuid = Uuid();
 
@@ -92,61 +91,10 @@ abstract class PlanRepository {
 ///
 /// All writes use [into] / [update] / [delete] so that Drift's built-in
 /// change-tracking automatically notifies any active [watchUserPlans] streams.
-class DriftPlanRepository implements PlanRepository {
+class DriftPlanRepository with PlanRepositoryMixin implements PlanRepository {
   DriftPlanRepository(this._db);
 
   final AppDatabase _db;
-
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
-
-  /// Converts a Drift [PlansTableData] row into a domain [Plan].
-  Plan _rowToPlan(PlansTableData row) {
-    return Plan(
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      category: PlanCategory.values.firstWhere(
-        (c) => c.name == row.category,
-        orElse: () => PlanCategory.custom,
-      ),
-      tags: row.tags,
-      defaultVoice: row.defaultVoice,
-      steps: row.steps,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      lastUsedAt: row.lastUsedAt,
-      isActive: row.isActive,
-      ttsStatus: row.ttsStatus,
-      ttsTotal: row.ttsTotal,
-      ttsCompleted: row.ttsCompleted,
-      libraryId: row.libraryId,
-    );
-  }
-
-  /// Converts a domain [Plan] into a Drift [PlansTableCompanion] for updates.
-  ///
-  /// The [id] column is intentionally excluded — callers that need to set the
-  /// id (e.g. [createPlan]) add it via [PlansTableCompanion.copyWith].
-  PlansTableCompanion _planToCompanion(Plan plan) {
-    return PlansTableCompanion(
-      name: Value(plan.name),
-      description: Value(plan.description),
-      category: Value(plan.category.name),
-      tags: Value(plan.tags),
-      defaultVoice: Value(plan.defaultVoice),
-      steps: Value(plan.steps),
-      createdAt: Value(plan.createdAt),
-      updatedAt: Value(plan.updatedAt),
-      lastUsedAt: Value(plan.lastUsedAt),
-      isActive: Value(plan.isActive),
-      ttsStatus: Value(plan.ttsStatus),
-      ttsTotal: Value(plan.ttsTotal),
-      ttsCompleted: Value(plan.ttsCompleted),
-      libraryId: Value(plan.libraryId),
-    );
-  }
 
   // -------------------------------------------------------------------------
   // CRUD
@@ -158,7 +106,7 @@ class DriftPlanRepository implements PlanRepository {
     // Use the plan's existing id when non-empty (server-assigned UUID), or
     // generate a local UUID for plans created offline.
     final id = plan.id.isEmpty ? _uuid.v4() : plan.id;
-    final companion = _planToCompanion(plan).copyWith(
+    final companion = planToCompanion(plan).copyWith(
       id: Value(id),
       createdAt: Value(now),
       updatedAt: Value(now),
@@ -169,7 +117,7 @@ class DriftPlanRepository implements PlanRepository {
 
   @override
   Future<void> updatePlan(String id, Plan plan) async {
-    final companion = _planToCompanion(plan).copyWith(
+    final companion = planToCompanion(plan).copyWith(
       updatedAt: Value(DateTime.now()),
     );
     await (_db.update(_db.plansTable)
@@ -196,7 +144,7 @@ class DriftPlanRepository implements PlanRepository {
     final row = await (_db.select(_db.plansTable)
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
-    return row == null ? null : _rowToPlan(row);
+    return row == null ? null : rowToPlan(row);
   }
 
   @override
@@ -235,7 +183,7 @@ class DriftPlanRepository implements PlanRepository {
 
     if (searchQuery != null && searchQuery.isNotEmpty) {
       query.where(
-        (t) => t.name.like('%${_escapeLikePattern(searchQuery)}%'),
+        (t) => t.name.like('%${escapeLikePattern(searchQuery)}%'),
       );
     }
 
@@ -243,7 +191,7 @@ class DriftPlanRepository implements PlanRepository {
       query.where((t) => t.category.equals(category.name));
     }
 
-    return query.watch().map((rows) => rows.map(_rowToPlan).toList());
+    return query.watch().map((rows) => rows.map(rowToPlan).toList());
   }
 
   // -------------------------------------------------------------------------
@@ -277,10 +225,10 @@ class DriftPlanRepository implements PlanRepository {
     var updatedCount = 0;
     final allRows = await _db.select(_db.plansTable).get();
     for (final row in allRows) {
-      final plan = _rowToPlan(row);
+      final plan = rowToPlan(row);
       final newDefaultVoice =
           voiceMap[plan.defaultVoice] ?? plan.defaultVoice;
-      final newSteps = _remapSteps(plan.steps, voiceMap);
+      final newSteps = remapSteps(plan.steps, voiceMap);
 
       // Only update if something actually changed.
       if (newDefaultVoice == plan.defaultVoice && newSteps == null) continue;
@@ -293,47 +241,6 @@ class DriftPlanRepository implements PlanRepository {
       updatedCount++;
     }
     return updatedCount;
-  }
-
-  /// Recursively remaps voiceId in SaySteps and RepeatStep children.
-  /// Returns null if no step was changed.
-  List<PlanStep>? _remapSteps(
-      List<PlanStep> steps, Map<String, String> voiceMap) {
-    var changed = false;
-    final result = steps.map((step) {
-      return switch (step) {
-        SayStep(:final voiceId) when voiceId != null &&
-            voiceMap.containsKey(voiceId) =>
-          () {
-            changed = true;
-            return (step as SayStep).copyWith(voiceId: voiceMap[voiceId]);
-          }(),
-        RepeatStep(:final children) => () {
-            final remapped = _remapSteps(children, voiceMap);
-            if (remapped != null) {
-              changed = true;
-              return (step as RepeatStep).copyWith(children: remapped);
-            }
-            return step;
-          }(),
-        _ => step,
-      };
-    }).toList();
-    return changed ? result : null;
-  }
-
-  // -------------------------------------------------------------------------
-  // Private utilities
-  // -------------------------------------------------------------------------
-
-  /// Escapes special LIKE pattern characters (`%`, `_`, `\`) in [input] so
-  /// that user-typed text is treated as a literal string rather than a
-  /// pattern wildcard.
-  String _escapeLikePattern(String input) {
-    return input
-        .replaceAll(r'\', r'\\')
-        .replaceAll('%', r'\%')
-        .replaceAll('_', r'\_');
   }
 }
 
@@ -351,7 +258,7 @@ class DriftPlanRepository implements PlanRepository {
 /// Read operations ([getPlanById], [watchUserPlans]) are served from the local
 /// Drift cache, which is populated either lazily (per-mutation) or in bulk via
 /// [refreshFromServer].
-class ApiPlanRepository implements PlanRepository {
+class ApiPlanRepository with PlanRepositoryMixin implements PlanRepository {
   ApiPlanRepository({
     required PlanApiService planApiService,
     required AppDatabase db,
@@ -360,57 +267,6 @@ class ApiPlanRepository implements PlanRepository {
 
   final PlanApiService _api;
   final AppDatabase _db;
-
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
-
-  /// Converts a Drift [PlansTableData] row into a domain [Plan].
-  Plan _rowToPlan(PlansTableData row) {
-    return Plan(
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      category: PlanCategory.values.firstWhere(
-        (c) => c.name == row.category,
-        orElse: () => PlanCategory.custom,
-      ),
-      tags: row.tags,
-      defaultVoice: row.defaultVoice,
-      steps: row.steps,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      lastUsedAt: row.lastUsedAt,
-      isActive: row.isActive,
-      ttsStatus: row.ttsStatus,
-      ttsTotal: row.ttsTotal,
-      ttsCompleted: row.ttsCompleted,
-      libraryId: row.libraryId,
-    );
-  }
-
-  /// Converts a domain [Plan] into a Drift [PlansTableCompanion].
-  ///
-  /// The [id] column is intentionally excluded — callers that need to set the
-  /// id add it via [PlansTableCompanion.copyWith].
-  PlansTableCompanion _planToCompanion(Plan plan) {
-    return PlansTableCompanion(
-      name: Value(plan.name),
-      description: Value(plan.description),
-      category: Value(plan.category.name),
-      tags: Value(plan.tags),
-      defaultVoice: Value(plan.defaultVoice),
-      steps: Value(plan.steps),
-      createdAt: Value(plan.createdAt),
-      updatedAt: Value(plan.updatedAt),
-      lastUsedAt: Value(plan.lastUsedAt),
-      isActive: Value(plan.isActive),
-      ttsStatus: Value(plan.ttsStatus),
-      ttsTotal: Value(plan.ttsTotal),
-      ttsCompleted: Value(plan.ttsCompleted),
-      libraryId: Value(plan.libraryId),
-    );
-  }
 
   // -------------------------------------------------------------------------
   // CRUD — API first, then cache
@@ -423,7 +279,7 @@ class ApiPlanRepository implements PlanRepository {
 
     // 2. Write to local cache using the server-assigned id.
     //    Preserve createdAt from the caller; stamp updatedAt to now.
-    final companion = _planToCompanion(plan).copyWith(
+    final companion = planToCompanion(plan).copyWith(
       id: Value(serverId),
       updatedAt: Value(DateTime.now()),
     );
@@ -438,7 +294,7 @@ class ApiPlanRepository implements PlanRepository {
     await _api.savePlan(plan.copyWith(id: id));
 
     // 2. Update local cache row.
-    final companion = _planToCompanion(plan).copyWith(
+    final companion = planToCompanion(plan).copyWith(
       updatedAt: Value(DateTime.now()),
     );
     await (_db.update(_db.plansTable)..where((t) => t.id.equals(id)))
@@ -467,7 +323,7 @@ class ApiPlanRepository implements PlanRepository {
     final row = await (_db.select(_db.plansTable)
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
-    return row == null ? null : _rowToPlan(row);
+    return row == null ? null : rowToPlan(row);
   }
 
   // -------------------------------------------------------------------------
@@ -481,23 +337,11 @@ class ApiPlanRepository implements PlanRepository {
     required String locale,
     required String speechRate,
   }) async {
-    // 1. Fetch the full plan (including steps) to build planJson for batch-pregen.
-    final planRow = await (_db.select(_db.plansTable)
-          ..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
-    if (planRow == null) throw ArgumentError('Plan $id not found in local cache');
-    final planJson = jsonEncode(_rowToPlan(planRow).toJson());
+    // 1. Trigger server-side TTS pre-generation with the user's settings
+    // so cache keys match runtime requests.
+    await _api.activatePlan(id, voice: voice, locale: locale, speechRate: speechRate);
 
-    // 2. Trigger batch TTS pre-generation — provider is determined by the backend.
-    await _api.startBatchPregen(
-      id,
-      planJson: planJson,
-      voiceId: voice,
-      locale: locale,
-      speechRate: speechRate,
-    );
-
-    // 4. Optimistically update local cache: mark active, set status to pending.
+    // 2. Optimistically update local cache: mark active, set status to pending.
     await (_db.update(_db.plansTable)..where((t) => t.id.equals(id))).write(
       const PlansTableCompanion(
         isActive: Value(true),
@@ -527,7 +371,7 @@ class ApiPlanRepository implements PlanRepository {
 
     if (searchQuery != null && searchQuery.isNotEmpty) {
       query.where(
-        (t) => t.name.like('%${_escapeLikePattern(searchQuery)}%'),
+        (t) => t.name.like('%${escapeLikePattern(searchQuery)}%'),
       );
     }
 
@@ -535,7 +379,7 @@ class ApiPlanRepository implements PlanRepository {
       query.where((t) => t.category.equals(category.name));
     }
 
-    return query.watch().map((rows) => rows.map(_rowToPlan).toList());
+    return query.watch().map((rows) => rows.map(rowToPlan).toList());
   }
 
   // -------------------------------------------------------------------------
@@ -559,10 +403,10 @@ class ApiPlanRepository implements PlanRepository {
     var updatedCount = 0;
     final allRows = await _db.select(_db.plansTable).get();
     for (final row in allRows) {
-      final plan = _rowToPlan(row);
+      final plan = rowToPlan(row);
       final newDefaultVoice =
           voiceMap[plan.defaultVoice] ?? plan.defaultVoice;
-      final newSteps = _remapSteps(plan.steps, voiceMap);
+      final newSteps = remapSteps(plan.steps, voiceMap);
 
       // Only update if something actually changed.
       if (newDefaultVoice == plan.defaultVoice && newSteps == null) continue;
@@ -603,52 +447,12 @@ class ApiPlanRepository implements PlanRepository {
       // Bulk-insert server plans. Plans with no server id are skipped.
       for (final plan in serverPlans) {
         if (plan.id.isEmpty) continue;
-        final companion = _planToCompanion(plan).copyWith(
+        final companion = planToCompanion(plan).copyWith(
           id: Value(plan.id),
         );
         await _db.into(_db.plansTable).insert(companion);
       }
     });
-  }
-
-  // -------------------------------------------------------------------------
-  // Private utilities
-  // -------------------------------------------------------------------------
-
-  /// Recursively remaps voiceId in [SayStep]s and [RepeatStep] children.
-  ///
-  /// Returns null when no step was changed (allows callers to skip the update).
-  List<PlanStep>? _remapSteps(
-      List<PlanStep> steps, Map<String, String> voiceMap) {
-    var changed = false;
-    final result = steps.map((step) {
-      return switch (step) {
-        SayStep(:final voiceId)
-            when voiceId != null && voiceMap.containsKey(voiceId) =>
-          () {
-            changed = true;
-            return (step as SayStep).copyWith(voiceId: voiceMap[voiceId]);
-          }(),
-        RepeatStep(:final children) => () {
-            final remapped = _remapSteps(children, voiceMap);
-            if (remapped != null) {
-              changed = true;
-              return (step as RepeatStep).copyWith(children: remapped);
-            }
-            return step;
-          }(),
-        _ => step,
-      };
-    }).toList();
-    return changed ? result : null;
-  }
-
-  /// Escapes special LIKE pattern characters in [input].
-  String _escapeLikePattern(String input) {
-    return input
-        .replaceAll(r'\', r'\\')
-        .replaceAll('%', r'\%')
-        .replaceAll('_', r'\_');
   }
 }
 

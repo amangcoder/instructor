@@ -39,3 +39,29 @@ DEFAULT_SPEED: float = float(os.getenv("KOKORO_DEFAULT_SPEED", "1.0"))
 
 # Sample rate produced by the Kokoro model (24 kHz).
 SAMPLE_RATE: int = 24000
+
+# ── API Key Authentication ────────────────────────────────────────────────────
+
+# API key required to access /synthesize and /voices endpoints.
+# If not set, all requests are allowed (development mode).
+# If set, all requests to protected endpoints must include Authorization: Bearer <key> header.
+# Generated per deployment and stored securely in environment variables.
+KOKORO_API_KEY: str = os.getenv("KOKORO_API_KEY", "")
+
+# ── Forced alignment ─────────────────────────────────────────────────────────
+
+# HuggingFace model id for ctc-forced-aligner. Default: multilingual MMS-300M.
+ALIGN_MODEL: str = os.getenv("ALIGN_MODEL", "MahmoudAshraf/mms-300m-1130-forced-aligner")
+
+# Sample rate the alignment model expects (MMS = 16 kHz). Input audio is
+# resampled to this rate before alignment.
+ALIGN_SAMPLE_RATE: int = 16000
+
+# "cpu", "cuda", or "auto" (cuda if available, else cpu).
+ALIGN_DEVICE: str = os.getenv("ALIGN_DEVICE", "auto")
+
+# Batch size used by the aligner's emission generator.
+ALIGN_BATCH_SIZE: int = int(os.getenv("ALIGN_BATCH_SIZE", "4"))
+
+# How long a single /align call may run before it is aborted.
+ALIGN_TIMEOUT_SEC: float = float(os.getenv("ALIGN_TIMEOUT_SEC", "60"))

@@ -16,31 +16,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ConflictException } from '@nestjs/common';
 import { DeletionRequestsAdminService } from './deletion-requests-admin.service';
 import { DatabaseService } from '../database/database.service';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
 // Mock factory
 // ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    offset: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    returning: jest.fn().mockResolvedValue([]),
-    execute: jest.fn(),
-  };
-
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
 
 const NOW = new Date('2026-04-21T12:00:00Z');
 const REQUESTED_AT = new Date('2026-04-20T10:00:00Z');

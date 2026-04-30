@@ -23,14 +23,11 @@ final appVersionServiceProvider = Provider<AppVersionService>.internal(
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
 typedef AppVersionServiceRef = ProviderRef<AppVersionService>;
-String _$appVersionCheckHash() => r'3a09c9c6cf43c957cde0a899d2d9062bc68c1c76';
+String _$appVersionCheckHash() => r'1f8bb9a1c6f7affe2c0726cfd1ea553bac680076';
 
-/// One-shot check run at startup; the root widget watches this to decide
-/// whether to render the force-update screen.
-///
-/// Copied from [appVersionCheck].
+/// See also [appVersionCheck].
 @ProviderFor(appVersionCheck)
-final appVersionCheckProvider = FutureProvider<AppVersionCheck>.internal(
+final appVersionCheckProvider = StreamProvider<AppVersionCheck>.internal(
   appVersionCheck,
   name: r'appVersionCheckProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
@@ -42,6 +39,6 @@ final appVersionCheckProvider = FutureProvider<AppVersionCheck>.internal(
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef AppVersionCheckRef = FutureProviderRef<AppVersionCheck>;
+typedef AppVersionCheckRef = StreamProviderRef<AppVersionCheck>;
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member, deprecated_member_use_from_same_package

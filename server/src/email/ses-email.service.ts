@@ -9,10 +9,11 @@
  *   AWS_REGION       — AWS region for SES endpoint (default: ap-south-1)
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import type { SendOtpEmailTask } from '../lambda';
+import type { SendOtpEmailTask } from '../common/email-task.types';
+import type { AppConfig } from '../config/app-config.interface';
 
 const DEFAULT_FROM_EMAIL = '"Instructor App" <instructor.app@layersiq.com>';
 
@@ -22,12 +23,14 @@ export class SESEmailService {
   private readonly ses: SESClient;
   private readonly lambda: LambdaClient;
   private readonly fromEmail: string;
+  private readonly lambdaFunctionName: string | null;
 
-  constructor() {
-    const region = process.env.AWS_REGION ?? 'ap-south-1';
+  constructor(@Optional() @Inject('APP_CONFIG') config?: AppConfig) {
+    const region = config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1';
     this.ses = new SESClient({ region });
     this.lambda = new LambdaClient({ region });
-    this.fromEmail = process.env.SES_FROM_EMAIL ?? DEFAULT_FROM_EMAIL;
+    this.fromEmail = config?.sesFromEmail || process.env.SES_FROM_EMAIL || DEFAULT_FROM_EMAIL;
+    this.lambdaFunctionName = (config?.lambdaFunctionName || process.env.AWS_LAMBDA_FUNCTION_NAME) ?? null;
 
     this.logger.log(`SESEmailService initialised — from=${this.fromEmail}, region=${region}`);
   }
@@ -40,7 +43,7 @@ export class SESEmailService {
    * Falls back to direct SES send if not running in Lambda (local dev).
    */
   async dispatchOtpEmail(recipientEmail: string, code: string): Promise<void> {
-    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const functionName = this.lambdaFunctionName;
 
     if (!functionName) {
       // Local dev: send directly (no async Lambda available).

@@ -34,7 +34,8 @@ export class TtsEnumerationService {
    * @param voiceId    Default voice to use for synthesis
    * @param locale     Locale code (e.g. 'enUS')
    * @param provider   TTS provider (e.g. 'kokoro', 'gemini')
-   * @param speechRate Speech rate as a string (e.g. '1.0')
+   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.00').
+   *                   Conversion from NUMERIC happens at the repository boundary.
    * @returns Deduplicated array of TtsPairs
    */
   enumerate(
@@ -116,10 +117,13 @@ export class TtsEnumerationService {
     provider: string,
     speechRate: string,
   ): void {
-    const cacheKey = this.ttsService.cacheKey(text, voiceId, locale, provider, speechRate);
+    // Resolve raw → effective voice before hashing so foreign-voice requests
+    // (e.g. a Kokoro voice routed to Gemini) collapse onto a canonical cache key.
+    const effectiveVoice = this.ttsService.resolveEffectiveVoice(voiceId, provider);
+    const cacheKey = this.ttsService.cacheKey(text, effectiveVoice, locale, provider, speechRate);
     if (!seen.has(cacheKey)) {
       seen.add(cacheKey);
-      pairs.push({ text, voiceId, locale, provider, speechRate, cacheKey });
+      pairs.push({ text, voiceId: effectiveVoice, locale, provider, speechRate, cacheKey });
     }
   }
 }

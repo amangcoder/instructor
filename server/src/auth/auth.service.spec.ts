@@ -24,29 +24,11 @@ import { AuthService } from './auth.service';
 import { DatabaseService } from '../database/database.service';
 import { SESEmailService } from '../email/ses-email.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
 // Mock factories
 // ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  return {
-    getUserById: jest.fn().mockResolvedValue(null),
-    getUserByEmail: jest.fn().mockResolvedValue(USER),
-    createUser: jest.fn().mockResolvedValue(undefined),
-    createOtp: jest.fn().mockResolvedValue(undefined),
-    getActiveOtps: jest.fn().mockResolvedValue([]),
-    markOtpUsed: jest.fn().mockResolvedValue(undefined),
-    incrementOtpAttempts: jest.fn().mockResolvedValue(undefined),
-    invalidateOtpsForEmail: jest.fn().mockResolvedValue(undefined),
-    createRefreshToken: jest.fn().mockResolvedValue(undefined),
-    getRefreshToken: jest.fn().mockResolvedValue(null),
-    revokeRefreshToken: jest.fn().mockResolvedValue(undefined),
-    revokeAllRefreshTokens: jest.fn().mockResolvedValue(undefined),
-    getSyncMetadata: jest.fn().mockResolvedValue(null),
-    upsertSyncMetadata: jest.fn().mockResolvedValue(undefined),
-  };
-}
 
 function createMockSESEmailService() {
   return {
@@ -89,7 +71,7 @@ const VALID_REFRESH_TOKEN_RECORD = {
   tokenHash: 'sha256ofvalidrefreshtoken',
   revoked: false,
   expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-  sk: 'TOKEN',
+  id: 'TOKEN',
 };
 
 /**
@@ -109,7 +91,7 @@ function makeOtpRecord(overrides: {
     attempts: overrides.attempts ?? 0,
     used: overrides.used ?? false,
     expiresAt: overrides.expiresAt ?? new Date(Date.now() + 5 * 60 * 1000),
-    sk: `2026-04-09T00:00:00.000Z#otp-test-id`,
+    id: `2026-04-09T00:00:00.000Z#otp-test-id`,
   };
 }
 
@@ -128,6 +110,8 @@ describe('AuthService', () => {
     process.env.OTP_SALT = 'test-otp-salt-32-chars-placeholder';
 
     mockDynamo = createMockDatabaseService();
+    // Override default null to return USER for this service's expectations
+    (mockDynamo.getUserByEmail as jest.Mock).mockResolvedValue(USER);
     mockSes = createMockSESEmailService();
     mockRateLimiter = createMockRateLimiter();
     mockJwt = createMockJwtService();

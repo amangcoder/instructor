@@ -60,6 +60,15 @@ image = (
         "fastapi>=0.115.0",     # brings pydantic v2 transitively
         "uvicorn>=0.30.0",      # no [standard] extras needed
     )
+    # Forced alignment (CPU torch — much smaller than the CUDA build).
+    .pip_install(
+        "torch>=2.2",
+        "torchaudio>=2.2",
+        extra_options="--index-url https://download.pytorch.org/whl/cpu",
+    )
+    .pip_install(
+        "ctc-forced-aligner @ git+https://github.com/MahmoudAshraf97/ctc-forced-aligner.git",
+    )
     .add_local_dir(
         str(_SOURCE_DIR),
         remote_path="/kokoro_server",

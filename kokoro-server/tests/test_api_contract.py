@@ -226,3 +226,124 @@ def test_synthesis_timeout_is_30_seconds():
     """AC: synthesis times out after 30 seconds."""
     import config
     assert config.SYNTHESIS_TIMEOUT_SEC == 30.0
+
+
+# ---------------------------------------------------------------------------
+# Contract: Bearer token authentication (TASK-016)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_returns_401_without_auth_when_key_configured():
+    """POST /synthesize without Authorization header returns 401 when KOKORO_API_KEY is set."""
+    import importlib
+    import config as cfg
+
+    original = cfg.KOKORO_API_KEY
+    cfg.KOKORO_API_KEY = "test-secret"
+
+    import main as main_module
+    importlib.reload(main_module)
+
+    engine = MagicMock()
+    engine.is_ready = True
+    engine.load_error = None
+    engine.synthesize = AsyncMock(return_value=b"\x00" * 44)
+    main_module.engine = engine
+
+    transport = ASGITransport(app=main_module.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        res = await ac.post(
+            "/synthesize",
+            json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+        )
+
+    cfg.KOKORO_API_KEY = original
+    assert res.status_code == 401
+    assert "Authorization header required" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_returns_200_with_valid_bearer_token():
+    """POST /synthesize with correct Bearer token returns 200."""
+    import importlib
+    import config as cfg
+
+    original = cfg.KOKORO_API_KEY
+    cfg.KOKORO_API_KEY = "test-secret"
+
+    import main as main_module
+    importlib.reload(main_module)
+
+    engine = MagicMock()
+    engine.is_ready = True
+    engine.load_error = None
+    engine.synthesize = AsyncMock(return_value=b"\x52\x49\x46\x46" + b"\x00" * 100)
+    main_module.engine = engine
+
+    transport = ASGITransport(app=main_module.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        res = await ac.post(
+            "/synthesize",
+            json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+            headers={"Authorization": "Bearer test-secret"},
+        )
+
+    cfg.KOKORO_API_KEY = original
+    assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_synthesize_returns_401_with_invalid_token():
+    """POST /synthesize with wrong Bearer token returns 401."""
+    import importlib
+    import config as cfg
+
+    original = cfg.KOKORO_API_KEY
+    cfg.KOKORO_API_KEY = "test-secret"
+
+    import main as main_module
+    importlib.reload(main_module)
+
+    engine = MagicMock()
+    engine.is_ready = True
+    engine.load_error = None
+    main_module.engine = engine
+
+    transport = ASGITransport(app=main_module.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        res = await ac.post(
+            "/synthesize",
+            json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+
+    cfg.KOKORO_API_KEY = original
+    assert res.status_code == 401
+    assert "Invalid authorization token" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_health_works_without_auth_when_key_configured():
+    """GET /health returns 200 without any auth header (liveness probe)."""
+    import importlib
+    import config as cfg
+
+    original = cfg.KOKORO_API_KEY
+    cfg.KOKORO_API_KEY = "test-secret"
+
+    import main as main_module
+    importlib.reload(main_module)
+
+    engine = MagicMock()
+    engine.is_ready = True
+    engine.load_error = None
+    engine.available_voices.return_value = ["af_aoede"]
+    main_module.engine = engine
+
+    transport = ASGITransport(app=main_module.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        res = await ac.get("/health")
+
+    cfg.KOKORO_API_KEY = original
+    assert res.status_code == 200

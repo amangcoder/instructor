@@ -12,11 +12,10 @@
  *   Content-Disposition: attachment; filename=<type>_export_YYYY-MM-DD.csv
  */
 
-import { Injectable, Logger } from '@nestjs/common';
-import { sql, ilike, eq, and, desc } from 'drizzle-orm';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import type { Response } from 'express';
 import { DatabaseService } from '../database/database.service';
-import { users, plans, sessionCompletions, deletionRequests } from '../database/schema';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 
 const BATCH_SIZE = 1000;
 const MAX_ROWS = 10000;
@@ -24,8 +23,10 @@ const MAX_ROWS = 10000;
 @Injectable()
 export class CsvExportService {
   private readonly logger = new Logger(CsvExportService.name);
-
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   /**
    * Stream a CSV export of users.
@@ -56,43 +57,12 @@ export class CsvExportService {
       const batchSize = Math.min(BATCH_SIZE, MAX_ROWS - totalWritten);
 
       const rows = await this.db.withRetry(async () => {
-        const drizzle = this.db.getDb();
-
-        // Build conditions
-        const conditions: Array<ReturnType<typeof eq>> = [];
-        if (params.search) {
-          conditions.push(
-            ilike(users.email, `%${params.search}%`) as unknown as ReturnType<typeof eq>,
-          );
-        }
-        if (params.role) {
-          conditions.push(eq(users.role, params.role));
-        }
-
-        const whereClause = conditions.length > 0
-          ? and(...conditions)
-          : undefined;
-
-        return drizzle
-          .select({
-            id: users.id,
-            email: users.email,
-            role: users.role,
-            createdAt: users.createdAt,
-            planCount: sql<number>`(
-              SELECT COUNT(*)::int FROM ${plans} WHERE ${plans.userId} = ${users.id}
-            )`,
-            lastActiveAt: sql<Date | null>`(
-              SELECT MAX(${sessionCompletions.completedAt})
-              FROM ${sessionCompletions}
-              WHERE ${sessionCompletions.userId} = ${users.id}
-            )`,
-          })
-          .from(users)
-          .where(whereClause)
-          .orderBy(desc(users.createdAt))
-          .limit(batchSize)
-          .offset(offset);
+        return this.repo.getUsersCsvBatch({
+            search: params.search,
+            role: params.role,
+            limit: batchSize,
+            offset,
+          });
       });
 
       if (rows.length === 0) break;
@@ -151,29 +121,12 @@ export class CsvExportService {
       const batchSize = Math.min(BATCH_SIZE, MAX_ROWS - totalWritten);
 
       const rows = await this.db.withRetry(async () => {
-        const drizzle = this.db.getDb();
-
-        const conditions: Array<ReturnType<typeof eq>> = [];
-        if (params.search) {
-          conditions.push(
-            ilike(deletionRequests.email, `%${params.search}%`) as unknown as ReturnType<typeof eq>,
-          );
-        }
-        if (params.status) {
-          conditions.push(eq(deletionRequests.status, params.status));
-        }
-
-        const whereClause = conditions.length > 0
-          ? and(...conditions)
-          : undefined;
-
-        return drizzle
-          .select()
-          .from(deletionRequests)
-          .where(whereClause)
-          .orderBy(desc(deletionRequests.createdAt))
-          .limit(batchSize)
-          .offset(offset);
+        return this.repo.getDeletionRequestsCsvBatch({
+            search: params.search,
+            status: params.status,
+            limit: batchSize,
+            offset,
+          });
       });
 
       if (rows.length === 0) break;

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
 
 /// Converts a [List<PlanStep>] to/from a JSON string for storage in a Drift
@@ -39,4 +40,69 @@ class StringListConverter extends TypeConverter<List<String>, String> {
 
   @override
   String toSql(List<String> value) => jsonEncode(value);
+}
+
+/// Validates that a TTS status string column contains only known values.
+///
+/// Known values: 'none', 'pending', 'processing', 'completed', 'failed'.
+///
+/// Throws [StateError] for any unrecognised value, preventing silent data
+/// corruption caused by out-of-range strings entering the Dart layer.
+class TtsStatusConverter extends TypeConverter<String, String> {
+  const TtsStatusConverter();
+
+  static const _validValues = {
+    'none',
+    'pending',
+    'processing',
+    'completed',
+    'failed',
+  };
+
+  @override
+  String fromSql(String fromDb) {
+    if (!_validValues.contains(fromDb)) {
+      throw StateError(
+        'Unknown TTS status value: "$fromDb". '
+        'Expected one of: ${_validValues.join(', ')}',
+      );
+    }
+    return fromDb;
+  }
+
+  @override
+  String toSql(String value) {
+    if (!_validValues.contains(value)) {
+      throw StateError(
+        'Unknown TTS status value: "$value". '
+        'Expected one of: ${_validValues.join(', ')}',
+      );
+    }
+    return value;
+  }
+}
+
+/// Converts a [PlanCategory] enum to/from its string name in the database.
+///
+/// Throws [StateError] for any unrecognised string value, so that invalid
+/// data in the database surfaces as an explicit error rather than silently
+/// degrading to [PlanCategory.custom].
+class PlanCategoryConverter extends TypeConverter<PlanCategory, String> {
+  const PlanCategoryConverter();
+
+  @override
+  PlanCategory fromSql(String fromDb) {
+    final value =
+        PlanCategory.values.where((e) => e.name == fromDb).firstOrNull;
+    if (value == null) {
+      throw StateError(
+        'Unknown PlanCategory value: "$fromDb". '
+        'Expected one of: ${PlanCategory.values.map((e) => e.name).join(', ')}',
+      );
+    }
+    return value;
+  }
+
+  @override
+  String toSql(PlanCategory value) => value.name;
 }

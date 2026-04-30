@@ -21,9 +21,10 @@
  *   6. StreakService calculates streaks from combined local + server completions
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../database/database.service';
+import { SyncRepository } from '../database/repositories/sync.repository';
 import {
   GetCompletionsResponseDto,
   CompletionResponseDto,
@@ -56,8 +57,14 @@ export interface UploadCompletionsResult {
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
+  private readonly repo: SyncRepository | DatabaseService;
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Optional() @Inject(SyncRepository) syncRepo?: SyncRepository,
+  ) {
+    this.repo = syncRepo ?? db;
+  }
 
   /**
    * Upload (upsert) session completions from client.
@@ -83,7 +90,7 @@ export class SyncService {
     }));
 
     // Upsert into PostgreSQL (ON CONFLICT DO NOTHING handles duplicates)
-    const syncedCount = await this.db.upsertSessionCompletions(userId, dbCompletions);
+    const syncedCount = await this.repo.upsertSessionCompletions(userId, dbCompletions);
 
     this.logger.debug(`Session completions uploaded: userId=${userId}, count=${syncedCount}`);
 
@@ -100,7 +107,7 @@ export class SyncService {
     userId: string,
     options: GetCompletionsOptions = {},
   ): Promise<GetCompletionsResponseDto> {
-    const completions = await this.db.getSessionCompletions(userId, options.since);
+    const completions = await this.repo.getSessionCompletions(userId, options.since);
 
     // Map to response DTO (exclude internal fields like userId, clientId)
     const response: CompletionResponseDto[] = completions.map((c) => ({
@@ -145,7 +152,7 @@ export class SyncService {
       updatedAt: new Date(t.updatedAt),
     }));
 
-    const merged = await this.db.upsertPlanTriggers(userId, dbRows);
+    const merged = await this.repo.upsertPlanTriggers(userId, dbRows);
 
     this.logger.debug(
       `Plan triggers uploaded: userId=${userId}, count=${merged.length}`,
@@ -164,7 +171,7 @@ export class SyncService {
     userId: string,
     options: GetCompletionsOptions = {},
   ): Promise<GetTriggersResponseDto> {
-    const rows = await this.db.getPlanTriggers(userId, options.since);
+    const rows = await this.repo.getPlanTriggers(userId, options.since);
 
     this.logger.debug(
       `Plan triggers retrieved: userId=${userId}, count=${rows.length}, since=${options.since?.toISOString() || 'all'}`,

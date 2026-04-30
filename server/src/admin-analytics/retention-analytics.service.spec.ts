@@ -13,27 +13,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { GatewayTimeoutException } from '@nestjs/common';
 import { RetentionAnalyticsService } from './retention-analytics.service';
 import { DatabaseService } from '../database/database.service';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
 // Mock DatabaseService
 // ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    execute: jest.fn(),
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    groupBy: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-  };
-
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
 
 describe('RetentionAnalyticsService', () => {
   let service: RetentionAnalyticsService;

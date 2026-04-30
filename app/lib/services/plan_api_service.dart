@@ -15,6 +15,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 
+import 'package:instructor/exceptions/app_exception.dart';
 import 'package:instructor/models/audio_file_url.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/library_plan_summary.dart';
@@ -29,13 +30,15 @@ import 'package:instructor/services/api_client.dart';
 
 /// Thrown when any [PlanApiService] call encounters an error.
 ///
+/// Extends [PlanAppException] so callers catching [AppException] also catch
+/// plan API errors via the unified exception hierarchy.
+///
 /// [message] is the raw technical error; [userMessage] is safe to display
 /// in the UI without leaking internal details.
-final class PlanApiException implements Exception {
-  const PlanApiException(this.message, {String? userMessage})
-      : userMessage = userMessage ?? message;
-
-  final String message;
+final class PlanApiException extends PlanAppException {
+  const PlanApiException(String message, {String? userMessage})
+      : userMessage = userMessage ?? message,
+        super(message);
 
   /// User-friendly message suitable for display in the UI.
   final String userMessage;
@@ -130,19 +133,6 @@ abstract class PlanApiService {
   /// Returns all TTS provider configs. The active provider has [isActive] ==
   /// true and [defaultVoice] set to the recommended voice for new plans.
   Future<TtsProvidersResponse> fetchProviderCatalog();
-
-  /// POST /api/tts/batch-pregen
-  ///
-  /// Starts batch TTS pre-generation for [planId]. Groups all SayStep texts
-  /// sharing the same voice + locale into a single API call, reducing N calls
-  /// to 1 per voice/locale group. [planJson] is the serialised [Plan] JSON string.
-  Future<void> startBatchPregen(
-    String planId, {
-    required String planJson,
-    required String voiceId,
-    required String locale,
-    String speechRate = '1.0',
-  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -430,38 +420,6 @@ class PlanApiServiceImpl implements PlanApiService {
       throw PlanApiException(
         e.toString(),
         userMessage: 'Failed to fetch TTS provider config.',
-      );
-    }
-  }
-
-  @override
-  Future<void> startBatchPregen(
-    String planId, {
-    required String planJson,
-    required String voiceId,
-    required String locale,
-    String speechRate = '1.0',
-  }) async {
-    final uri = Uri.parse('${_client.backendBaseUrl}/api/tts/batch-pregen');
-    try {
-      await _client.postJson(uri, {
-        'planId': planId,
-        'planJson': planJson,
-        'voiceId': voiceId,
-        'locale': locale,
-        'speechRate': speechRate,
-      });
-    } on ApiException catch (e) {
-      throw PlanApiException(
-        'startBatchPregen($planId) failed: ${e.message}',
-        userMessage: _friendlyError(e),
-      );
-    } catch (e) {
-      if (e is PlanApiException) rethrow;
-      debugPrint('PlanApiService.startBatchPregen: unexpected error: $e');
-      throw PlanApiException(
-        e.toString(),
-        userMessage: 'Failed to start voice generation. Please try again.',
       );
     }
   }

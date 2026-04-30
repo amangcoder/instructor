@@ -1,0 +1,616 @@
+{
+  "tasks": [
+    {
+      "task_id": "TASK-001",
+      "title": "Fix NestJS circular dependency between library, plans, tts, auth, and database modules",
+      "description": "The NestJS backend has a critical circular dependency: library → plans → tts → auth → common → email → database → server. This blocks code quality improvements and violates architecture best practices. Refactor the circular path by: 1) Extracting shared utilities and interfaces into a 'server/src/shared' module that has no internal dependencies, 2) Moving common error handling, logging, and validation utilities to shared, 3) Reorganizing module imports to break the cycle (library should not import from plans; instead extract a 'LibraryPlanService' to break the dependency), 4) Adding explicit module boundaries with barrel exports to prevent transitive dependencies. Document the new dependency graph and add linting rules to prevent new cycles. This is a critical blocker for other backend improvements.",
+      "assigned_role": "backend_engineer",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "No circular dependencies detected by 'npm run build' or dependency analysis tools",
+        "All modules (library, plans, tts, auth, database) can be imported independently",
+        "Shared utilities are centralized in server/src/shared with clear ownership",
+        "Documentation updated with new module architecture and dependency rules",
+        "Tests pass with new import structure"
+      ],
+      "files_to_modify": [
+        "server/src/library",
+        "server/src/plans",
+        "server/src/tts",
+        "server/src/auth",
+        "server/src/common",
+        "server/src/email",
+        "server/src/database",
+        "server/src",
+        "server/src/shared"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-002",
+      "title": "Standardize NestJS error handling and exception hierarchy across all modules",
+      "description": "Create a comprehensive error handling and exception strategy for the NestJS backend. Current state: inconsistent exception handling across modules (auth, plans, tts, database). Implement: 1) A hierarchy of custom exceptions extending NestJS exceptions (AppException base, then specific types like ValidationException, DatabaseException, AuthException, TtsException, etc.), 2) Global exception filter that catches all exceptions and returns consistent error response format with error codes and user messages, 3) Standardized error codes enum (ERR-001, ERR-002, etc.) shared across backend and frontend, 4) Typed error responses with statusCode, errorCode, message, and details fields, 5) Error logging middleware to log all exceptions to observability system. Apply this pattern to all existing modules.",
+      "assigned_role": "backend_engineer",
+      "dependencies": ["TASK-001"],
+      "acceptance_criteria": [
+        "Custom exception hierarchy exists in server/src/shared/exceptions",
+        "Global exception filter handles all exception types and returns consistent format",
+        "Error codes are documented and shared between backend and frontend",
+        "All modules use custom exceptions instead of generic errors",
+        "Exception handling tests exist for all exception types",
+        "Error responses include proper status codes and user-friendly messages"
+      ],
+      "files_to_modify": [
+        "server/src/shared/exceptions",
+        "server/src/common/exception-filter",
+        "server/src/auth",
+        "server/src/plans",
+        "server/src/tts",
+        "server/src/database",
+        "server/src/library",
+        "server/src/email"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-003",
+      "title": "Standardize NestJS validation and DTO patterns across all modules",
+      "description": "Ensure consistent validation patterns using class-validator and NestJS pipes across the entire backend. Current state: DTOs exist but validation patterns may be inconsistent. Implement: 1) Base DTO class with common validation decorators, 2) Standardized field validation using @IsString, @IsNumber, @IsEmail, @IsEnum, @IsArray decorators with proper error messages, 3) Custom validators for domain-specific rules (e.g., @IsPlanName, @IsTtsVoice), 4) Global ValidationPipe configured to transform and validate all request DTOs, 5) Consistent error response format for validation failures including field names and error messages. Apply to all existing DTOs in auth, plans, tts, library modules.",
+      "assigned_role": "backend_engineer",
+      "dependencies": ["TASK-002"],
+      "acceptance_criteria": [
+        "Base DTO class exists with standard validation patterns",
+        "Custom validators created for domain-specific rules",
+        "All endpoint DTOs inherit from base and have proper validation",
+        "ValidationPipe is configured globally and catches validation errors",
+        "Validation error responses include field-level details",
+        "At least 90% of DTOs have validation tests"
+      ],
+      "files_to_modify": [
+        "server/src/shared/dto",
+        "server/src/shared/validators",
+        "server/src/auth/dto",
+        "server/src/plans/dto",
+        "server/src/tts/dto",
+        "server/src/library/dto",
+        "server/src/common"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-004",
+      "title": "Implement comprehensive NestJS logging strategy with structured logging",
+      "description": "Create a standardized logging infrastructure for the NestJS backend. Current state: logging may be inconsistent across modules. Implement: 1) Custom logger service wrapping NestJS logger with structured logging (JSON format), 2) Logging decorators (@Log, @LogError) for controllers and services, 3) Request/response logging middleware tracking request ID, endpoint, duration, status, 4) Error logging with stack traces and context, 5) Log levels configuration (debug, info, warn, error) per module, 6) Integration with observability platform (e.g., Winston, Pino, or ELK stack preparation), 7) Log aggregation utilities for multi-line context (user info, request context, database queries). Apply to all modules.",
+      "assigned_role": "backend_engineer",
+      "dependencies": ["TASK-002"],
+      "acceptance_criteria": [
+        "Custom logger service created with structured JSON logging",
+        "Logging middleware added to all endpoints",
+        "All errors logged with proper context and stack traces",
+        "Request ID correlation across logs",
+        "Log format is consistent and parseable",
+        "Performance impact is minimal (logging doesn't block requests)",
+        "Documentation includes logging guidelines for new modules"
+      ],
+      "files_to_modify": [
+        "server/src/shared/logger",
+        "server/src/common/middleware",
+        "server/src/main.ts",
+        "server/src/auth",
+        "server/src/plans",
+        "server/src/tts",
+        "server/src/database",
+        "server/src/library"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-005",
+      "title": "Complete repository pattern migration in NestJS backend",
+      "description": "The backend has partial repository pattern migration. Complete it across all data access code. Current state: database module has repositories (AuthRepository, PlanRepository, TtsRepository, etc.) but patterns may be inconsistent. Goals: 1) Ensure all repositories have consistent interface definitions, 2) Add generic base repository class with common CRUD operations (create, read, update, delete, list with pagination), 3) Ensure services depend on repositories via dependency injection, 4) Add repository tests with mocked database, 5) Document repository naming conventions and organization. This improves testability and reusability.",
+      "assigned_role": "backend_engineer",
+      "dependencies": ["TASK-002", "TASK-003"],
+      "acceptance_criteria": [
+        "Base repository interface exists with standard CRUD operations",
+        "All data access through repositories, not direct database calls in services",
+        "Repositories are injected via NestJS dependency injection",
+        "Repository tests exist for all public methods",
+        "Pagination, filtering, sorting patterns are consistent",
+        "Database service is no longer directly called from business logic"
+      ],
+      "files_to_modify": [
+        "server/src/database/repositories",
+        "server/src/database/base.repository.ts",
+        "server/src/auth",
+        "server/src/plans",
+        "server/src/tts",
+        "server/src/library",
+        "server/src/email"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-006",
+      "title": "Add comprehensive API documentation and OpenAPI/Swagger specification to NestJS backend",
+      "description": "Document all NestJS API endpoints with OpenAPI 3.0 specification using NestJS Swagger integration. This improves frontend developer experience and API contract clarity. Implement: 1) Install and configure @nestjs/swagger, 2) Add @ApiController, @ApiOperation, @ApiResponse, @ApiParam decorators to all controllers, 3) Document all DTOs with @ApiProperty decorators, 4) Generate Swagger UI at /api/docs endpoint, 5) Export OpenAPI JSON for external tools, 6) Document all error responses with proper status codes and examples, 7) Add authentication requirements documentation, 8) Add rate limiting documentation. Generate Swagger spec and use it as source of truth for frontend API client generation.",
+      "assigned_role": "backend_engineer",
+      "dependencies": ["TASK-002", "TASK-003"],
+      "acceptance_criteria": [
+        "@nestjs/swagger is installed and configured",
+        "All controllers have @ApiController and @ApiOperation decorators",
+        "All DTOs documented with @ApiProperty",
+        "Swagger UI accessible at /api/docs",
+        "OpenAPI JSON exported to /api-docs.json",
+        "All error responses documented with examples",
+        "Frontend can auto-generate API client from Swagger spec"
+      ],
+      "files_to_modify": [
+        "server/src/main.ts",
+        "server/src/auth",
+        "server/src/plans",
+        "server/src/tts",
+        "server/src/library",
+        "server/src/email",
+        "server/package.json",
+        "server/README.md"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-007",
+      "title": "Improve NestJS test coverage and standardize testing patterns across modules",
+      "description": "Ensure comprehensive test coverage across the NestJS backend with standardized patterns. Current state: some tests exist but coverage may be inconsistent. Goals: 1) Target 80%+ code coverage for critical paths (auth, plans, database), 2) Create testing utilities and mocks for common dependencies (DatabaseService, AuthService, repositories), 3) Standardize test file naming (.spec.ts) and organization, 4) Add unit tests for all services and controllers, 5) Add integration tests for API endpoints, 6) Use Jest with proper configuration, 7) Add test performance benchmarks, 8) Add pre-commit hooks to run tests. This was referenced in TASK-001 architecture fix.",
+      "assigned_role": "automation_engineer",
+      "dependencies": ["TASK-001", "TASK-005"],
+      "acceptance_criteria": [
+        "Code coverage at least 80% for critical paths",
+        "All services have unit tests",
+        "All controllers have integration tests",
+        "Testing utilities and mocks are centralized in server/src/testing",
+        "Test files follow consistent naming and organization",
+        "Jest is configured with coverage thresholds",
+        "All tests pass before deployment"
+      ],
+      "files_to_modify": [
+        "server/src/testing",
+        "server/src/auth",
+        "server/src/plans",
+        "server/src/tts",
+        "server/src/database",
+        "server/jest.config.js",
+        "server/package.json"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-008",
+      "title": "Standardize database schema design and add comprehensive migrations",
+      "description": "Review and improve the PostgreSQL database schema design using Drizzle ORM. Current state: schema.ts exists with Drizzle definitions. Goals: 1) Ensure all tables have proper primary keys and constraints, 2) Add foreign key relationships with proper cascading, 3) Add CHECK constraints for valid data, 4) Add NOT NULL constraints where appropriate, 5) Add DEFAULT values for timestamps (created_at, updated_at), 6) Add indexes on frequently queried columns, 7) Create comprehensive migration guide documenting all schema changes, 8) Add soft-delete patterns where appropriate (e.g., for users, plans), 9) Add audit trail for sensitive operations. Use Drizzle migrations for version control.",
+      "assigned_role": "database_engineer",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "All tables have proper constraints and relationships defined",
+        "Foreign keys with cascading deletes/updates are documented",
+        "Indexes exist on all frequently queried columns",
+        "Migrations are versioned and documented",
+        "Schema validation passes linting",
+        "Database integrity is verified by tests",
+        "Migration documentation is complete"
+      ],
+      "files_to_modify": [
+        "server/src/database/schema.ts",
+        "server/drizzle",
+        "server/src/database/migration.spec.ts",
+        "server/README.md"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-009",
+      "title": "Optimize database queries and add query monitoring in NestJS",
+      "description": "Improve database query performance and monitoring. Goals: 1) Add query execution time logging in DatabaseService, 2) Identify and optimize slow queries (N+1 problems), 3) Add database connection pooling configuration, 4) Add query result caching where appropriate (Redis integration), 5) Create performance benchmarks for critical queries, 6) Add database query monitoring/APM integration, 7) Document query optimization guidelines for team. Use Drizzle ORM query builder to ensure efficient queries.",
+      "assigned_role": "caching_performance_engineer",
+      "dependencies": ["TASK-008"],
+      "acceptance_criteria": [
+        "Query execution time is logged for all database operations",
+        "N+1 queries are identified and fixed in critical paths",
+        "Database connection pool is properly configured",
+        "Query result caching is implemented for read-heavy operations",
+        "Performance benchmarks show query improvements",
+        "Database metrics are exported to observability platform"
+      ],
+      "files_to_modify": [
+        "server/src/database/database.service.ts",
+        "server/src/database/repositories",
+        "server/.env.example",
+        "server/README.md"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-010",
+      "title": "Standardize Flutter app state management using Riverpod",
+      "description": "Ensure consistent Riverpod state management patterns across the Flutter app. Current state: app/lib/providers has various providers but patterns may be inconsistent. Goals: 1) Create base provider patterns (SimpleProvider, AsyncProvider, NotifierProvider, AsyncNotifierProvider), 2) Standardize provider naming (suffix with Provider or Notifier), 3) Ensure all state is exposed through providers (no direct class instantiation), 4) Add provider invalidation patterns for cache management, 5) Add StateNotifier mixins for common patterns (error handling, loading states), 6) Document provider architecture and best practices. This improves testability and code reusability.",
+      "assigned_role": "frontend_engineer",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "All state is managed through Riverpod providers",
+        "Provider naming is consistent across app",
+        "Loading and error states are standardized",
+        "Provider dependency graph is clear and documented",
+        "Tests can mock providers using ProviderContainer",
+        "No direct service instantiation outside of providers"
+      ],
+      "files_to_modify": [
+        "app/lib/providers",
+        "app/lib/services",
+        "app/lib/repositories",
+        "app/lib/screens",
+        "app/lib/widgets"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-011",
+      "title": "Standardize Flutter error handling and exception hierarchy",
+      "description": "Create consistent error handling patterns across the Flutter app. Goals: 1) Define exception hierarchy (AppException base, then specific types like NetworkException, DatabaseException, AuthException, PlanException, TtsException, etc.), 2) Create error handling utilities and extensions on Future/Stream, 3) Standardize error recovery patterns (retry logic, fallback, user notification), 4) Ensure all async operations have proper error handling, 5) Add error boundary widgets to catch and display errors gracefully, 6) Implement error logging to backend, 7) Create error mapping from API error codes to user messages. Apply across all screens and services.",
+      "assigned_role": "frontend_engineer",
+      "dependencies": ["TASK-002"],
+      "acceptance_criteria": [
+        "Exception hierarchy exists in app/lib/exceptions",
+        "All async operations have error handling",
+        "Error messages are user-friendly and localized",
+        "Errors are logged to backend for monitoring",
+        "Retry logic is implemented for network errors",
+        "Error boundary widgets exist for critical UI areas",
+        "Tests verify error handling for all services"
+      ],
+      "files_to_modify": [
+        "app/lib/exceptions",
+        "app/lib/services",
+        "app/lib/providers",
+        "app/lib/screens",
+        "app/lib/widgets",
+        "app/lib/utils"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-012",
+      "title": "Implement comprehensive Flutter app logging and debugging infrastructure",
+      "description": "Add structured logging throughout the Flutter app for better debugging and monitoring. Goals: 1) Create custom logger service with structured logging (JSON), 2) Add logging levels (debug, info, warn, error), 3) Log all network requests/responses, 4) Log all state changes in providers, 5) Log user interactions (screen navigation, button clicks), 6) Send logs to backend for aggregation, 7) Add crash reporting (Sentry or similar), 8) Add performance profiling (frame rate, memory usage), 9) Create logging configuration for different build flavors (dev/prod). Ensure logging doesn't impact performance.",
+      "assigned_role": "observability_engineer",
+      "dependencies": ["TASK-011"],
+      "acceptance_criteria": [
+        "Custom logger service created with structured logging",
+        "All network requests are logged with timing",
+        "All errors are logged with stack traces",
+        "Logs are sent to backend for aggregation",
+        "Crash reporting is integrated",
+        "Performance metrics are collected and monitored",
+        "Logging has minimal performance impact"
+      ],
+      "files_to_modify": [
+        "app/lib/services/logger_service.dart",
+        "app/lib/services",
+        "app/lib/providers",
+        "app/pubspec.yaml",
+        "app/lib/main.dart"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-013",
+      "title": "Standardize Flutter widget and screen architecture patterns",
+      "description": "Ensure consistent widget organization and screen architecture across the Flutter app. Goals: 1) Standardize screen structure (AppBar, body, bottomNavigationBar, floating action buttons), 2) Create reusable widget components (buttons, forms, cards, dialogs), 3) Standardize state management in screens (Consumer widgets, hooks), 4) Implement common patterns (empty states, loading states, error states, list items), 5) Create screen/widget naming conventions, 6) Organize screens by feature (auth, plans, execution, library, settings), 7) Add widget tests for all custom widgets. This improves code reusability and consistency.",
+      "assigned_role": "frontend_engineer",
+      "dependencies": ["TASK-010"],
+      "acceptance_criteria": [
+        "Screen structure is consistent across app",
+        "Reusable widgets exist for common UI patterns",
+        "All screens use Consumer or hooks for state",
+        "Empty/loading/error states are handled consistently",
+        "Widget naming follows conventions",
+        "Screens are organized by feature",
+        "Widget tests exist for all custom widgets"
+      ],
+      "files_to_modify": [
+        "app/lib/screens",
+        "app/lib/widgets",
+        "app/lib/theme",
+        "app/test"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-014",
+      "title": "Improve Flutter app database layer (Drift) patterns and migrations",
+      "description": "Standardize and improve the Drift database layer in the Flutter app. Current state: app/lib/database has tables and type converters. Goals: 1) Review all table definitions for consistency, 2) Add database migrations for schema changes, 3) Add foreign key relationships, 4) Add indexes on frequently queried columns, 5) Standardize table naming (snake_case), 6) Standardize column naming and types, 7) Add soft-delete support, 8) Create database testing utilities, 9) Document database schema. Ensure schema aligns with backend schema where applicable.",
+      "assigned_role": "database_engineer",
+      "dependencies": ["TASK-008"],
+      "acceptance_criteria": [
+        "All Drift table definitions are consistent",
+        "Database migrations are versioned",
+        "Foreign key relationships are defined",
+        "Indexes exist on frequently queried columns",
+        "Soft-delete patterns are implemented",
+        "Database tests exist for all operations",
+        "Schema documentation is complete"
+      ],
+      "files_to_modify": [
+        "app/lib/database",
+        "app/lib/models",
+        "app/test"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-015",
+      "title": "Implement comprehensive Flutter app testing strategy and test utilities",
+      "description": "Increase test coverage and standardize testing patterns in the Flutter app. Goals: 1) Target 70%+ code coverage for critical paths, 2) Create testing utilities for mocking services, repositories, providers, 3) Add unit tests for all services and repositories, 4) Add widget tests for all screens and custom widgets, 5) Add integration tests for key user flows, 6) Use mockito/mocktail for mocking, 7) Create test fixtures and builders for test data, 8) Add performance testing, 9) Document testing guidelines. Run tests before each commit.",
+      "assigned_role": "automation_engineer",
+      "dependencies": ["TASK-010", "TASK-014"],
+      "acceptance_criteria": [
+        "Code coverage at least 70% for critical paths",
+        "All services have unit tests",
+        "All screens have widget tests",
+        "Integration tests cover key user flows",
+        "Testing utilities are centralized in app/test",
+        "Tests run automatically before commits",
+        "Test results are reported in CI/CD pipeline"
+      ],
+      "files_to_modify": [
+        "app/test",
+        "app/lib/services",
+        "app/lib/repositories",
+        "app/lib/screens",
+        "app/pubspec.yaml",
+        "app/analysis_options.yaml"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-016",
+      "title": "Standardize Next.js web frontend component architecture and patterns",
+      "description": "Ensure consistent React component patterns and organization in the Next.js web app. Current state: web/app has various page and component files. Goals: 1) Standardize functional component patterns, 2) Create reusable component library (buttons, forms, cards, modals, tables), 3) Standardize component prop definitions and TypeScript types, 4) Implement compound component patterns where appropriate, 5) Standardize error boundaries and error handling, 6) Standardize form handling and validation, 7) Organize components by feature, 8) Add component documentation and Storybook. This improves code reusability and consistency.",
+      "assigned_role": "frontend_engineer",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "All components follow functional component pattern",
+        "Reusable components exist for common UI patterns",
+        "Component props are properly typed",
+        "Error boundaries handle component errors gracefully",
+        "Form handling is consistent across app",
+        "Components are organized by feature",
+        "Storybook or similar documentation exists"
+      ],
+      "files_to_modify": [
+        "web/app",
+        "web/src/components",
+        "web/src/lib",
+        "web/src/types"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-017",
+      "title": "Improve Next.js web frontend state management and API client patterns",
+      "description": "Standardize state management and API client patterns in the Next.js web app. Goals: 1) Review current state management approach (context, hooks, external library?), 2) Create custom hooks for common state patterns (useAsync, useFetch, usePagination, useForm), 3) Create centralized API client with proper error handling and type safety, 4) Auto-generate API client types from NestJS Swagger spec (using openapi-generator or similar), 5) Standardize data fetching with proper loading/error/success states, 6) Implement caching for frequently accessed data, 7) Add request deduplication. This improves maintainability and reduces boilerplate.",
+      "assigned_role": "frontend_engineer",
+      "dependencies": ["TASK-006"],
+      "acceptance_criteria": [
+        "Custom hooks exist for common async patterns",
+        "API client is centralized with proper error handling",
+        "API types are auto-generated from Swagger spec",
+        "Data fetching patterns are consistent",
+        "Request caching is implemented",
+        "API client has comprehensive tests",
+        "Documentation includes API client usage examples"
+      ],
+      "files_to_modify": [
+        "web/src/lib",
+        "web/src/hooks",
+        "web/src/api",
+        "web/package.json",
+        "web/next.config.ts"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-018",
+      "title": "Add comprehensive Next.js web frontend testing and improve test coverage",
+      "description": "Increase test coverage in the Next.js web app with standardized patterns. Goals: 1) Target 70%+ code coverage for critical paths (auth, admin pages, data tables), 2) Create testing utilities and fixtures for mocking API responses, 3) Add unit tests for hooks and utilities, 4) Add integration tests for pages and key user flows, 5) Use React Testing Library for component tests, 6) Create snapshot tests for stable UI components, 7) Add E2E tests for critical user journeys (using Cypress or Playwright), 8) Document testing guidelines. This improves code reliability.",
+      "assigned_role": "automation_engineer",
+      "dependencies": ["TASK-016", "TASK-017"],
+      "acceptance_criteria": [
+        "Code coverage at least 70% for critical paths",
+        "All hooks have unit tests",
+        "All pages have integration tests",
+        "E2E tests cover critical user flows",
+        "Testing utilities are centralized in web/test",
+        "Tests run automatically in CI/CD",
+        "Test results are reported before deployment"
+      ],
+      "files_to_modify": [
+        "web/src/__tests__",
+        "web/jest.config.js",
+        "web/jest.setup.js",
+        "web/package.json",
+        "web/README.md"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-019",
+      "title": "Standardize configuration management across all backend, mobile, and web services",
+      "description": "Create consistent configuration management patterns across the entire project (NestJS, Flutter, Next.js, Kokoro). Goals: 1) Use environment variables for all configuration (with validation), 2) Create configuration modules/classes that validate and provide typed config, 3) Ensure sensitive values are never logged, 4) Support different configurations for dev/staging/production, 5) Document all configuration variables with descriptions, 6) Create configuration examples (.env.example files), 7) Ensure configuration is injected via dependency injection or providers. This improves security and deployment consistency.",
+      "assigned_role": "devops_engineer",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "All configuration is environment-based",
+        "Configuration classes validate all values at startup",
+        "Configuration is properly typed",
+        "Sensitive values are never logged",
+        "Different configurations for dev/staging/production",
+        "All configuration variables documented",
+        ".env.example files are complete and up-to-date"
+      ],
+      "files_to_modify": [
+        "server/src/config",
+        "server/.env.example",
+        "web/.env.example",
+        "app/lib/config",
+        "kokoro-server/config.py",
+        "infra/lib",
+        "README.md"
+      ],
+      "estimated_complexity": "low"
+    },
+    {
+      "task_id": "TASK-020",
+      "title": "Create comprehensive code quality and best practices documentation",
+      "description": "Document code quality standards, conventions, and best practices for all layers. This ensures consistency and helps onboard new developers. Create documentation for: 1) NestJS backend (module structure, naming conventions, patterns), 2) Flutter app (architecture, state management, testing), 3) Next.js web (component patterns, state management, testing), 4) Database design patterns, 5) API contract standards (error codes, response formats), 6) Testing guidelines and strategies, 7) Code review checklist, 8) CI/CD pipeline and deployment process. Host documentation in /Docs or create CODING_STANDARDS.md.",
+      "assigned_role": "documentation_engineer",
+      "dependencies": ["TASK-002", "TASK-003", "TASK-004", "TASK-010", "TASK-011", "TASK-016", "TASK-017"],
+      "acceptance_criteria": [
+        "Comprehensive documentation created for each layer",
+        "Code examples provided for each pattern",
+        "Naming conventions documented",
+        "Code review checklist created",
+        "Testing strategies documented",
+        "CI/CD pipeline documented",
+        "Documentation is accessible and easy to navigate"
+      ],
+      "files_to_modify": [
+        "Docs/CODING_STANDARDS.md",
+        "Docs/ARCHITECTURE.md",
+        "server/README.md",
+        "app/README.md",
+        "web/README.md",
+        "CONTRIBUTING.md"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-021",
+      "title": "Set up and enforce code quality tools and linting across all services",
+      "description": "Configure automated code quality enforcement using linters, formatters, and static analysis tools. Goals: 1) Set up ESLint for NestJS backend with strict rules, 2) Set up Dart analyzer for Flutter with strict rules, 3) Set up ESLint for Next.js with strict rules, 4) Configure Prettier for code formatting (backend and web), 5) Set up pre-commit hooks to run linting and formatting, 6) Add linting to CI/CD pipeline (fail if violations), 7) Configure SonarQube or CodeClimate for static analysis, 8) Add code coverage thresholds to CI/CD. This ensures code quality remains high.",
+      "assigned_role": "cicd_specialist",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "ESLint is configured with strict rules for backend and web",
+        "Dart analyzer is configured for Flutter",
+        "Prettier is configured for code formatting",
+        "Pre-commit hooks run linting and formatting",
+        "CI/CD fails if linting violations are found",
+        "Code coverage thresholds are enforced",
+        "Static analysis results are visible in CI/CD"
+      ],
+      "files_to_modify": [
+        "server/.eslintrc.mjs",
+        "server/.prettierrc",
+        "web/.eslintignore",
+        "web/eslint.config.js",
+        "app/analysis_options.yaml",
+        ".github/workflows",
+        "package.json",
+        "app/pubspec.yaml"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-022",
+      "title": "Implement API contract and error code standardization across frontend and backend",
+      "description": "Ensure consistent API contracts and error codes between frontend and backend. Goals: 1) Define standardized error codes (ERR-001 for auth failures, ERR-002 for validation, etc.), 2) Document error code to HTTP status code mapping, 3) Standardize API response format (success: boolean, data: T, error: {code, message}), 4) Auto-generate frontend types from NestJS Swagger spec, 5) Create shared error code enum accessible to both frontend and backend, 6) Ensure all endpoints follow same response pattern, 7) Document API versioning strategy if needed. This reduces frontend/backend miscommunication.",
+      "assigned_role": "api_contract_designer",
+      "dependencies": ["TASK-006", "TASK-017"],
+      "acceptance_criteria": [
+        "Error codes are standardized and documented",
+        "Error code to HTTP status mapping is defined",
+        "API response format is consistent across all endpoints",
+        "Frontend types auto-generated from Swagger spec",
+        "Error codes shared between frontend and backend",
+        "All endpoints follow standardized response pattern",
+        "API contract documentation is complete"
+      ],
+      "files_to_modify": [
+        "server/src/shared/errors",
+        "server/README.md",
+        "web/src/types/api.ts",
+        "app/lib/api/error_codes.dart"
+      ],
+      "estimated_complexity": "low"
+    },
+    {
+      "task_id": "TASK-023",
+      "title": "Add APM (Application Performance Monitoring) and observability infrastructure",
+      "description": "Implement comprehensive monitoring and observability across all services. Goals: 1) Set up APM agent for NestJS (NewRelic, DataDog, or Elastic APM), 2) Add metrics collection for key operations (request latency, database queries, errors), 3) Set up centralized logging (ELK stack, CloudWatch, or similar), 4) Add distributed tracing across services, 5) Create dashboards for key metrics (latency, error rate, throughput, database performance), 6) Set up alerting for critical issues (high error rate, slow queries, service down), 7) Add RUM (Real User Monitoring) for web and mobile apps. This improves visibility into system health.",
+      "assigned_role": "observability_engineer",
+      "dependencies": ["TASK-004", "TASK-012"],
+      "acceptance_criteria": [
+        "APM agent is installed and reporting metrics",
+        "Key metrics are collected and visible in dashboards",
+        "Centralized logging is configured",
+        "Distributed tracing works across services",
+        "Alerting is configured for critical issues",
+        "Performance dashboards are created",
+        "Documentation includes observability guidelines"
+      ],
+      "files_to_modify": [
+        "server/src/main.ts",
+        "server/package.json",
+        "app/lib/main.dart",
+        "web/next.config.ts",
+        "infra/lib"
+      ],
+      "estimated_complexity": "high"
+    },
+    {
+      "task_id": "TASK-024",
+      "title": "Improve security practices and implement secure coding standards",
+      "description": "Implement security best practices across all services. Goals: 1) Add input validation and sanitization, 2) Implement proper authentication and authorization (JWT validation, role-based access control), 3) Add rate limiting (already using Upstash), 4) Implement CORS properly with specific allowed origins, 5) Add SQL injection prevention (Drizzle provides parameterized queries), 6) Implement HTTPS/TLS, 7) Add security headers (HSTS, X-Frame-Options, CSP), 8) Implement secrets management (environment variables, no hardcoded secrets), 9) Add dependency vulnerability scanning in CI/CD, 10) Create security guidelines for team. This prevents common security vulnerabilities.",
+      "assigned_role": "security_engineer",
+      "dependencies": ["TASK-002", "TASK-003", "TASK-021"],
+      "acceptance_criteria": [
+        "All inputs are validated and sanitized",
+        "Authentication and authorization are properly implemented",
+        "Rate limiting is configured",
+        "CORS is properly configured",
+        "Security headers are added to responses",
+        "No hardcoded secrets in code",
+        "Dependency vulnerabilities are scanned in CI/CD",
+        "Security guidelines are documented"
+      ],
+      "files_to_modify": [
+        "server/src/main.ts",
+        "server/src/common/middleware",
+        "server/src/auth",
+        "web/next.config.ts",
+        ".github/workflows",
+        "CONTRIBUTING.md"
+      ],
+      "estimated_complexity": "medium"
+    },
+    {
+      "task_id": "TASK-025",
+      "title": "Create reusable utility libraries for common functionality across all layers",
+      "description": "Extract and create reusable utility libraries to reduce code duplication. Goals: 1) Create shared utilities for date/time handling (timezone conversion, date formatting), 2) Create shared utilities for data transformation (serialization, deserialization, validation), 3) Create shared utilities for async operations (retry logic, exponential backoff, timeouts), 4) Create shared utilities for error handling (error mapping, error recovery), 5) Create shared utilities for API operations (request building, response parsing), 6) Create shared utilities for notifications (toast, dialog, snackbar patterns). Document and export from barrel files. This improves code reusability.",
+      "assigned_role": "backend_engineer",
+      "dependencies": [],
+      "acceptance_criteria": [
+        "Shared utilities are created and exported from barrel files",
+        "No duplicate code across modules",
+        "Utilities are well-tested with high coverage",
+        "Utilities are documented with examples",
+        "Utilities are used consistently across codebase",
+        "Utility libraries are versioned and released"
+      ],
+      "files_to_modify": [
+        "server/src/shared/utils",
+        "app/lib/utils",
+        "web/src/utils"
+      ],
+      "estimated_complexity": "medium"
+    }
+  ]
+}

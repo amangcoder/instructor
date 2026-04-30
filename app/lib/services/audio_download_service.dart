@@ -22,6 +22,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/app_database.dart';
+import 'package:instructor/exceptions/app_exception.dart';
 import 'package:instructor/models/audio_file_url.dart';
 import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/services/api_client.dart';
@@ -145,7 +146,7 @@ class AudioDownloadServiceImpl implements AudioDownloadService {
     try {
       allUrls = await _api.getAudioUrls(planId);
     } catch (e) {
-      throw AudioDownloadException(
+      throw AudioAppException(
           'Failed to fetch audio URLs for planId=$planId: $e');
     }
 
@@ -205,7 +206,7 @@ class AudioDownloadServiceImpl implements AudioDownloadService {
     await Future.wait(futures, eagerError: false);
 
     if (errors.isNotEmpty) {
-      throw AudioDownloadException(
+      throw AudioAppException(
           '${errors.length} file(s) failed to download for '
           'planId=$planId');
     }
@@ -247,7 +248,7 @@ class AudioDownloadServiceImpl implements AudioDownloadService {
     }
 
     if (response.statusCode != 200) {
-      throw AudioDownloadException(
+      throw AudioAppException(
           'HTTP ${response.statusCode} downloading ${audioUrl.cacheKey}');
     }
 
@@ -290,13 +291,13 @@ class AudioDownloadServiceImpl implements AudioDownloadService {
     try {
       refreshed = await _api.getAudioUrls(planId);
     } catch (e) {
-      throw AudioDownloadException(
+      throw AudioAppException(
           'URL refresh failed for cacheKey=$cacheKey, planId=$planId: $e');
     }
     final match =
         refreshed.where((u) => u.cacheKey == cacheKey).firstOrNull;
     if (match == null) {
-      throw AudioDownloadException(
+      throw AudioAppException(
           'cacheKey=$cacheKey not found after URL refresh for '
           'planId=$planId');
     }

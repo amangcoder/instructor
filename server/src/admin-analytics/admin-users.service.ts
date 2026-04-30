@@ -1,14 +1,13 @@
 /**
  * AdminUsersService — paginated list + role management.
  *
- * Queries use this.db.withRetry() + this.db.getDb() in line with the rest of
- * the admin-analytics module, so Neon cold-starts are handled transparently.
+ * Queries use this.db.withRetry() with AdminAnalyticsRepository for all data
+ * access, so Neon cold-starts are handled transparently.
  */
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, asc, avg, count, desc, eq, ilike, inArray, or, sql, sum } from 'drizzle-orm';
+import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-import { plans, sessionCompletions, ttsJobs, users, libraryPlans } from '../database/schema';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 import type {
   AdminUserRow,
   AdminUsersListResponse,
@@ -24,7 +23,10 @@ import {
 export class AdminUsersService {
   private readonly logger = new Logger(AdminUsersService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   async listUsers(params: {
     page?: number;
@@ -43,75 +45,24 @@ export class AdminUsersService {
     const escaped = rawSearch.replace(/[\\%_]/g, (ch) => `\\${ch}`);
     const searchPattern = escaped ? `%${escaped}%` : null;
 
-    const searchClause = searchPattern
-      ? or(
-          ilike(users.email, searchPattern),
-          ilike(users.name, searchPattern),
-          ilike(users.username, searchPattern),
-        )
-      : undefined;
-    const roleClause = params.role ? eq(users.role, params.role) : undefined;
-    const whereClause =
-      searchClause && roleClause
-        ? and(searchClause, roleClause)
-        : (searchClause ?? roleClause);
-
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let total: number;
+      let rows: Array<Record<string, unknown>>;
 
-      // Precompute per-user aggregates as subqueries to avoid correlated subquery issues
-      // with Drizzle's neon-http driver.
-      const planCounts = drizzle
-        .select({
-          userId: plans.userId,
-          planCount: count().as('plan_count'),
-        })
-        .from(plans)
-        .groupBy(plans.userId)
-        .as('plan_counts');
-
-      const lastActivity = drizzle
-        .select({
-          userId: sessionCompletions.userId,
-          lastActivityAt: sql<Date | null>`MAX(${sessionCompletions.completedAt})`.as('last_activity_at'),
-        })
-        .from(sessionCompletions)
-        .groupBy(sessionCompletions.userId)
-        .as('last_activity');
-
-      const [totalResult, rows] = await Promise.all([
-        drizzle
-          .select({ value: count() })
-          .from(users)
-          .where(whereClause ?? sql`true`),
-
-        drizzle
-          .select({
-            id: users.id,
-            email: users.email,
-            name: users.name,
-            username: users.username,
-            role: users.role,
-            createdAt: users.createdAt,
-            planCount: planCounts.planCount,
-            lastActivityAt: lastActivity.lastActivityAt,
-          })
-          .from(users)
-          .leftJoin(planCounts, eq(planCounts.userId, users.id))
-          .leftJoin(lastActivity, eq(lastActivity.userId, users.id))
-          .where(whereClause ?? sql`true`)
-          .orderBy(desc(users.createdAt), asc(users.id))
-          .limit(pageSize)
-          .offset((page - 1) * pageSize),
-      ]);
-
-      const total = totalResult[0]?.value ?? 0;
+      const result = await this.repo.listAdminUsers({
+        page,
+        pageSize,
+        searchPattern: searchPattern,
+        role: params.role,
+      });
+      rows = result.rows;
+      total = result.total;
 
       const mapped: AdminUserRow[] = rows.map((r) => ({
-        id: r.id,
-        email: r.email,
-        name: r.name,
-        username: r.username,
+        id: r.id as string,
+        email: r.email as string,
+        name: r.name as string | null,
+        username: r.username as string | null,
         role: r.role === 'admin' ? 'admin' : 'user',
         createdAt:
           r.createdAt instanceof Date
@@ -132,92 +83,31 @@ export class AdminUsersService {
 
   async getUserDetail(id: string) {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let user: Record<string, unknown> | null;
 
-      const userRows = await drizzle
-        .select({
-          id: users.id,
-          email: users.email,
-          name: users.name,
-          username: users.username,
-          role: users.role,
-          photoUrl: users.photoUrl,
-          createdAt: users.createdAt,
-        })
-        .from(users)
-        .where(eq(users.id, id))
-        .limit(1);
+      user = await this.repo.getAdminUserById(id) as Record<string, unknown> | null;
 
-      if (userRows.length === 0) {
+      if (!user) {
         throw new NotFoundException(`User ${id} not found`);
       }
-      const user = userRows[0];
 
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      let planStats: any, sessionStats: any, ttsStats: any, recentPlans: any[];
 
-      const [
-        planStats,
-        sessionStats,
-        ttsStats,
-        recentPlans,
-      ] = await Promise.all([
-        drizzle
-          .select({
-            total: count(),
-            active: sql<number>`COUNT(*) FILTER (WHERE ${plans.isActive} = true)::int`,
-          })
-          .from(plans)
-          .where(eq(plans.userId, id)),
-        drizzle
-          .select({
-            total: count(),
-            avgDurationMs: avg(sessionCompletions.durationMs),
-            totalDurationMs: sum(sessionCompletions.durationMs),
-            lastCompletedAt: sql<Date | null>`MAX(${sessionCompletions.completedAt})`,
-          })
-          .from(sessionCompletions)
-          .where(eq(sessionCompletions.userId, id)),
-        drizzle
-          .select({
-            total: count(),
-            completed: sql<number>`COUNT(*) FILTER (WHERE ${ttsJobs.status} = 'completed')::int`,
-            failed: sql<number>`COUNT(*) FILTER (WHERE ${ttsJobs.status} = 'failed')::int`,
-          })
-          .from(ttsJobs)
-          .innerJoin(plans, eq(ttsJobs.planId, plans.id))
-          .where(eq(plans.userId, id)),
-        drizzle
-          .select({
-            id: plans.id,
-            name: plans.name,
-            isActive: plans.isActive,
-            ttsStatus: plans.ttsStatus,
-            createdAt: plans.createdAt,
-          })
-          .from(plans)
-          .where(eq(plans.userId, id))
-          .orderBy(desc(plans.createdAt))
-          .limit(25),
-      ]);
+      const stats = await this.repo.getUserDetailStats(id);
+      planStats = stats.planStats;
+      sessionStats = stats.sessionStats;
+      ttsStats = stats.ttsStats;
+      recentPlans = stats.recentPlans;
 
-      const planIds = recentPlans.map((p) => p.id);
-      const planSessionStats = planIds.length > 0
-        ? await drizzle
-            .select({
-              planId: sessionCompletions.planId,
-              runCount: count(),
-              lastRunAt: sql<Date | null>`MAX(${sessionCompletions.completedAt})`,
-            })
-            .from(sessionCompletions)
-            .where(inArray(sessionCompletions.planId, planIds))
-            .groupBy(sessionCompletions.planId)
-        : [];
+      const planIds = recentPlans.map((p: any) => p.id);
+      let planSessionStats: any[];
+      planSessionStats = await this.repo.getPlanSessionStats(planIds);
       const sessionMap = new Map(planSessionStats.map((s) => [s.planId, s]));
 
-      const toIso = (v: Date | string | null): string | null => {
+      const toIso = (v: unknown): string | null => {
         if (v === null || v === undefined) return null;
         if (v instanceof Date) return v.toISOString();
-        return new Date(v as unknown as string).toISOString();
+        return new Date(v as string).toISOString();
       };
 
       return {
@@ -260,36 +150,17 @@ export class AdminUsersService {
 
   async getPlanDetail(planId: string) {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let p: Record<string, unknown> | null;
 
-      const rows = await drizzle
-        .select({
-          id: plans.id,
-          userId: plans.userId,
-          name: plans.name,
-          planJson: plans.planJson,
-          isActive: plans.isActive,
-          ttsStatus: plans.ttsStatus,
-          ttsTotal: plans.ttsTotal,
-          ttsCompleted: plans.ttsCompleted,
-          voiceQuality: plans.voiceQuality,
-          shareToken: plans.shareToken,
-          createdAt: plans.createdAt,
-          updatedAt: plans.updatedAt,
-        })
-        .from(plans)
-        .where(eq(plans.id, planId))
-        .limit(1);
+      p = await this.repo.getAdminPlanDetail(planId) as Record<string, unknown> | null;
 
-      if (rows.length === 0) {
+      if (!p) {
         throw new NotFoundException(`Plan ${planId} not found`);
       }
-
-      const p = rows[0];
-      const toIso = (v: Date | string | null): string | null => {
+      const toIso = (v: unknown): string | null => {
         if (!v) return null;
         if (v instanceof Date) return v.toISOString();
-        return new Date(v as unknown as string).toISOString();
+        return new Date(v as string).toISOString();
       };
 
       return {
@@ -319,23 +190,11 @@ export class AdminUsersService {
    */
   async getUserSessions(userId: string) {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let rawRows: Array<Record<string, unknown>>;
 
-      const rows = await drizzle.execute(sql`
-        SELECT
-          sc.id,
-          COALESCE(lp.name, p.name, 'Unknown Plan') AS plan_name,
-          sc.completed_at,
-          sc.duration_ms
-        FROM session_completions sc
-        LEFT JOIN plans p ON p.id = sc.plan_id
-        LEFT JOIN library_plans lp ON lp.id = p.source_library_plan_id
-        WHERE sc.user_id = ${userId}
-        ORDER BY sc.completed_at DESC
-        LIMIT 20
-      `);
+      rawRows = await this.repo.getAdminUserSessions(userId, 20);
 
-      const sessions = (rows.rows as Array<Record<string, unknown>>).map((r) => ({
+      const sessions = rawRows.map((r) => ({
         id: String(r.id ?? ''),
         planName: String(r.plan_name ?? 'Unknown Plan'),
         completedAt: r.completed_at instanceof Date
@@ -358,28 +217,11 @@ export class AdminUsersService {
    */
   async getPlansWithSummary(userId: string) {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      let rawRows: Array<Record<string, unknown>>;
 
-      const rows = await drizzle.execute(sql`
-        SELECT
-          p.id,
-          p.name,
-          p.is_active,
-          p.tts_status,
-          p.created_at,
-          COUNT(sc.id)::int AS run_count,
-          MAX(sc.completed_at) AS last_run_at,
-          CASE WHEN MAX(sc.completed_at) >= ${thirtyDaysAgo} THEN true ELSE false END AS has_recent_session
-        FROM plans p
-        LEFT JOIN session_completions sc ON sc.plan_id = p.id
-        WHERE p.user_id = ${userId}
-        GROUP BY p.id, p.name, p.is_active, p.tts_status, p.created_at
-        ORDER BY p.created_at DESC
-        LIMIT 25
-      `);
+      rawRows = await this.repo.getAdminPlansWithSummary(userId, 25);
 
-      return (rows.rows as Array<Record<string, unknown>>).map((r) => ({
+      return rawRows.map((r) => ({
         id: String(r.id ?? ''),
         name: String(r.name ?? ''),
         isActive: Boolean(r.is_active),
@@ -400,12 +242,9 @@ export class AdminUsersService {
     role: 'user' | 'admin',
   ): Promise<{ id: string; role: 'user' | 'admin' }> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
-      const result = await drizzle
-        .update(users)
-        .set({ role })
-        .where(eq(users.id, id))
-        .returning({ id: users.id, role: users.role });
+      let result: Array<{ id: string; role: string | null }>;
+
+      result = await this.repo.updateAdminUserRole(id, role);
 
       if (result.length === 0) {
         throw new NotFoundException(`User ${id} not found`);

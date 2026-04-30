@@ -294,7 +294,7 @@ export default async function AdminEngagementPage({
               {isActiveUsersEmpty ? (
                 <EmptyState message="No data for this period." />
               ) : (
-                <ChartErrorBoundary>
+                <ChartErrorBoundary key={range}>
                   <TimeSeriesChart
                     data={mergedActiveUsersData}
                     xKey="date"
@@ -371,7 +371,7 @@ export default async function AdminEngagementPage({
               {streaksData.series.length === 0 ? (
                 <EmptyState message="No data for this period." />
               ) : (
-                <ChartErrorBoundary>
+                <ChartErrorBoundary key="default">
                   <StreakBarChart data={streaksData.series} />
                 </ChartErrorBoundary>
               )}

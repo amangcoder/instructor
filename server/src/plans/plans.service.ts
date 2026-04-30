@@ -4,7 +4,10 @@ import {
   UnprocessableEntityException,
   ServiceUnavailableException,
   BadGatewayException,
+  Optional,
+  Inject,
 } from '@nestjs/common';
+import type { AppConfig } from '../config/app-config.interface';
 import { parseDslPlan } from './parsers/dsl.parser';
 import {
   buildPhase1SystemPrompt,
@@ -14,7 +17,13 @@ import {
   type PlanPhase,
 } from './prompts/phase1.prompt';
 import { PHASE2_SYSTEM_PROMPT, buildPhase2PhasePrompt } from './prompts/phase2.prompt';
+import {
+  TRIAGE_SCHEMA,
+  TRIAGE_SYSTEM_PROMPT,
+  type TriageResult,
+} from './prompts/triage.prompt';
 import { DatabaseService, type PlanRecord, type PlanSummaryRecord, type SavePlanResult } from '../database/database.service';
+import { PlanRepository } from '../database/repositories/plan.repository';
 import { TtsPregenService } from '../tts/tts-pregen.service';
 import { SavePlanDto } from './dto/save-plan.dto';
 
@@ -25,24 +34,27 @@ const GEMINI_GENERATE_URL =
 
 const MAX_DURATION_MINUTES = 240; // 4-hour hard cap
 
-// ── Backend selection ─────────────────────────────────────────────────────────
-// llmProvider()=gemini → use Gemini API (requires GEMINI_API_KEY).
-// Default → Ollama local server.
-// OLLAMA_URL overrides the Ollama base URL (default: http://localhost:11434).
-// ollamaModel() overrides the model (default: gemma4:e4b).
-// Read at runtime (not module load) so tests can override process.env.
-function llmProvider(): string { return process.env.LLM_PROVIDER ?? 'ollama'; }
-function ollamaBaseUrl(): string { return process.env.OLLAMA_URL ?? 'http://localhost:11434'; }
-function ollamaModel(): string { return process.env.OLLAMA_MODEL ?? 'gemma4:e4b'; }
-
 @Injectable()
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
+  private readonly plans: PlanRepository | DatabaseService;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly ttsPregen: TtsPregenService,
-  ) {}
+    @Optional() @Inject('APP_CONFIG') private readonly config?: AppConfig,
+    @Optional() @Inject(PlanRepository) planRepo?: PlanRepository,
+  ) {
+    // Prefer PlanRepository when available; fall back to DatabaseService for
+    // backward compatibility with tests that only provide DatabaseService.
+    this.plans = planRepo ?? db;
+  }
+
+  private get llmProvider(): string { return this.config?.llmProvider ?? process.env.LLM_PROVIDER ?? 'ollama'; }
+  private get ollamaBaseUrl(): string { return this.config?.ollamaUrl ?? process.env.OLLAMA_URL ?? 'http://localhost:11434'; }
+  private get ollamaModel(): string { return this.config?.ollamaModel ?? process.env.OLLAMA_MODEL ?? 'gemma4:e4b'; }
+  private get geminiApiKey(): string { return this.config?.geminiApiKey ?? process.env.GEMINI_API_KEY ?? ''; }
+  private get defaultTtsProvider(): string { return this.config?.defaultTtsProvider ?? process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro'; }
 
   async generatePlan(
     prompt: string,
@@ -50,24 +62,41 @@ export class PlansService {
     language?: string,
   ): Promise<{ plan: Record<string, unknown> }> {
     // Resolve backend — Gemini requires an API key; Ollama runs locally.
-    let geminiApiKey: string | undefined;
-    if (llmProvider() === 'gemini') {
-      geminiApiKey = process.env.GEMINI_API_KEY;
-      if (!geminiApiKey) {
+    let resolvedGeminiKey: string | undefined;
+    if (this.llmProvider === 'gemini') {
+      resolvedGeminiKey = this.geminiApiKey || undefined;
+      if (!resolvedGeminiKey) {
         throw new ServiceUnavailableException(
-          'GEMINI_API_KEY is not set — set llmProvider()=ollama to use local Ollama instead',
+          'GEMINI_API_KEY is not set — set LLM_PROVIDER=ollama to use local Ollama instead',
         );
       }
       this.logger.log(`Backend: Gemini 2.5 Flash`);
     } else {
-      this.logger.log(`Backend: Ollama ${ollamaModel()} @ ${ollamaBaseUrl()}`);
+      this.logger.log(`Backend: Ollama ${this.ollamaModel} @ ${this.ollamaBaseUrl}`);
     }
 
-    const ttsProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+    const ttsProvider = this.defaultTtsProvider;
+
+    // ── Triage: cheap feasibility gate before any expensive generation ─────
+    // Fail-open: if triage itself errors, log and proceed (don't block legit
+    // users on a flaky triage call). The 4-hour duration cap below is the
+    // structural backstop.
+    const triage = await this.triagePrompt(resolvedGeminiKey, prompt);
+    if (triage && !triage.feasible) {
+      this.logger.warn(
+        `Triage rejected prompt for user ${userId} — flags=${triage.flags.join(',')} reason="${triage.reason}"`,
+      );
+      throw new UnprocessableEntityException(triage.reason);
+    }
+    if (triage) {
+      this.logger.log(
+        `Triage passed — complexity=${triage.complexity} flags=${triage.flags.join(',') || 'none'}`,
+      );
+    }
 
     // ── Phase 1: Extract requirements + divide into phases ─────────────────
     this.logger.log(`Phase 1: Extracting requirements for user ${userId} (ttsProvider=${ttsProvider})`);
-    const requirements = await this.extractRequirements(geminiApiKey, prompt, ttsProvider);
+    const requirements = await this.extractRequirements(resolvedGeminiKey, prompt, ttsProvider);
 
     // Override language if the user explicitly selected one in the UI.
     if (language) {
@@ -98,7 +127,7 @@ export class PlansService {
 
     const phaseResults = await Promise.all(
       requirements.phases.map((phase, i) =>
-        this.generatePhase(geminiApiKey, requirements, phase, i, requirements.phases.length),
+        this.generatePhase(resolvedGeminiKey, requirements, phase, i, requirements.phases.length),
       ),
     );
 
@@ -124,7 +153,7 @@ export class PlansService {
     this.logger.log(
       `savePlan — userId=${userId}, planId=${dto.planId ?? 'NEW'}, name="${dto.name}"`,
     );
-    return this.db.savePlan(userId, dto.name, dto.planJson, dto.planId);
+    return this.plans.savePlan(userId, dto.name, dto.planJson, dto.planId);
   }
 
   /**
@@ -133,7 +162,7 @@ export class PlansService {
    */
   async listPlans(userId: string): Promise<{ plans: PlanSummaryRecord[] }> {
     this.logger.log(`listPlans — userId=${userId}`);
-    const planList = await this.db.listPlans(userId);
+    const planList = await this.plans.listPlans(userId);
     return { plans: planList };
   }
 
@@ -143,7 +172,7 @@ export class PlansService {
    */
   async getPlanById(userId: string, planId: string): Promise<PlanRecord | null> {
     this.logger.log(`getPlanById — userId=${userId}, planId=${planId}`);
-    return this.db.getPlanById(planId, userId);
+    return this.plans.getPlanById(planId, userId);
   }
 
   /**
@@ -152,12 +181,15 @@ export class PlansService {
    */
   async deletePlan(userId: string, planId: string): Promise<void> {
     this.logger.log(`deletePlan — userId=${userId}, planId=${planId}`);
-    return this.db.deletePlan(planId, userId);
+    return this.plans.deletePlan(planId, userId);
   }
 
   /**
    * Activate a plan for the authenticated user.
    * For studio voice quality, triggers TTS pre-generation after activation.
+   *
+   * @param speechRate Speech rate from API (string, e.g. '1.0').
+   *                   Forwarded to TtsPregenService which accepts string | number.
    */
   async activatePlan(
     userId: string,
@@ -168,14 +200,14 @@ export class PlansService {
     speechRate?: string,
   ): Promise<void> {
     this.logger.log(`activatePlan — userId=${userId}, planId=${planId}, voiceQuality=${voiceQuality}, voice=${voice}, locale=${locale}, speechRate=${speechRate}`);
-    await this.db.activatePlan(planId, userId, voiceQuality);
+    await this.plans.activatePlan(planId, userId, voiceQuality);
 
     if (voiceQuality === 'studio') {
       try {
-        const plan = await this.db.getPlanById(planId, userId);
+        const plan = await this.plans.getPlanById(planId, userId);
         if (!plan) return;
 
-        const effectiveProvider = process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro';
+        const effectiveProvider = this.defaultTtsProvider;
         const providerDefaultVoice = PROVIDER_DEFAULT_VOICES[effectiveProvider] ?? PROVIDER_DEFAULT_VOICES.kokoro;
 
         // Use client-provided voice, falling back to plan default, then provider default.
@@ -203,7 +235,7 @@ export class PlansService {
           `TTS pre-generation failed for planId=${planId}: ${err instanceof Error ? err.message : err}`,
         );
         // Reset status so the UI doesn't show a spinner forever.
-        await this.db.setTtsStatus(planId, 'failed', 0, 0);
+        await this.plans.setTtsStatus(planId, 'failed', 0, 0);
       }
     }
   }
@@ -247,6 +279,55 @@ export class PlansService {
     throw new UnprocessableEntityException(
       `Failed to generate phase "${phase.name}" after retries`,
     );
+  }
+
+  // ── Triage: pre-generation feasibility gate ────────────────────────────────
+
+  /**
+   * Returns a TriageResult on success, or null if triage failed (fail-open).
+   * Caller must treat null as "proceed" — the existing duration cap and
+   * Phase 1 schema validation are the structural backstops.
+   */
+  private async triagePrompt(
+    geminiApiKey: string | undefined,
+    userPrompt: string,
+  ): Promise<TriageResult | null> {
+    let text: string;
+    try {
+      if (geminiApiKey) {
+        const body = JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: `${TRIAGE_SYSTEM_PROMPT}\n\nUser request: ${userPrompt}` }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: TRIAGE_SCHEMA,
+            temperature: 0.0,
+            maxOutputTokens: 256,
+          },
+        });
+        const response = await this.callGeminiRaw(geminiApiKey, body, 'Triage', 15_000);
+        text = this.extractGeminiText(response, 'Triage');
+      } else {
+        text = await this.callOllama(TRIAGE_SYSTEM_PROMPT, userPrompt, 'Triage', TRIAGE_SCHEMA, 15_000);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Triage call failed — proceeding without gate: ${(err as Error).message}`,
+      );
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(text) as TriageResult;
+      if (typeof parsed.feasible !== 'boolean' || !parsed.complexity || !Array.isArray(parsed.flags)) {
+        throw new Error('Missing required fields in triage output');
+      }
+      return parsed;
+    } catch (err) {
+      this.logger.warn(
+        `Triage parse failed — proceeding without gate: ${(err as Error).message}. Response (first 200 chars): ${text.slice(0, 200)}`,
+      );
+      return null;
+    }
   }
 
   // ── Phase 1: Requirements extraction ───────────────────────────────────────
@@ -366,20 +447,20 @@ export class PlansService {
     format?: object,
     timeoutMs = 60_000,
   ): Promise<string> {
-    this.logger.log(`Calling Ollama ${ollamaModel()} — ${label}`);
+    this.logger.log(`Calling Ollama ${this.ollamaModel} — ${label}`);
 
     const body: Record<string, unknown> = {
-      model: ollamaModel(),
+      model: this.ollamaModel,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       stream: false,
-      options: { temperature: llmProvider() === 'ollama' ? 0.7 : 0.3 },
+      options: { temperature: this.llmProvider === 'ollama' ? 0.7 : 0.3 },
     };
     if (format) body.format = format;
 
-    const response = await fetch(`${ollamaBaseUrl()}/api/chat`, {
+    const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

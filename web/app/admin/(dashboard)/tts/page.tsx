@@ -142,7 +142,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
               <p className="text-sm font-medium text-on-surface-variant mb-3">
                 Daily Requests
               </p>
-              <ChartErrorBoundary>
+              <ChartErrorBoundary key={range}>
                 <TimeSeriesChart
                   data={volumeData.series}
                   xKey="date"
@@ -297,7 +297,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                 <p className="text-sm font-medium text-on-surface-variant mb-3">
                   Daily Error Count
                 </p>
-                <ChartErrorBoundary>
+                <ChartErrorBoundary key={range}>
                   <TimeSeriesChart
                     data={errorsData.series}
                     xKey="date"

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/models/enums.dart';
+import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/providers/tts_providers.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,6 +305,28 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /// Resolves [voiceId] to its human-readable label in [provider]'s namespace.
+  ///
+  /// When the plan stores a foreign voice ID (e.g. seed library plans store
+  /// Kokoro IDs like `af_bella` but the active provider is Gemini), the audio
+  /// was actually generated using the cross-provider mapping. Display the
+  /// label of the mapped voice so the locked picker reflects what was used.
+  String _resolveDisplayLabel(TtsProviderConfig provider, String voiceId) {
+    final native = provider.voices.firstWhere(
+      (v) => v.id == voiceId,
+      orElse: () => const TtsVoiceOption(id: '', label: ''),
+    );
+    if (native.id.isNotEmpty) return native.label;
+
+    final mappedId = provider.voiceMap[voiceId];
+    if (mappedId == null) return voiceId;
+    final mapped = provider.voices.firstWhere(
+      (v) => v.id == mappedId,
+      orElse: () => const TtsVoiceOption(id: '', label: ''),
+    );
+    return mapped.id.isNotEmpty ? mapped.label : mappedId;
+  }
+
   String _categoryLabel(PlanCategory c) => switch (c) {
         PlanCategory.yoga => 'Yoga',
         PlanCategory.meditation => 'Meditation',
@@ -319,6 +342,11 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
 
     // When TTS has been pre-generated, lock the voice to avoid cache mismatches.
     if (widget.voiceLocked) {
+      final providerAsync = ref.watch(activeProviderProvider);
+      final displayLabel = providerAsync.maybeWhen(
+        data: (p) => _resolveDisplayLabel(p, _voice),
+        orElse: () => _voice,
+      );
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -328,7 +356,7 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
               labelText: 'Default Voice',
               suffixIcon: Icon(Icons.lock_outline, size: 18),
             ),
-            items: [DropdownMenuItem(value: _voice, child: Text(_voice))],
+            items: [DropdownMenuItem(value: _voice, child: Text(displayLabel))],
             onChanged: null,
           ),
           const SizedBox(height: 4),

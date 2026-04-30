@@ -14,28 +14,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CsvExportService } from './csv-export.service';
 import { DatabaseService } from '../database/database.service';
+import { createMockDatabaseService } from '../database/testing';
 import type { Response } from 'express';
 
 // ---------------------------------------------------------------------------
 // Mock factories
 // ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    offset: jest.fn().mockResolvedValue([]),
-  };
-
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
 
 function createMockResponse(): jest.Mocked<Response> {
   return {

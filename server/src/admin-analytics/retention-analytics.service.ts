@@ -13,19 +13,21 @@
  * for efficient completedAt-only range queries.
  */
 
-import { Injectable, Logger, GatewayTimeoutException } from '@nestjs/common';
-import { sql, count } from 'drizzle-orm';
+import { Injectable, Logger, GatewayTimeoutException, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 import type { RetentionResponse, ActiveUsersResponse } from './dto/retention.dto';
 import type { AnalyticsRange } from '../admin/dto/analytics.dto';
 import { rangeToDate } from './dto/range-query.dto';
-import { fillDateGaps } from './admin-analytics.service';
+import { fillDateGaps, computeRetentionRate } from '../common/analytics-utils';
 
 @Injectable()
 export class RetentionAnalyticsService {
   private readonly logger = new Logger(RetentionAnalyticsService.name);
-
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   // =========================================================================
   // getRetention() — D7 and D30 cohort retention
@@ -49,7 +51,6 @@ export class RetentionAnalyticsService {
    */
   async getRetention(): Promise<RetentionResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
       const now = new Date();
 
       // D7 windows
@@ -75,113 +76,26 @@ export class RetentionAnalyticsService {
       const d30PrevRetentionEnd = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       try {
-        const [
-          d7CohortResult,
-          d7RetainedResult,
-          d7PrevCohortResult,
-          d7PrevRetainedResult,
-          d30CohortResult,
-          d30RetainedResult,
-          d30PrevCohortResult,
-          d30PrevRetainedResult,
-        ] = await Promise.all([
-          // D7 current cohort size
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT u.id)::int AS cohort_size
-            FROM users u
-            WHERE u.created_at >= ${d7CohortStart}
-              AND u.created_at < ${d7CohortEnd}
-          `),
+        let d7CohortSize: number, d7RetainedCount: number, d7PrevCohortSize: number, d7PrevRetainedCount: number;
+        let d30CohortSize: number, d30RetainedCount: number, d30PrevCohortSize: number, d30PrevRetainedCount: number;
 
-          // D7 current retained count (single-query JOIN)
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT sc.user_id)::int AS retained_count
-            FROM session_completions sc
-            INNER JOIN users u ON u.id = sc.user_id
-            WHERE u.created_at >= ${d7CohortStart}
-              AND u.created_at < ${d7CohortEnd}
-              AND sc.completed_at >= ${d7RetentionStart}
-          `),
+        [d7CohortSize, d7RetainedCount, d7PrevCohortSize, d7PrevRetainedCount,
+           d30CohortSize, d30RetainedCount, d30PrevCohortSize, d30PrevRetainedCount] = await Promise.all([
+            this.repo.getCohortSize(d7CohortStart, d7CohortEnd),
+            this.repo.getRetainedCount(d7CohortStart, d7CohortEnd, d7RetentionStart),
+            this.repo.getCohortSize(d7PrevCohortStart, d7PrevCohortEnd),
+            this.repo.getRetainedCount(d7PrevCohortStart, d7PrevCohortEnd, d7PrevRetentionStart, d7PrevRetentionEnd),
+            this.repo.getCohortSize(d30CohortStart, d30CohortEnd),
+            this.repo.getRetainedCount(d30CohortStart, d30CohortEnd, d30RetentionStart),
+            this.repo.getCohortSize(d30PrevCohortStart, d30PrevCohortEnd),
+            this.repo.getRetainedCount(d30PrevCohortStart, d30PrevCohortEnd, d30PrevRetentionStart, d30PrevRetentionEnd),
+          ]);
 
-          // D7 previous cohort size
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT u.id)::int AS cohort_size
-            FROM users u
-            WHERE u.created_at >= ${d7PrevCohortStart}
-              AND u.created_at < ${d7PrevCohortEnd}
-          `),
+        const d7Rate = computeRetentionRate(d7RetainedCount, d7CohortSize);
+        const d7PrevRate = computeRetentionRate(d7PrevRetainedCount, d7PrevCohortSize);
 
-          // D7 previous retained count
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT sc.user_id)::int AS retained_count
-            FROM session_completions sc
-            INNER JOIN users u ON u.id = sc.user_id
-            WHERE u.created_at >= ${d7PrevCohortStart}
-              AND u.created_at < ${d7PrevCohortEnd}
-              AND sc.completed_at >= ${d7PrevRetentionStart}
-              AND sc.completed_at < ${d7PrevRetentionEnd}
-          `),
-
-          // D30 current cohort size
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT u.id)::int AS cohort_size
-            FROM users u
-            WHERE u.created_at >= ${d30CohortStart}
-              AND u.created_at < ${d30CohortEnd}
-          `),
-
-          // D30 current retained count
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT sc.user_id)::int AS retained_count
-            FROM session_completions sc
-            INNER JOIN users u ON u.id = sc.user_id
-            WHERE u.created_at >= ${d30CohortStart}
-              AND u.created_at < ${d30CohortEnd}
-              AND sc.completed_at >= ${d30RetentionStart}
-          `),
-
-          // D30 previous cohort size
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT u.id)::int AS cohort_size
-            FROM users u
-            WHERE u.created_at >= ${d30PrevCohortStart}
-              AND u.created_at < ${d30PrevCohortEnd}
-          `),
-
-          // D30 previous retained count
-          drizzle.execute(sql`
-            SELECT COUNT(DISTINCT sc.user_id)::int AS retained_count
-            FROM session_completions sc
-            INNER JOIN users u ON u.id = sc.user_id
-            WHERE u.created_at >= ${d30PrevCohortStart}
-              AND u.created_at < ${d30PrevCohortEnd}
-              AND sc.completed_at >= ${d30PrevRetentionStart}
-              AND sc.completed_at < ${d30PrevRetentionEnd}
-          `),
-        ]);
-
-        // Extract values safely (Neon HTTP driver returns rows as array)
-        const extractInt = (result: unknown, key: string): number => {
-          const rows = result as Array<Record<string, unknown>>;
-          const val = rows[0]?.[key];
-          return val ? Number(val) : 0;
-        };
-
-        const d7CohortSize = extractInt(d7CohortResult.rows, 'cohort_size');
-        const d7RetainedCount = extractInt(d7RetainedResult.rows, 'retained_count');
-        const d7PrevCohortSize = extractInt(d7PrevCohortResult.rows, 'cohort_size');
-        const d7PrevRetainedCount = extractInt(d7PrevRetainedResult.rows, 'retained_count');
-
-        const d30CohortSize = extractInt(d30CohortResult.rows, 'cohort_size');
-        const d30RetainedCount = extractInt(d30RetainedResult.rows, 'retained_count');
-        const d30PrevCohortSize = extractInt(d30PrevCohortResult.rows, 'cohort_size');
-        const d30PrevRetainedCount = extractInt(d30PrevRetainedResult.rows, 'retained_count');
-
-        const d7Rate = d7CohortSize > 0 ? d7RetainedCount / d7CohortSize : 0;
-        const d7PrevRate = d7PrevCohortSize > 0 ? d7PrevRetainedCount / d7PrevCohortSize : 0;
-
-        const d30Rate = d30CohortSize > 0 ? d30RetainedCount / d30CohortSize : 0;
-        const d30PrevRate = d30PrevCohortSize > 0 ? d30PrevRetainedCount / d30PrevCohortSize : 0;
+        const d30Rate = computeRetentionRate(d30RetainedCount, d30CohortSize);
+        const d30PrevRate = computeRetentionRate(d30PrevRetainedCount, d30PrevCohortSize);
 
         return {
           d7: {
@@ -224,69 +138,28 @@ export class RetentionAnalyticsService {
    */
   async getActiveUsers(range: AnalyticsRange): Promise<ActiveUsersResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
       const startDate = rangeToDate(range);
       const now = new Date();
 
       try {
-        const [dauRows, wauRows, mauRows] = await Promise.all([
-          // DAU: distinct users per day
-          drizzle.execute(sql`
-            SELECT
-              DATE_TRUNC('day', completed_at)::date::text AS date,
-              COUNT(DISTINCT user_id)::int AS value
-            FROM session_completions
-            WHERE completed_at >= ${startDate}
-              AND completed_at <= ${now}
-            GROUP BY DATE_TRUNC('day', completed_at)
-            ORDER BY DATE_TRUNC('day', completed_at)
-          `),
+        let dauPoints: Array<{ date: string; value: number }>;
+        let wauPoints: Array<{ date: string; value: number }>;
+        let mauPoints: Array<{ date: string; value: number }>;
 
-          // WAU: distinct users per ISO week
-          drizzle.execute(sql`
-            SELECT
-              DATE_TRUNC('week', completed_at)::date::text AS date,
-              COUNT(DISTINCT user_id)::int AS value
-            FROM session_completions
-            WHERE completed_at >= ${startDate}
-              AND completed_at <= ${now}
-            GROUP BY DATE_TRUNC('week', completed_at)
-            ORDER BY DATE_TRUNC('week', completed_at)
-          `),
-
-          // MAU: distinct users per month
-          drizzle.execute(sql`
-            SELECT
-              DATE_TRUNC('month', completed_at)::date::text AS date,
-              COUNT(DISTINCT user_id)::int AS value
-            FROM session_completions
-            WHERE completed_at >= ${startDate}
-              AND completed_at <= ${now}
-            GROUP BY DATE_TRUNC('month', completed_at)
-            ORDER BY DATE_TRUNC('month', completed_at)
-          `),
-        ]);
-
-        const toPoints = (result: unknown): Array<{ date: string; value: number }> => {
-          const rows = result as Array<Record<string, unknown>>;
-          return rows.map((r) => ({
-            date: String(r.date ?? ''),
-            value: Number(r.value ?? 0),
-          }));
-        };
+        [dauPoints, wauPoints, mauPoints] = await Promise.all([
+            this.repo.getDauTimeSeries(startDate, now),
+            this.repo.getWauTimeSeries(startDate, now),
+            this.repo.getMauTimeSeries(startDate, now),
+          ]);
 
         // Fill DAU gaps so the frontend gets a contiguous series
         const dauMap = new Map<string, number>();
-        for (const row of (dauRows.rows as Array<Record<string, unknown>>)) {
-          dauMap.set(String(row.date ?? ''), Number(row.value ?? 0));
+        for (const row of dauPoints) {
+          dauMap.set(row.date, row.value);
         }
         const dau = fillDateGaps(dauMap, startDate, now);
 
-        return {
-          dau,
-          wau: toPoints(wauRows.rows),
-          mau: toPoints(mauRows.rows),
-        };
+        return { dau, wau: wauPoints, mau: mauPoints };
       } catch (err) {
         const pgCode = (err as { code?: string }).code;
         if (pgCode === '57014') {

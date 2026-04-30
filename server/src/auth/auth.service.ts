@@ -16,14 +16,19 @@ import {
   Injectable,
   Logger,
   UnauthorizedException,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomInt, createHmac, createHash, timingSafeEqual } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { DatabaseService } from '../database/database.service';
+import { AuthRepository } from '../database/repositories/auth.repository';
+import { UserRepository } from '../database/repositories/user.repository';
 import { SESEmailService } from '../email/ses-email.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
+import type { AppConfig } from '../config/app-config.interface';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -66,16 +71,25 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly s3: S3Client | null;
   private readonly bucket: string | null;
+  private readonly auth: AuthRepository | DatabaseService;
+  private readonly userRepo: UserRepository | DatabaseService;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly ses: SESEmailService,
     private readonly rateLimit: UpstashRateLimitService,
     private readonly jwt: JwtService,
+    @Optional() @Inject('APP_CONFIG') private readonly config?: AppConfig,
+    @Optional() @Inject(AuthRepository) authRepo?: AuthRepository,
+    @Optional() @Inject(UserRepository) userRepo?: UserRepository,
   ) {
-    this.bucket = process.env.AWS_S3_BUCKET ?? null;
+    // Prefer repositories when available; fall back to DatabaseService for
+    // backward compatibility with tests that only provide DatabaseService.
+    this.auth = authRepo ?? db;
+    this.userRepo = userRepo ?? db;
+    this.bucket = (config?.awsS3Bucket || process.env.AWS_S3_BUCKET) ?? null;
     this.s3 = this.bucket
-      ? new S3Client({ region: process.env.AWS_REGION ?? 'ap-south-1' })
+      ? new S3Client({ region: config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1' })
       : null;
   }
 
@@ -99,16 +113,16 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     // Invalidate all previous unused OTPs for this email (single-active-OTP invariant).
-    await this.db.invalidateOtpsForEmail(normalizedEmail);
+    await this.auth.invalidateOtpsForEmail(normalizedEmail);
 
     // Store new OTP record — the hash, never plaintext.
-    await this.db.createOtp(normalizedEmail, hashedCode, expiresAt);
+    await this.auth.createOtp(normalizedEmail, hashedCode, expiresAt);
 
     // Dispatch email via async Lambda self-invocation (returns 202 immediately).
     // The email Lambda runs independently — no risk of dying with this request.
     await this.ses.dispatchOtpEmail(normalizedEmail, code);
 
-    if (process.env.NODE_ENV !== 'production') {
+    if ((this.config?.nodeEnv ?? process.env.NODE_ENV) !== 'production') {
       this.logger.log(`[DEV] OTP for ${normalizedEmail}: ${code}`);
     }
     this.logger.log(`OTP requested for ${normalizedEmail}`);
@@ -121,7 +135,7 @@ export class AuthService {
     const normalizedEmail = email.toLowerCase().trim();
 
     // Retrieve all active (unused, non-expired) OTP records for this email.
-    const records = await this.db.getActiveOtps(normalizedEmail);
+    const records = await this.auth.getActiveOtps(normalizedEmail);
 
     // Use the most recently created record (highest sort key = most recent ISO timestamp).
     const record = records.length > 0 ? records[records.length - 1] : null;
@@ -146,7 +160,7 @@ export class AuthService {
     );
 
     if (!otpMatch) {
-      await this.db.incrementOtpAttempts(normalizedEmail, record.sk);
+      await this.auth.incrementOtpAttempts(normalizedEmail, record.id);
 
       const remaining = OTP_MAX_ATTEMPTS - (record.attempts + 1);
       throw new UnauthorizedException(
@@ -155,16 +169,16 @@ export class AuthService {
     }
 
     // Mark OTP as used (single-use enforcement).
-    await this.db.markOtpUsed(normalizedEmail, record.sk);
+    await this.auth.markOtpUsed(normalizedEmail, record.id);
 
     // Upsert user record (create on first successful login).
-    let user = await this.db.getUserByEmail(normalizedEmail);
+    let user = await this.userRepo.getUserByEmail(normalizedEmail);
 
     if (!user) {
       const newUserId = uuidv4();
-      await this.db.createUser({ id: newUserId, email: normalizedEmail, createdAt: new Date() });
+      await this.userRepo.createUser({ id: newUserId, email: normalizedEmail, createdAt: new Date() });
       // Re-fetch so we have the full UserRecord shape (including nullable profile fields).
-      user = await this.db.getUserById(newUserId);
+      user = await this.userRepo.getUserById(newUserId);
       this.logger.log(`New user created: ${normalizedEmail} (id=${newUserId})`);
     }
 
@@ -192,12 +206,12 @@ export class AuthService {
   async inviteUser(email: string): Promise<{ message: string; email: string }> {
     const normalizedEmail = email.toLowerCase().trim();
 
-    const existing = await this.db.getUserByEmail(normalizedEmail);
+    const existing = await this.userRepo.getUserByEmail(normalizedEmail);
     if (existing) {
       return { message: 'User already exists', email: normalizedEmail };
     }
 
-    await this.db.createUser({
+    await this.userRepo.createUser({
       id: uuidv4(),
       email: normalizedEmail,
       createdAt: new Date(),
@@ -215,19 +229,19 @@ export class AuthService {
     const hashedToken = this.hashRefreshToken(token);
 
     // Look up the refresh token by its hash.
-    const record = await this.db.getRefreshToken(hashedToken);
+    const record = await this.auth.getRefreshToken(hashedToken);
 
     if (!record || record.revoked || record.expiresAt <= new Date()) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    const user = await this.db.getUserById(record.userId);
+    const user = await this.userRepo.getUserById(record.userId);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
 
     // Revoke the current token (token rotation — limits blast radius of theft).
-    await this.db.revokeRefreshToken(record.userId, hashedToken);
+    await this.auth.revokeRefreshToken(record.userId, hashedToken);
 
     // Issue a fresh access token AND a new refresh token.
     const tokens = await this.issueTokens(user.id, user.email, user.role ?? 'user');
@@ -245,21 +259,21 @@ export class AuthService {
   async revokeRefreshToken(token: string): Promise<void> {
     const hashedToken = this.hashRefreshToken(token);
     // The database update is a no-op if the item doesn't exist or is already revoked.
-    await this.db.revokeRefreshToken('', hashedToken);
+    await this.auth.revokeRefreshToken('', hashedToken);
   }
 
   /**
    * Revoke all refresh tokens for a user (logout-all / security reset).
    */
   async revokeAllRefreshTokens(userId: string): Promise<void> {
-    await this.db.revokeAllRefreshTokens(userId);
+    await this.auth.revokeAllRefreshTokens(userId);
     this.logger.log(`All refresh tokens revoked for user ${userId}`);
   }
 
   // ── Profile ───────────────────────────────────────────────────────────────
 
   async getProfile(userId: string): Promise<UserProfile> {
-    const user = await this.db.getUserById(userId);
+    const user = await this.userRepo.getUserById(userId);
     if (!user) throw new UnauthorizedException('User not found');
     return {
       id: user.id,
@@ -294,7 +308,7 @@ export class AuthService {
       }),
     );
 
-    await this.db.updateUserProfile(userId, { photoUrl: s3Key });
+    await this.userRepo.updateUserProfile(userId, { photoUrl: s3Key });
 
     const photoUrl = this.buildPublicPhotoUrl(s3Key)!;
 
@@ -303,9 +317,9 @@ export class AuthService {
   }
 
   async deleteAccount(userId: string): Promise<void> {
-    const user = await this.db.getUserById(userId);
+    const user = await this.userRepo.getUserById(userId);
     if (!user) throw new UnauthorizedException('User not found');
-    await this.db.deleteUser(userId, user.email);
+    await this.userRepo.deleteUser(userId, user.email);
     this.logger.log(`Account deleted: userId=${userId}`);
   }
 
@@ -314,7 +328,7 @@ export class AuthService {
     data: { name?: string; username?: string; photoUrl?: string },
   ): Promise<UserProfile> {
     try {
-      await this.db.updateUserProfile(userId, data);
+      await this.userRepo.updateUserProfile(userId, data);
     } catch (err) {
       if ((err as { code?: string })?.code === 'USERNAME_TAKEN') {
         throw new HttpException('Username already taken', HttpStatus.CONFLICT);
@@ -338,7 +352,7 @@ export class AuthService {
 
   private buildPublicPhotoUrl(s3Key: string): string | null {
     if (!this.bucket) return null;
-    const region = process.env.AWS_REGION ?? 'ap-south-1';
+    const region = this.config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1';
     return `https://${this.bucket}.s3.${region}.amazonaws.com/${s3Key}`;
   }
 
@@ -358,7 +372,7 @@ export class AuthService {
     const hashedRefreshToken = this.hashRefreshToken(refreshToken);
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
 
-    await this.db.createRefreshToken(userId, hashedRefreshToken, expiresAt);
+    await this.auth.createRefreshToken(userId, hashedRefreshToken, expiresAt);
 
     return { accessToken, refreshToken };
   }
@@ -373,7 +387,7 @@ export class AuthService {
    * Returns a 64-character hex string for constant-time comparison.
    */
   private hashOtp(code: string): string {
-    const salt = process.env.OTP_SALT;
+    const salt = this.config?.otpSalt || process.env.OTP_SALT;
     if (!salt) {
       throw new Error(
         'OTP_SALT must be set to a secure random value — ' +

@@ -13,15 +13,21 @@ Or via Docker:
   docker run -p 3070:3070 kokoro-tts-server
 """
 import asyncio
+import base64
 import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 import config
+from alignment_engine import alignment_engine
+from auth import verify_api_key
 from models import (
+    AlignBoundary,
+    AlignRequest,
+    AlignResponse,
     HealthResponse,
     SynthesizeRequest,
     VoiceInfo,
@@ -51,6 +57,16 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         config.HOST,
         config.PORT,
     )
+
+    # Log warning if API key is not configured
+    if not config.KOKORO_API_KEY:
+        logger.warning(
+            "KOKORO_API_KEY is not set — all requests will be allowed without authentication. "
+            "This is suitable for local development only. Set KOKORO_API_KEY in production."
+        )
+    else:
+        logger.info("KOKORO_API_KEY is configured — protected endpoints require Bearer token")
+
     # Kick off model loading in the background — don't await here so the server
     # starts accepting requests (returning 503 from /health until ready).
     asyncio.create_task(engine.load())
@@ -131,6 +147,7 @@ async def health() -> JSONResponse:
     "/voices",
     response_model=VoicesResponse,
     summary="List all available voice IDs and labels",
+    dependencies=[Depends(verify_api_key)],
 )
 async def list_voices() -> VoicesResponse:
     """Returns the full catalog of voice IDs and human-readable labels."""
@@ -151,9 +168,11 @@ async def list_voices() -> VoicesResponse:
             "description": "WAV audio bytes",
         },
         400: {"description": "Invalid input (unknown voice, unsupported language, empty text)"},
+        401: {"description": "Invalid or missing authorization token"},
         503: {"description": "Model not ready yet"},
         408: {"description": "Synthesis timed out"},
     },
+    dependencies=[Depends(verify_api_key)],
 )
 async def synthesize(req: SynthesizeRequest) -> Response:
     """
@@ -212,4 +231,63 @@ async def synthesize(req: SynthesizeRequest) -> Response:
             "X-Voice": req.voice,
             "X-Language": req.language,
         },
+    )
+
+
+@app.post(
+    "/align",
+    response_model=AlignResponse,
+    summary="Forced-align ordered texts against a single concatenated audio",
+    responses={
+        200: {"description": "Per-text {start_ms, end_ms} windows in source order"},
+        400: {"description": "Invalid PCM payload, sample rate, or text list"},
+        401: {"description": "Invalid or missing authorization token"},
+        408: {"description": "Alignment timed out"},
+        500: {"description": "Alignment model failed"},
+    },
+    dependencies=[Depends(verify_api_key)],
+)
+async def align(req: AlignRequest) -> AlignResponse:
+    """
+    Returns one {start_ms, end_ms} window per input text. The caller slices
+    the source PCM at those offsets to recover per-text audio.
+    """
+    try:
+        pcm = base64.b64decode(req.audio_b64, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise HTTPException(status_code=400, detail=f"audio_b64 decode failed: {exc}")
+
+    logger.info(
+        "POST /align — texts=%d, sample_rate=%d, pcm_bytes=%d, language=%s",
+        len(req.texts),
+        req.sample_rate,
+        len(pcm),
+        req.language,
+    )
+
+    try:
+        boundaries, duration_ms = await asyncio.wait_for(
+            alignment_engine.align(pcm, req.sample_rate, req.texts, req.language),
+            timeout=config.ALIGN_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Alignment timed out after %.0fs — texts=%d, pcm_bytes=%d",
+            config.ALIGN_TIMEOUT_SEC,
+            len(req.texts),
+            len(pcm),
+        )
+        raise HTTPException(
+            status_code=408,
+            detail=f"Alignment timed out after {config.ALIGN_TIMEOUT_SEC:.0f}s.",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Alignment failed")
+        raise HTTPException(status_code=500, detail=f"alignment failed: {exc}")
+
+    return AlignResponse(
+        boundaries=[AlignBoundary(start_ms=b.start_ms, end_ms=b.end_ms) for b in boundaries],
+        duration_ms=duration_ms,
     )

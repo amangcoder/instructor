@@ -1,11 +1,23 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsNotEmpty, IsOptional, MaxLength, IsIn, Matches } from 'class-validator';
 
 export class SynthesizeDto {
+  @ApiProperty({
+    description: 'Text to synthesise into speech (max 5000 characters)',
+    example: 'Take a deep breath and relax your shoulders.',
+    maxLength: 5000,
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(5000)
   text!: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Voice ID to use for synthesis. Must contain only alphanumeric characters, hyphens, or underscores.',
+    example: 'af_aoede',
+    maxLength: 200,
+  })
   @IsString()
   @IsOptional()
   @MaxLength(200)
@@ -14,30 +26,36 @@ export class SynthesizeDto {
   })
   voice?: string;
 
-  /**
-   * Locale code for accent selection.
-   * Gemini: 'enIN' | 'enGB' | 'enUS' | 'enAU' | 'enCA'
-   * Kokoro: 'en-us' | 'en-gb'
-   */
+  @ApiPropertyOptional({
+    description:
+      'Locale code for accent selection. ' +
+      'Gemini: enIN | enGB | enUS | enAU | enCA. ' +
+      'Kokoro: en-us | en-gb.',
+    example: 'en-us',
+    maxLength: 20,
+  })
   @IsOptional()
   @IsString()
   @MaxLength(20)
   locale?: string;
 
-  /**
-   * TTS provider to route to.
-   * Defaults to DEFAULT_TTS_PROVIDER env var (fallback: 'kokoro') when not specified.
-   */
+  @ApiPropertyOptional({
+    description: 'TTS provider to route to. Defaults to DEFAULT_TTS_PROVIDER env var (fallback: kokoro).',
+    example: 'kokoro',
+    enum: ['gemini', 'kokoro', 'elevenlabs'],
+  })
   @IsOptional()
   @IsString()
   @IsIn(['gemini', 'kokoro', 'elevenlabs'], { message: 'provider must be "gemini", "kokoro", or "elevenlabs"' })
   provider?: string;
 
-  /**
-   * Speech rate multiplier (e.g. '1.0' = normal, '1.5' = 50% faster).
-   * Used in cache key computation — must match the Flutter client's format.
-   * Defaults to '1.0' when not specified.
-   */
+  @ApiPropertyOptional({
+    description:
+      'Speech rate multiplier as a decimal string (e.g. "1.0" = normal, "1.5" = 50% faster). ' +
+      'Used in cache key computation — must match the Flutter client format.',
+    example: '1.0',
+    pattern: '^[0-3](\\.[0-9]{1,2})?$',
+  })
   @IsOptional()
   @IsString()
   @Matches(/^[0-3](\.\d{1,2})?$/, {

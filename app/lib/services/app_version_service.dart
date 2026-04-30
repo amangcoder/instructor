@@ -130,10 +130,18 @@ class AppVersionService {
 @Riverpod(keepAlive: true)
 AppVersionService appVersionService(Ref ref) => AppVersionService();
 
-/// One-shot check run at startup; the root widget watches this to decide
-/// whether to render the force-update screen.
+/// Periodically re-checks the force-update status. The root widget watches
+/// this to decide whether to render the force-update screen — when the
+/// backend flips the gate on mid-session, the next emission rebuilds the
+/// app into the blocker without a relaunch.
+const Duration _kAppVersionCheckInterval = Duration(minutes: 5);
+
 @Riverpod(keepAlive: true)
-Future<AppVersionCheck> appVersionCheck(Ref ref) {
+Stream<AppVersionCheck> appVersionCheck(Ref ref) async* {
   final service = ref.watch(appVersionServiceProvider);
-  return service.check();
+  yield await service.check();
+  while (true) {
+    await Future<void>.delayed(_kAppVersionCheckInterval);
+    yield await service.check();
+  }
 }

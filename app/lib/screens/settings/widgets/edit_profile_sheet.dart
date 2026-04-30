@@ -94,7 +94,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
               mimeType: mimeType,
             );
       } on AuthException catch (e) {
-        if (mounted) setState(() => _error = e.userMessage);
+        if (mounted) setState(() => _error = e.message);
       } catch (_) {
         if (mounted) setState(() => _error = 'Photo upload failed. Please try again.');
       }
@@ -150,7 +150,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
           );
       if (mounted) Navigator.of(context).pop();
     } on AuthException catch (e) {
-      setState(() => _error = e.userMessage);
+      setState(() => _error = e.message);
     } catch (e) {
       setState(() => _error = 'Something went wrong. Please try again.');
     } finally {

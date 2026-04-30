@@ -10,18 +10,17 @@
  *
  * Local-dev mode (IS_LOCAL=true): uses setImmediate() instead of Lambda self-invocation.
  */
-import { Injectable, Logger } from '@nestjs/common';
-import {
-  LambdaClient,
-  InvokeCommand,
-  InvocationType,
-} from '@aws-sdk/client-lambda';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { S3Client, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { DatabaseService } from '../database/database.service';
+import { TtsRepository } from '../database/repositories/tts.repository';
+import { PlanRepository } from '../database/repositories/plan.repository';
 import { TtsService } from './tts.service';
 import { TtsEnumerationService } from './tts-enumeration.service';
-import type { TtsPregenWorkerTask } from '../lambda';
+import { WorkerDispatchService } from '../worker-dispatch/worker-dispatch.service';
+import type { TtsPregenWorkerTask } from '../worker-dispatch/worker-task.interface';
+import type { AppConfig } from '../config/app-config.interface';
 
 /** How many TTS jobs to dispatch per Lambda worker invocation. */
 const CHUNK_SIZE = 10;
@@ -47,28 +46,32 @@ export class TtsPregenService {
   private readonly logger = new Logger(TtsPregenService.name);
   private readonly s3: S3Client | null;
   private readonly bucket: string | null;
-  private readonly lambda: LambdaClient | null;
+  private readonly ttsRepo: TtsRepository | DatabaseService;
+  private readonly planRepo: PlanRepository | DatabaseService;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly ttsService: TtsService,
     private readonly enumService: TtsEnumerationService,
+    private readonly workerDispatch: WorkerDispatchService,
+    @Optional() @Inject('APP_CONFIG') config?: AppConfig,
+    @Optional() @Inject(TtsRepository) ttsRepository?: TtsRepository,
+    @Optional() @Inject(PlanRepository) planRepository?: PlanRepository,
   ) {
-    this.bucket = process.env.AWS_S3_BUCKET ?? null;
+    this.ttsRepo = ttsRepository ?? db;
+    this.planRepo = planRepository ?? db;
+    this.bucket = (config?.awsS3Bucket || process.env.AWS_S3_BUCKET) ?? null;
     this.s3 = this.bucket
-      ? new S3Client({ region: process.env.AWS_REGION ?? 'ap-south-1' })
+      ? new S3Client({ region: config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1' })
       : null;
-
-    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
-    this.lambda =
-      functionName && !process.env.IS_LOCAL
-        ? new LambdaClient({ region: process.env.AWS_REGION ?? 'ap-south-1' })
-        : null;
   }
 
   /**
    * Begin TTS pre-generation for a plan.
    * Called after plan activation with voiceQuality='studio'.
+   *
+   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.00').
+   *                   Conversion from NUMERIC happens at the repository boundary.
    */
   async startPregen(
     planId: string,
@@ -87,7 +90,7 @@ export class TtsPregenService {
 
     if (pairs.length === 0) {
       this.logger.warn(`startPregen — no TTS pairs found for planId=${planId}, marking complete`);
-      await this.db.setTtsStatus(planId, 'completed', 0, 0);
+      await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
       return;
     }
 
@@ -106,7 +109,7 @@ export class TtsPregenService {
 
     if (uncachedPairs.length === 0) {
       this.logger.log(`startPregen — all ${pairs.length} TTS files already cached for planId=${planId}, marking complete`);
-      await this.db.setTtsStatus(planId, 'completed', 0, 0);
+      await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
       return;
     }
 
@@ -117,7 +120,7 @@ export class TtsPregenService {
     }
 
     // Create job records only for the uncached pairs.
-    const jobRecords = await this.db.createTtsJobs(
+    const jobRecords = await this.ttsRepo.createTtsJobs(
       uncachedPairs.map((p) => ({
         planId,
         cacheKey: p.cacheKey,
@@ -129,7 +132,7 @@ export class TtsPregenService {
       })),
     );
 
-    await this.db.setTtsStatus(planId, 'processing', jobRecords.length, 0);
+    await this.ttsRepo.setTtsStatus(planId, 'processing', jobRecords.length, 0);
     this.logger.log(`startPregen — created ${jobRecords.length} jobs for planId=${planId}`);
 
     // Dispatch worker(s) — chunked to stay within Lambda payload/timeout limits.
@@ -148,7 +151,7 @@ export class TtsPregenService {
   async processJobs(planId: string, jobIds: string[]): Promise<void> {
     this.logger.log(`processJobs — planId=${planId}, jobs=${jobIds.length}`);
 
-    const jobs = await this.db.getTtsJobsByIds(jobIds);
+    const jobs = await this.ttsRepo.getTtsJobsByIds(jobIds);
 
     for (const job of jobs) {
       let lastErr: Error | undefined;
@@ -178,22 +181,22 @@ export class TtsPregenService {
 
       if (!lastErr) {
         const s3Key = `tts/${job.cacheKey}.wav`;
-        await this.db.updateTtsJobStatus(job.id, 'completed', s3Key);
-        await this.db.incrementTtsCompleted(planId);
+        await this.ttsRepo.updateTtsJobStatus(job.id, 'completed', s3Key);
+        await this.ttsRepo.incrementTtsCompleted(planId);
         this.logger.log(`processJobs — job ${job.id} completed (${job.cacheKey.slice(0, 12)}…)`);
       } else {
         this.logger.error(
           `processJobs — job ${job.id} failed after ${MAX_SYNTHESIS_ATTEMPTS} attempts: ${lastErr.message}`,
         );
-        await this.db.updateTtsJobStatus(job.id, 'failed', undefined, lastErr.message);
+        await this.ttsRepo.updateTtsJobStatus(job.id, 'failed', undefined, lastErr.message);
       }
     }
 
     // Check whether all jobs for this plan are now done.
-    const status = await this.db.getPlanTtsStatus(planId);
+    const status = await this.ttsRepo.getPlanTtsStatus(planId);
     const allDone = status.completed + status.failed >= status.total;
     if (allDone) {
-      await this.db.finalizePlanTtsStatus(planId);
+      await this.ttsRepo.finalizePlanTtsStatus(planId);
       this.logger.log(`processJobs — planId=${planId} finalized (${status.completed}/${status.total})`);
     }
   }
@@ -204,7 +207,7 @@ export class TtsPregenService {
    */
   async getStatus(planId: string) {
     await this.recoverIfStale(planId);
-    return this.db.getPlanTtsStatus(planId);
+    return this.ttsRepo.getPlanTtsStatus(planId);
   }
 
   /**
@@ -216,7 +219,7 @@ export class TtsPregenService {
    * plan status — which produces `partial` (some completed) or `failed` (none).
    */
   private async recoverIfStale(planId: string): Promise<void> {
-    const status = await this.db.getPlanTtsStatus(planId);
+    const status = await this.ttsRepo.getPlanTtsStatus(planId);
 
     const isInFlight = status.status === 'pending' || status.status === 'processing';
     if (!isInFlight) return;
@@ -228,8 +231,8 @@ export class TtsPregenService {
       `recoverIfStale — planId=${planId} has been ${status.status} for ${Math.round(ageMs / 60_000)}min, recovering`,
     );
 
-    await this.db.failStalePendingJobs(planId);
-    await this.db.finalizePlanTtsStatus(planId);
+    await this.ttsRepo.failStalePendingJobs(planId);
+    await this.ttsRepo.finalizePlanTtsStatus(planId);
   }
 
   /**
@@ -242,7 +245,7 @@ export class TtsPregenService {
       return {};
     }
 
-    const jobs = await this.db.getCompletedTtsJobs(planId);
+    const jobs = await this.ttsRepo.getCompletedTtsJobs(planId);
     const urlMap: Record<string, string> = {};
 
     await Promise.all(
@@ -280,40 +283,9 @@ export class TtsPregenService {
   }
 
   private async dispatchWorker(task: TtsPregenWorkerTask): Promise<void> {
-    if (process.env.IS_LOCAL) {
-      // Local dev: process asynchronously in-process via setImmediate().
-      this.logger.log(
-        `dispatchWorker (local) — planId=${task.planId}, jobs=${task.jobIds.length}`,
-      );
-      setImmediate(() => {
-        this.processJobs(task.planId, task.jobIds).catch((err) =>
-          this.logger.error(`dispatchWorker setImmediate error: ${err instanceof Error ? err.message : err}`),
-        );
-      });
-      return;
-    }
-
-    // Production: self-invoke this Lambda asynchronously.
-    const functionName = process.env.AWS_LAMBDA_FUNCTION_NAME;
-    if (!functionName || !this.lambda) {
-      this.logger.warn('dispatchWorker — AWS_LAMBDA_FUNCTION_NAME not set, falling back to setImmediate()');
-      setImmediate(() => {
-        this.processJobs(task.planId, task.jobIds).catch((err) =>
-          this.logger.error(`dispatchWorker fallback error: ${err instanceof Error ? err.message : err}`),
-        );
-      });
-      return;
-    }
-
-    await this.lambda.send(
-      new InvokeCommand({
-        FunctionName: functionName,
-        InvocationType: InvocationType.Event, // async, fire-and-forget
-        Payload: Buffer.from(JSON.stringify(task)),
-      }),
-    );
-    this.logger.log(
-      `dispatchWorker — invoked Lambda ${functionName} for planId=${task.planId}, jobs=${task.jobIds.length}`,
+    await this.workerDispatch.dispatchTtsPregen(
+      task,
+      () => this.processJobs(task.planId, task.jobIds),
     );
   }
 }

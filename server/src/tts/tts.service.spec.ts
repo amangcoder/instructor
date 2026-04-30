@@ -190,6 +190,43 @@ describe('TtsService', () => {
       const body = JSON.parse((init as RequestInit).body as string);
       expect(body.contents[0].parts[0].text).toBe('Hello');
     });
+
+    // SSML <lang> wrapping is exercised through geminiTtsRequestBody, which
+    // invokes the same buildPrompt path used by the live Gemini fetch but
+    // returns a plain object — sidestepping the synthesize() cache + provider
+    // routing that those higher-level tests depend on.
+
+    it('wraps SSML body in <lang xml:lang="…"> for SSML input + known locale', () => {
+      const ssml = '<speak>step one<break time="2500ms"/>step two</speak>';
+      const out = service.geminiTtsRequestBody(ssml, 'aoede', 'enIN') as {
+        body: { contents: Array<{ parts: Array<{ text: string }> }> };
+      };
+      const text = out.body.contents[0].parts[0].text;
+      // No plain-text prefix (would clobber <break>).
+      expect(text).not.toContain('Say the following');
+      // Body wrapped, breaks preserved, root <speak> intact.
+      expect(text).toBe(
+        '<speak><lang xml:lang="en-IN">step one<break time="2500ms"/>step two</lang></speak>',
+      );
+    });
+
+    it('uses the BCP-47 tag for non-English locales in SSML', () => {
+      const ssml = '<speak>hola<break time="1000ms"/>mundo</speak>';
+      const out = service.geminiTtsRequestBody(ssml, 'aoede', 'es') as {
+        body: { contents: Array<{ parts: Array<{ text: string }> }> };
+      };
+      const text = out.body.contents[0].parts[0].text;
+      expect(text).toContain('<lang xml:lang="es-ES">');
+      expect(text).toContain('<break time="1000ms"/>');
+    });
+
+    it('leaves SSML untouched when locale has no BCP-47 mapping', () => {
+      const ssml = '<speak>hello</speak>';
+      const out = service.geminiTtsRequestBody(ssml, 'aoede', 'enXX') as {
+        body: { contents: Array<{ parts: Array<{ text: string }> }> };
+      };
+      expect(out.body.contents[0].parts[0].text).toBe(ssml);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -736,19 +773,19 @@ describe('TtsService', () => {
   // Backward compatibility (TASK-005)
   // -------------------------------------------------------------------------
 
-  describe('backward compatibility — legacy cache key fallback', () => {
-    it('falls back to legacy cache key (no provider) when new key misses', async () => {
-      // This test verifies the backward compat fallback described in TASK-005:
-      // When new key (with provider) misses but old key (without provider) hits,
-      // the old file is reused and promoted to the new key.
-      //
-      // Since this requires internal cache state, we test via a round-trip:
-      // 1) Synthesize without provider (old behavior) → writes to legacy key
-      // 2) Synthesize with provider='gemini' → should find the legacy cache entry
+  describe('legacy cache key removal (TASK-005)', () => {
+    it('does not check legacy cache keys — single key lookup only', async () => {
+      // After TASK-005, readCache no longer accepts a legacyHash parameter.
+      // This test verifies that synthesize() uses only the new cache key format.
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeGeminiResponse(silentPcmBase64()),
+      } as unknown as Response);
 
-      // The test is marked as a contract test — the implementation must satisfy it.
-      // Full validation requires an integration test with real disk cache.
-      expect(true).toBe(true); // Placeholder: full test in tts.e2e-spec.ts
+      await service.synthesize('Test', 'aoede');
+
+      // Synthesis should be called (cache miss on single key lookup)
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

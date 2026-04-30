@@ -3,6 +3,7 @@ import { adminFetch, AdminApiError } from '@/lib/admin-api';
 import StatCard from '@/components/admin/StatCard';
 import RangePicker from '@/components/admin/RangePicker';
 import SparklineChart from '@/components/admin/SparklineChart';
+import ChartErrorBoundary from '@/components/admin/ChartErrorBoundary';
 import DataTableToggle from '@/components/admin/DataTableToggle';
 import EmptyState from '@/components/admin/EmptyState';
 import ActivityFeedWidget from '@/components/admin/ActivityFeedWidget';
@@ -126,12 +127,14 @@ export default async function AdminOverviewPage({
                 >
                   {weeklyPlansPlayed.sparkline.length > 0 && (
                     <div className="flex items-end gap-3">
-                      <SparklineChart
-                        points={weeklyPlansPlayed.sparkline}
-                        width={200}
-                        height={48}
-                        color="#4ade80"
-                      />
+                      <ChartErrorBoundary key={range}>
+                        <SparklineChart
+                          points={weeklyPlansPlayed.sparkline}
+                          width={200}
+                          height={48}
+                          color="#4ade80"
+                        />
+                      </ChartErrorBoundary>
                       <span className="text-xs text-on-surface-variant pb-1">
                         {weeklyPlansPlayed.sparkline.length}-day trend
                       </span>

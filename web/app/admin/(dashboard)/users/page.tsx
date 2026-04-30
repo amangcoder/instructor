@@ -161,7 +161,7 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
               />
             </div>
             <div className="rounded-xl bg-surface-container shadow-sm p-6">
-              <ChartErrorBoundary>
+              <ChartErrorBoundary key={range}>
                 <TimeSeriesChart
                   data={signupsData.series}
                   xKey="date"
@@ -221,7 +221,7 @@ export default async function AdminUsersPage({ searchParams }: UsersPageProps) {
               />
             </div>
             <div className="rounded-xl bg-surface-container shadow-sm p-6">
-              <ChartErrorBoundary>
+              <ChartErrorBoundary key={range}>
                 <TimeSeriesChart
                   data={activationSeries}
                   xKey="date"

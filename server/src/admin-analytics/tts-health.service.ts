@@ -16,9 +16,9 @@
  *   - 'unknown':  no jobs in last 60min (totalCount === 0)
  */
 
-import { Injectable, Logger } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 import type {
   TtsHealthResponse,
   TtsProviderHealth,
@@ -30,8 +30,10 @@ const PROVIDERS = ['kokoro', 'elevenlabs'] as const;
 @Injectable()
 export class TtsHealthService {
   private readonly logger = new Logger(TtsHealthService.name);
-
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   /**
    * Get TTS provider health status for all providers.
@@ -44,38 +46,22 @@ export class TtsHealthService {
    */
   async getTtsHealth(): Promise<TtsHealthResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
       const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
 
       // Run all provider queries in parallel
       const results = await Promise.all(
         PROVIDERS.map(async (provider): Promise<TtsProviderHealth> => {
-          const [countsResult, lastSuccessResult] = await Promise.all([
-            // Total + failed count in last 60min
-            drizzle.execute(sql`
-              SELECT
-                COUNT(*)::int AS total,
-                COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
-              FROM tts_jobs
-              WHERE created_at >= ${sixtyMinAgo}
-                AND provider = ${provider}
-            `),
-            // Last successful job timestamp
-            drizzle.execute(sql`
-              SELECT MAX(created_at) AS last_success_at
-              FROM tts_jobs
-              WHERE status = 'completed'
-                AND provider = ${provider}
-            `),
-          ]);
+          let total: number;
+          let failed: number;
+          let lastSuccessAt: Date | null;
 
-          const countsRow = (countsResult.rows as Array<Record<string, unknown>>)[0] ?? {};
-          const total = Number(countsRow.total ?? 0);
-          const failed = Number(countsRow.failed ?? 0);
-
-          const lastSuccessRow = (lastSuccessResult.rows as Array<Record<string, unknown>>)[0] ?? {};
-          const lastSuccessRaw = lastSuccessRow.last_success_at;
-          const lastSuccessAt = lastSuccessRaw ? new Date(lastSuccessRaw as string) : null;
+          const [counts, lastSuccess] = await Promise.all([
+              this.repo.getTtsProviderCounts(provider, sixtyMinAgo),
+              this.repo.getTtsLastSuccess(provider),
+            ]);
+            total = counts.total;
+            failed = counts.failed;
+            lastSuccessAt = lastSuccess;
 
           // Calculate error rate
           const errorRate = total > 0 ? failed / total : 0;

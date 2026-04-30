@@ -10,9 +10,9 @@
  * Categories returned include all known categories even if they have zero plans.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 import type { AnalyticsRange } from '../admin/dto/analytics.dto';
 import { rangeToDate } from './dto/range-query.dto';
 import type { LibraryCategoryResponse, CategoryRow } from './dto/library-category.dto';
@@ -31,8 +31,10 @@ const ALL_CATEGORIES = [
 @Injectable()
 export class LibraryCategoryService {
   private readonly logger = new Logger(LibraryCategoryService.name);
-
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   /**
    * Get library plan category breakdown.
@@ -48,40 +50,17 @@ export class LibraryCategoryService {
    */
   async getLibraryCategories(range: AnalyticsRange): Promise<LibraryCategoryResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
       const startDate = rangeToDate(range);
       const now = new Date();
 
-      // Single query that joins library_plans → plans → session_completions
-      // and groups by category
-      const rows = await drizzle.execute(sql`
-        SELECT
-          lp.category,
-          COUNT(DISTINCT lp.id) FILTER (WHERE lp.is_published = true)::int AS published_plans,
-          COUNT(DISTINCT p.user_id) FILTER (
-            WHERE p.created_at >= ${startDate}
-              AND p.created_at <= ${now}
-          )::int AS total_adoptions,
-          COUNT(DISTINCT sc.id) FILTER (
-            WHERE sc.completed_at >= ${startDate}
-              AND sc.completed_at <= ${now}
-          )::int AS total_sessions
-        FROM library_plans lp
-        LEFT JOIN plans p
-          ON p.source_library_plan_id = lp.id
-        LEFT JOIN session_completions sc
-          ON sc.plan_id = p.id
-        GROUP BY lp.category
-        ORDER BY lp.category
-      `);
+      let rawRows: Array<{ category: string; publishedPlans: number; totalAdoptions: number; totalSessions: number }>;
+
+      rawRows = await this.repo.getLibraryCategoryBreakdown(startDate, now);
 
       // Build a map from the query results
       const categoryMap = new Map<string, CategoryRow>();
-      for (const row of rows.rows as Array<Record<string, unknown>>) {
-        const category = String(row.category ?? '');
-        const publishedPlans = Number(row.published_plans ?? 0);
-        const totalAdoptions = Number(row.total_adoptions ?? 0);
-        const totalSessions = Number(row.total_sessions ?? 0);
+      for (const row of rawRows) {
+        const { category, publishedPlans, totalAdoptions, totalSessions } = row;
         const conversionRate = totalAdoptions > 0
           ? Math.round((totalSessions / totalAdoptions) * 10000) / 10000
           : 0;

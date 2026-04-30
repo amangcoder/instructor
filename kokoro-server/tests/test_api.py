@@ -445,3 +445,181 @@ class TestSynthesizeRequest:
         from config import MAX_TEXT_LENGTH
         with pt.raises(Exception):
             SynthesizeRequest(text="A" * (MAX_TEXT_LENGTH + 1), voice="af_aoede")
+
+
+# ---------------------------------------------------------------------------
+# API key authentication tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestBearerTokenAuthentication:
+    """Tests for Authorization: Bearer token authentication on protected endpoints."""
+
+    async def test_synthesize_returns_401_without_auth_header_when_configured(self):
+        """POST /synthesize without Authorization header returns 401 when KOKORO_API_KEY is set."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = "test-secret-key"
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        engine.synthesize = AsyncMock(return_value=MOCK_WAV)
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post(
+                "/synthesize",
+                json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+            )
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 401
+
+    async def test_synthesize_returns_200_with_valid_bearer_token(self):
+        """POST /synthesize with valid Bearer token returns 200."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = "test-secret-key"
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        engine.synthesize = AsyncMock(return_value=MOCK_WAV)
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post(
+                "/synthesize",
+                json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+                headers={"Authorization": "Bearer test-secret-key"},
+            )
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 200
+
+    async def test_synthesize_returns_401_with_wrong_bearer_token(self):
+        """POST /synthesize with wrong Bearer token returns 401."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = "test-secret-key"
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post(
+                "/synthesize",
+                json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+                headers={"Authorization": "Bearer wrong-key"},
+            )
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 401
+
+    async def test_synthesize_returns_401_with_malformed_auth_header(self):
+        """POST /synthesize with non-Bearer Authorization header returns 401 (invalid token)."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = "test-secret-key"
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post(
+                "/synthesize",
+                json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+                headers={"Authorization": "Basic test-secret-key"},
+            )
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 401
+
+    async def test_health_returns_200_without_auth_header(self):
+        """GET /health returns 200 with no Authorization header (liveness probe exempt)."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = "test-secret-key"
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        engine.available_voices.return_value = ["af_aoede"]
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.get("/health")
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 200
+
+    async def test_voices_returns_401_without_auth_header_when_configured(self):
+        """GET /voices without Authorization header returns 401 when KOKORO_API_KEY is set."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = "test-secret-key"
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.get("/voices")
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 401
+
+    async def test_all_requests_allowed_without_api_key_configured(self):
+        """When KOKORO_API_KEY is unset, all requests are allowed."""
+        import importlib
+        import config as cfg_module
+        original_key = cfg_module.KOKORO_API_KEY
+        cfg_module.KOKORO_API_KEY = ""
+
+        import main as main_module
+        importlib.reload(main_module)
+
+        engine = MagicMock()
+        engine.is_ready = True
+        engine.load_error = None
+        engine.synthesize = AsyncMock(return_value=MOCK_WAV)
+        main_module.engine = engine
+
+        transport = ASGITransport(app=main_module.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post(
+                "/synthesize",
+                json={"text": "Hello", "voice": "af_aoede", "language": "en-us"},
+            )
+        cfg_module.KOKORO_API_KEY = original_key
+        assert res.status_code == 200

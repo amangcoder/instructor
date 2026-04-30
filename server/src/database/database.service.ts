@@ -29,7 +29,7 @@
  *   NODE_ENV      — set to "production" to suppress Drizzle query logs
  */
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional, Inject } from '@nestjs/common';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { and, asc, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
@@ -37,6 +37,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
 import { deletionRequests, libraryPlans, otpRecords, planTriggers, plans, refreshTokens, sessionCompletions, ttsJobs, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
+import type { AppConfig } from '../config/app-config.interface';
 
 // ── Typed result shapes returned to callers ────────────────────────────────
 
@@ -51,13 +52,13 @@ export interface UserRecord {
 }
 
 /**
- * CRITICAL: OtpRecord.sk maps from the PostgreSQL otp_records.id (UUID PK).
- * AuthService calls markOtpUsed(email, record.sk) and
- * incrementOtpAttempts(email, record.sk) using this field as the row identifier.
+ * OtpRecord represents a one-time password record.
+ * The id field maps from the PostgreSQL otp_records.id (UUID primary key).
+ * AuthService uses this id as the row identifier for operations like markOtpUsed and incrementOtpAttempts.
  */
 export interface OtpRecord {
-  /** Mapped from otp_records.id — used as the row identifier by AuthService */
-  sk: string;
+  /** Mapped from otp_records.id — the UUID primary key */
+  id: string;
   email: string;
   /** Mapped from otp_records.code_hash */
   code: string;
@@ -71,8 +72,8 @@ export interface RefreshTokenRecord {
   tokenHash: string;
   revoked: boolean;
   expiresAt: Date;
-  /** Mapped from refresh_tokens.id */
-  sk: string;
+  /** Mapped from refresh_tokens.id — the UUID primary key */
+  id: string;
 }
 
 export interface PlanRecord {
@@ -184,8 +185,10 @@ export class DatabaseService {
   readonly noop: boolean;
 
 
-  constructor() {
-    const databaseUrl = process.env.DATABASE_URL;
+  constructor(
+    @Optional() @Inject('APP_CONFIG') config?: AppConfig,
+  ) {
+    const databaseUrl = config?.databaseUrl || process.env.DATABASE_URL;
 
     if (!databaseUrl) {
       this.logger.warn(
@@ -200,7 +203,8 @@ export class DatabaseService {
 
     // Disable Drizzle query logging in production to prevent accidental
     // leakage of parameter values (tokens, hashed passwords, etc.) in logs.
-    const enableLogger = process.env.NODE_ENV !== 'production';
+    const nodeEnv = config?.nodeEnv ?? process.env.NODE_ENV;
+    const enableLogger = nodeEnv !== 'production';
 
     const sqlClient = neon(databaseUrl);
     this.db = drizzle(sqlClient, {
@@ -379,7 +383,7 @@ export class DatabaseService {
     );
 
     return rows.map((row) => ({
-      sk: row.id,
+      id: row.id,
       email: row.email,
       code: row.codeHash,
       expiresAt: row.expiresAt,
@@ -458,7 +462,7 @@ export class DatabaseService {
       tokenHash: row.tokenHash,
       revoked: row.revoked,
       expiresAt: row.expiresAt,
-      sk: row.id,
+      id: row.id,
     };
   }
 
@@ -1192,6 +1196,14 @@ export class DatabaseService {
   }
 
   private mapTtsJobRecord(row: typeof ttsJobs.$inferSelect): TtsJobRecord {
+    // After migration 0011, speechRate is NUMERIC(4,2), not TEXT.
+    // Convert to string with 2 decimal places (toFixed(2)) for cache key consistency
+    // with Flutter client's hash_utils.dart fullParamCacheKey().
+    const speechRateStr =
+      typeof row.speechRate === 'number'
+        ? (row.speechRate as number).toFixed(2)
+        : String(row.speechRate);
+
     return {
       id: row.id,
       planId: row.planId,
@@ -1200,7 +1212,7 @@ export class DatabaseService {
       voiceId: row.voiceId,
       locale: row.locale,
       provider: row.provider,
-      speechRate: row.speechRate,
+      speechRate: speechRateStr,
       s3Key: row.s3Key ?? null,
       status: row.status,
       error: row.error ?? null,

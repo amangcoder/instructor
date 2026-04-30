@@ -3,7 +3,10 @@ import {
   Logger,
   BadGatewayException,
   BadRequestException,
+  Optional,
+  Inject,
 } from '@nestjs/common';
+import type { AppConfig } from '../../config/app-config.interface';
 
 export interface KokoroSynthesizeParams {
   text: string;
@@ -16,11 +19,13 @@ export interface KokoroSynthesizeParams {
 export class KokoroProxyService {
   private readonly logger = new Logger(KokoroProxyService.name);
   private readonly kokoroUrl: string;
+  private readonly apiKey: string | null;
   private readonly synthTimeoutMs = 120_000;
 
-  constructor() {
+  constructor(@Optional() @Inject('APP_CONFIG') config?: AppConfig) {
     this.kokoroUrl =
-      process.env.KOKORO_SERVER_URL ?? 'http://127.0.0.1:3070';
+      config?.kokoroServerUrl ?? process.env.KOKORO_SERVER_URL ?? 'http://127.0.0.1:3070';
+    this.apiKey = (config?.kokoroApiKey || process.env.KOKORO_API_KEY) ?? null;
   }
 
   /**
@@ -40,9 +45,14 @@ export class KokoroProxyService {
 
     let response: Response;
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.apiKey) {
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+      }
+
       response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text, voice, language, speed }),
         signal: AbortSignal.timeout(this.synthTimeoutMs),
       });
@@ -79,7 +89,13 @@ export class KokoroProxyService {
   /** Quick health check — returns true if Kokoro is ready. */
   async isHealthy(): Promise<boolean> {
     try {
+      const headers: Record<string, string> = {};
+      if (this.apiKey) {
+        headers['Authorization'] = `Bearer ${this.apiKey}`;
+      }
+
       const resp = await fetch(`${this.kokoroUrl}/health`, {
+        headers,
         signal: AbortSignal.timeout(3_000),
       });
       if (!resp.ok) return false;

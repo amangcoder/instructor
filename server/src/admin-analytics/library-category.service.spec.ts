@@ -11,17 +11,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LibraryCategoryService } from './library-category.service';
 import { DatabaseService } from '../database/database.service';
-
-function createMockDatabaseService() {
-  const mockDb = {
-    execute: jest.fn(),
-  };
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
+import { createMockDatabaseService } from '../database/testing';
 
 describe('LibraryCategoryService', () => {
   let service: LibraryCategoryService;

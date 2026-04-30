@@ -6,3 +6,10 @@ uvicorn>=0.30.0
 
 # Kokoro ONNX TTS library (pulls in onnxruntime and numpy transitively)
 kokoro-onnx>=0.4.0
+
+# Forced alignment for batch-TTS chunk splitting.
+# Pin torch CPU build size by installing torch>=2.2 and the matching torchaudio.
+# CUDA users override via TORCH_INDEX_URL at install time.
+torch>=2.2
+torchaudio>=2.2
+ctc-forced-aligner @ git+https://github.com/MahmoudAshraf97/ctc-forced-aligner.git

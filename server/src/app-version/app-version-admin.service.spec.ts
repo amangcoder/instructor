@@ -14,28 +14,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AppVersionAdminService } from './app-version-admin.service';
 import { DatabaseService } from '../database/database.service';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
 // Mock factory
 // ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    returning: jest.fn().mockResolvedValue([]),
-  };
-
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
 
 const DEFAULT_CONFIG = {
   id: 'config-uuid-001',

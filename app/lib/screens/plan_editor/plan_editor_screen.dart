@@ -201,7 +201,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           _description = plan.description ?? '';
           _category = plan.category;
           _tags = List<String>.from(plan.tags);
-          _defaultVoice = PlanVoice.values.map((v) => v.name).contains(plan.defaultVoice)
+          _defaultVoice = plan.defaultVoice.isNotEmpty
               ? plan.defaultVoice
               : _staticActiveDefaultVoice();
           _ttsStatus = plan.ttsStatus;

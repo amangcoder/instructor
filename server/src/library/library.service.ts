@@ -1,20 +1,27 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { LibraryRepository } from '../database/repositories/library.repository';
 import { CreateLibraryPlanDto } from './dto/create-library-plan.dto';
 import { UpdateLibraryPlanDto } from './dto/update-library-plan.dto';
 
 @Injectable()
 export class LibraryService {
   private readonly logger = new Logger(LibraryService.name);
+  private readonly repo: LibraryRepository | DatabaseService;
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Optional() @Inject(LibraryRepository) libraryRepo?: LibraryRepository,
+  ) {
+    this.repo = libraryRepo ?? db;
+  }
 
   /**
    * List all library plans regardless of publish status (admin only).
    */
   async getAllPlans() {
     this.logger.log('getAllPlans — admin');
-    return this.db.listAllLibraryPlans();
+    return this.repo.listAllLibraryPlans();
   }
 
   /**
@@ -24,7 +31,7 @@ export class LibraryService {
     this.logger.log(
       `listPlans — page=${page}, category=${category ?? 'all'}, search=${search ?? 'none'}`,
     );
-    return this.db.listLibraryPlans(page, category, search);
+    return this.repo.listLibraryPlans(page, category, search);
   }
 
   /**
@@ -33,7 +40,7 @@ export class LibraryService {
    */
   async getPlanById(id: string) {
     this.logger.log(`getPlanById — id=${id}`);
-    return this.db.getLibraryPlanById(id);
+    return this.repo.getLibraryPlanById(id);
   }
 
   /**
@@ -41,9 +48,9 @@ export class LibraryService {
    */
   async createPlan(dto: CreateLibraryPlanDto) {
     this.logger.log(`createPlan — name="${dto.name}", category=${dto.category}`);
-    return this.db.createLibraryPlan({
+    return this.repo.createLibraryPlan({
       name: dto.name,
-      description: dto.description,
+      description: dto.description ?? '',
       category: dto.category,
       tags: dto.tags ?? '',
       defaultVoice: dto.defaultVoice,
@@ -60,7 +67,7 @@ export class LibraryService {
    */
   async updatePlan(id: string, dto: UpdateLibraryPlanDto) {
     this.logger.log(`updatePlan — id=${id}`);
-    return this.db.updateLibraryPlan(id, dto);
+    return this.repo.updateLibraryPlan(id, dto);
   }
 
   /**
@@ -69,6 +76,6 @@ export class LibraryService {
    */
   async deletePlan(id: string): Promise<boolean> {
     this.logger.log(`deletePlan — id=${id}`);
-    return this.db.deleteLibraryPlan(id);
+    return this.repo.deleteLibraryPlan(id);
   }
 }

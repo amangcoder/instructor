@@ -18,32 +18,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { AdminUsersService } from './admin-users.service';
 import { DatabaseService } from '../database/database.service';
-
-// ---------------------------------------------------------------------------
-// Mock factory
-// ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockReturnThis(),
-    offset: jest.fn().mockResolvedValue([]),
-    innerJoin: jest.fn().mockReturnThis(),
-    update: jest.fn().mockReturnThis(),
-    set: jest.fn().mockReturnThis(),
-    returning: jest.fn().mockResolvedValue([]),
-    execute: jest.fn(),
-  };
-
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
+import { createMockDatabaseService } from '../database/testing';
 
 const USER_ID = 'user-uuid-001';
 const NOW = new Date('2026-04-21T12:00:00Z');

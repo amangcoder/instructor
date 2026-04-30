@@ -17,6 +17,7 @@ import 'package:instructor/database/tables/settings_table.dart';
 import 'package:instructor/database/tables/streak_freezes_table.dart';
 import 'package:instructor/database/tables/tts_cache_table.dart';
 import 'package:instructor/database/type_converters.dart';
+import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
 
 part 'app_database.g.dart';

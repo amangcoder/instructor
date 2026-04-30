@@ -12,28 +12,8 @@ import {
   sanitizeErrorMessage,
 } from './admin-analytics.service';
 import { DatabaseService } from '../database/database.service';
-
-// ---------------------------------------------------------------------------
-// Mock DatabaseService
-// ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    select: jest.fn().mockReturnThis(),
-    from: jest.fn().mockReturnThis(),
-    where: jest.fn().mockReturnThis(),
-    groupBy: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    execute: jest.fn(),
-  };
-
-  return {
-    noop: false,
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
+import { AdminAnalyticsRepository } from '../database/repositories';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
 // fillDateGaps utility tests
@@ -118,6 +98,7 @@ describe('AdminAnalyticsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminAnalyticsService,
+        AdminAnalyticsRepository,
         { provide: DatabaseService, useValue: dbService },
       ],
     }).compile();

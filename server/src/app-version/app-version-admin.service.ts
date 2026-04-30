@@ -17,10 +17,10 @@ import {
   Logger,
   NotFoundException,
   UnprocessableEntityException,
+  Inject,
 } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service';
-import { appVersionConfig } from '../database/schema';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 import { compareVersions } from './app-version.service';
 import type { UpdateVersionConfigDto } from './dto/update-version-config.dto';
 
@@ -39,8 +39,10 @@ export interface AppVersionConfigResponse {
 @Injectable()
 export class AppVersionAdminService {
   private readonly logger = new Logger(AppVersionAdminService.name);
-
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   /**
    * Read the current version configuration from the DB.
@@ -50,18 +52,14 @@ export class AppVersionAdminService {
    */
   async getVersionConfig(): Promise<AppVersionConfigResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let config: any;
 
-      const rows = await drizzle
-        .select()
-        .from(appVersionConfig)
-        .limit(1);
+      config = await this.repo.getAppVersionConfig();
 
-      if (rows.length === 0) {
+      if (!config) {
         throw new NotFoundException('App version config not found');
       }
 
-      const config = rows[0];
       return {
         ios: {
           minVersion: config.iosMinVersion,
@@ -90,19 +88,13 @@ export class AppVersionAdminService {
     dto: UpdateVersionConfigDto,
   ): Promise<AppVersionConfigResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let current: any;
 
-      // Read current config to merge with incoming DTO for validation
-      const currentRows = await drizzle
-        .select()
-        .from(appVersionConfig)
-        .limit(1);
+      current = await this.repo.getAppVersionConfig();
 
-      if (currentRows.length === 0) {
+      if (!current) {
         throw new NotFoundException('App version config not found');
       }
-
-      const current = currentRows[0];
 
       // Merge DTO with current values
       const iosMin = dto.iosMinVersion ?? current.iosMinVersion;
@@ -123,20 +115,14 @@ export class AppVersionAdminService {
       }
 
       // Build SET clause from provided DTO fields
-      const setClause: Partial<typeof appVersionConfig.$inferInsert> = {
-        updatedAt: new Date(),
-      };
+      const setClause: Record<string, unknown> = { updatedAt: new Date() };
       if (dto.iosMinVersion !== undefined) setClause.iosMinVersion = dto.iosMinVersion;
       if (dto.androidMinVersion !== undefined) setClause.androidMinVersion = dto.androidMinVersion;
       if (dto.iosForceVersion !== undefined) setClause.iosForceVersion = dto.iosForceVersion;
       if (dto.androidForceVersion !== undefined) setClause.androidForceVersion = dto.androidForceVersion;
       if (dto.forceUpdateEnabled !== undefined) setClause.forceUpdateEnabled = dto.forceUpdateEnabled;
 
-      const result = await drizzle
-        .update(appVersionConfig)
-        .set(setClause)
-        .where(eq(appVersionConfig.id, current.id))
-        .returning();
+      const result = await this.repo.updateAppVersionConfig(current.id, setClause);
 
       if (result.length === 0) {
         throw new NotFoundException('App version config not found');

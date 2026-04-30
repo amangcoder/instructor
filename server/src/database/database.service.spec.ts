@@ -10,7 +10,7 @@
  *      query-building and result-mapping logic.
  *
  * Key acceptance-criteria verified:
- *   - OtpRecord.sk maps from otp_records.id (not a composite DynamoDB key)
+ *   - OtpRecord.id maps from otp_records.id (not a composite DynamoDB key)
  *   - OtpRecord.code maps from otp_records.code_hash
  *   - createUser re-throws PostgreSQL 23505 as { code: 'USER_ALREADY_EXISTS' }
  *   - invalidateOtpsForEmail issues a single UPDATE (no TOCTOU race)
@@ -187,11 +187,11 @@ describe('DatabaseService — noop mode (no DATABASE_URL)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// OtpRecord.sk field mapping (CRITICAL acceptance criterion)
+// OtpRecord.id field mapping (CRITICAL acceptance criterion)
 // ---------------------------------------------------------------------------
 
-describe('DatabaseService — OtpRecord.sk field mapping', () => {
-  it('getActiveOtps maps sk from otp_records.id (not a DynamoDB composite key)', async () => {
+describe('DatabaseService — OtpRecord.id field mapping', () => {
+  it('getActiveOtps maps id from otp_records.id (not a DynamoDB composite key)', async () => {
     const mockOtpId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
     const mockRow = {
       id: mockOtpId,
@@ -209,8 +209,8 @@ describe('DatabaseService — OtpRecord.sk field mapping', () => {
 
     expect(result).toHaveLength(1);
 
-    // CRITICAL: sk must equal the otp_records.id UUID
-    expect(result[0].sk).toBe(mockOtpId);
+    // CRITICAL: id must equal the otp_records.id UUID
+    expect(result[0].id).toBe(mockOtpId);
 
     // code must map from code_hash, not the raw id
     expect(result[0].code).toBe('abc123hashvalue64chars');
@@ -229,7 +229,7 @@ describe('DatabaseService — OtpRecord.sk field mapping', () => {
     expect(result).toEqual([]);
   });
 
-  it('AuthService can use record.sk for markOtpUsed after getActiveOtps', async () => {
+  it('AuthService can use record.id for markOtpUsed after getActiveOtps', async () => {
     // Simulate the AuthService pattern: get active OTPs, then mark one used
     const otpId = '11111111-2222-3333-4444-555555555555';
     const mockRow = {
@@ -246,14 +246,14 @@ describe('DatabaseService — OtpRecord.sk field mapping', () => {
     const service = createServiceWithMockDb(selectDbMock);
 
     const otps = await service.getActiveOtps('bob@example.com');
-    expect(otps[0].sk).toBe(otpId);
+    expect(otps[0].id).toBe(otpId);
 
     // Inject update mock for markOtpUsed
     const { update: updateFn, _where: whereFn } = updateMock();
     (service as unknown as { db: unknown }).db = { update: updateFn };
 
-    // AuthService calls markOtpUsed(email, record.sk)
-    await service.markOtpUsed('bob@example.com', otps[0].sk);
+    // AuthService calls markOtpUsed(email, record.id)
+    await service.markOtpUsed('bob@example.com', otps[0].id);
     expect(updateFn).toHaveBeenCalledTimes(1);
     expect(whereFn).toHaveBeenCalledTimes(1);
   });
@@ -395,7 +395,7 @@ describe('DatabaseService — getRefreshToken', () => {
     await expect(service.getRefreshToken('missing-hash')).resolves.toBeNull();
   });
 
-  it('returns RefreshTokenRecord with sk mapped from id', async () => {
+  it('returns RefreshTokenRecord with id mapped from id', async () => {
     const tokenId = 'aaaabbbb-cccc-dddd-eeee-ffffffffffff';
     const expiresAt = new Date(Date.now() + 3_600_000);
     const mockDb = selectMockWithLimit([
@@ -411,7 +411,7 @@ describe('DatabaseService — getRefreshToken', () => {
 
     const result = await service.getRefreshToken('sha256hash');
     expect(result).not.toBeNull();
-    expect(result!.sk).toBe(tokenId);
+    expect(result!.id).toBe(tokenId);
     expect(result!.tokenHash).toBe('sha256hash');
     expect(result!.userId).toBe('user-xyz');
     expect(result!.revoked).toBe(false);

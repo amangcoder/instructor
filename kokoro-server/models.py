@@ -58,3 +58,44 @@ class HealthResponse(BaseModel):
     status: str  # 'ready' | 'loading' | 'error'
     model: str
     voices: List[str]
+
+
+class AlignRequest(BaseModel):
+    """POST /align — request body.
+
+    Caller sends raw 16-bit little-endian mono PCM (base64-encoded) plus the
+    ordered list of texts that produced it. The server returns one
+    {start_ms, end_ms} window per input text.
+    """
+
+    audio_b64: str = Field(..., description="Base64-encoded 16-bit LE mono PCM.")
+    sample_rate: int = Field(..., gt=0, description="Sample rate of the supplied PCM.")
+    texts: List[str] = Field(..., min_length=1, description="Ordered text chunks the audio was generated from.")
+    language: str = Field("eng", description="ISO-639-3 language code (e.g. 'eng', 'hin', 'spa').")
+
+    @field_validator("texts")
+    @classmethod
+    def texts_non_empty(cls, v: List[str]) -> List[str]:
+        cleaned = [t.strip() for t in v]
+        if any(not t for t in cleaned):
+            raise ValueError("texts entries must not be empty")
+        return cleaned
+
+    @field_validator("language")
+    @classmethod
+    def language_normalize(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class AlignBoundary(BaseModel):
+    """One {start_ms, end_ms} window in the source audio."""
+
+    start_ms: int
+    end_ms: int
+
+
+class AlignResponse(BaseModel):
+    """POST /align — response body."""
+
+    boundaries: List[AlignBoundary]
+    duration_ms: int

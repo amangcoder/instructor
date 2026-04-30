@@ -14,21 +14,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ActivityFeedService } from './activity-feed.service';
 import { DatabaseService } from '../database/database.service';
-
-// ---------------------------------------------------------------------------
-// Mock DatabaseService
-// ---------------------------------------------------------------------------
-
-function createMockDatabaseService() {
-  const mockDb = {
-    execute: jest.fn(),
-  };
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
+import { createMockDatabaseService } from '../database/testing';
 
 const BASE_DATE = new Date('2026-04-21T12:00:00Z');
 

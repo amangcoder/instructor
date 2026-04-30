@@ -77,7 +77,7 @@ class _OtpVerificationScreenState
     } on AuthException catch (e) {
       HapticFeedback.mediumImpact();
       if (mounted) {
-        setState(() => _errorMessage = e.userMessage);
+        setState(() => _errorMessage = e.message);
         _otpFieldKey.currentState?.clear();
         _currentOtp = '';
       }
@@ -123,7 +123,7 @@ class _OtpVerificationScreenState
       }
     } on AuthException catch (e) {
       if (mounted) {
-        setState(() => _errorMessage = e.userMessage);
+        setState(() => _errorMessage = e.message);
       }
     } catch (e) {
       if (mounted) {

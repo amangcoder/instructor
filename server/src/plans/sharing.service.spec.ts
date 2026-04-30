@@ -20,47 +20,35 @@ import {
 } from '@nestjs/common';
 import { SharingService } from './sharing.service';
 import { DatabaseService } from '../database/database.service';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
-// Mock factories
+// Default plan fixture for sharing tests
 // ---------------------------------------------------------------------------
 
-function createMockDatabaseService() {
-  return {
-    // Plan queries — returns a plan owned by 'owner-user-id'
-    getPlanById: jest.fn().mockResolvedValue({
-      planId: 'plan-uuid-001',
-      userId: 'owner-user-id',
-      name: 'Morning Yoga',
-      planJson: JSON.stringify({
-        name: 'Morning Yoga',
-        description: 'A relaxing morning routine.',
-        steps: [
-          { type: 'say', text: 'Welcome.' },
-          { type: 'wait', duration: 300 },
-        ],
-      }),
-      shareToken: null,
-      shareTokenCreatedAt: null,
-      isActive: false,
-      ttsStatus: 'none',
-      ttsTotal: 0,
-      ttsCompleted: 0,
-      voiceQuality: 'standard',
-      sourceLibraryPlanId: null,
-      createdAt: new Date('2026-01-01T00:00:00Z'),
-      updatedAt: new Date('2026-01-15T00:00:00Z'),
-    }),
-
-    // Share token operations (match actual DatabaseService method names)
-    updatePlanShareToken: jest.fn().mockResolvedValue(undefined),
-    revokePlanShareToken: jest.fn().mockResolvedValue(true),
-    getSharedPlan: jest.fn().mockResolvedValue(null),
-
-    // Generic withRetry wrapper (passthrough)
-    withRetry: jest.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
-  };
-}
+const DEFAULT_PLAN = {
+  planId: 'plan-uuid-001',
+  userId: 'owner-user-id',
+  name: 'Morning Yoga',
+  planJson: JSON.stringify({
+    name: 'Morning Yoga',
+    description: 'A relaxing morning routine.',
+    steps: [
+      { type: 'say', text: 'Welcome.' },
+      { type: 'wait', duration: 300 },
+    ],
+  }),
+  shareToken: null,
+  shareTokenCreatedAt: null,
+  isActive: false,
+  ttsStatus: 'none',
+  ttsTotal: 0,
+  ttsCompleted: 0,
+  voiceQuality: 'standard',
+  sourceLibraryPlanId: null,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  updatedAt: new Date('2026-01-15T00:00:00Z'),
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -72,6 +60,8 @@ describe('SharingService', () => {
 
   beforeEach(async () => {
     dbService = createMockDatabaseService();
+    // Override defaults for sharing-specific test expectations
+    dbService.getPlanById.mockResolvedValue(DEFAULT_PLAN);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

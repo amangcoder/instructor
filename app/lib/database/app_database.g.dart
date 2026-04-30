@@ -28,14 +28,13 @@ class $PlansTableTable extends PlansTable
   late final GeneratedColumn<String> description = GeneratedColumn<String>(
       'description', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
-  static const VerificationMeta _categoryMeta =
-      const VerificationMeta('category');
   @override
-  late final GeneratedColumn<String> category = GeneratedColumn<String>(
-      'category', aliasedName, false,
-      type: DriftSqlType.string,
-      requiredDuringInsert: false,
-      defaultValue: const Constant('custom'));
+  late final GeneratedColumnWithTypeConverter<PlanCategory, String> category =
+      GeneratedColumn<String>('category', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: const Constant('custom'))
+          .withConverter<PlanCategory>($PlansTableTable.$convertercategory);
   @override
   late final GeneratedColumnWithTypeConverter<List<String>, String> tags =
       GeneratedColumn<String>('tags', aliasedName, false,
@@ -90,14 +89,13 @@ class $PlansTableTable extends PlansTable
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_active" IN (0, 1))'),
       defaultValue: const Constant(false));
-  static const VerificationMeta _ttsStatusMeta =
-      const VerificationMeta('ttsStatus');
   @override
-  late final GeneratedColumn<String> ttsStatus = GeneratedColumn<String>(
-      'tts_status', aliasedName, false,
-      type: DriftSqlType.string,
-      requiredDuringInsert: false,
-      defaultValue: const Constant('none'));
+  late final GeneratedColumnWithTypeConverter<String, String> ttsStatus =
+      GeneratedColumn<String>('tts_status', aliasedName, false,
+              type: DriftSqlType.string,
+              requiredDuringInsert: false,
+              defaultValue: const Constant('none'))
+          .withConverter<String>($PlansTableTable.$converterttsStatus);
   static const VerificationMeta _ttsTotalMeta =
       const VerificationMeta('ttsTotal');
   @override
@@ -165,10 +163,6 @@ class $PlansTableTable extends PlansTable
           description.isAcceptableOrUnknown(
               data['description']!, _descriptionMeta));
     }
-    if (data.containsKey('category')) {
-      context.handle(_categoryMeta,
-          category.isAcceptableOrUnknown(data['category']!, _categoryMeta));
-    }
     if (data.containsKey('default_voice')) {
       context.handle(
           _defaultVoiceMeta,
@@ -192,10 +186,6 @@ class $PlansTableTable extends PlansTable
     if (data.containsKey('is_active')) {
       context.handle(_isActiveMeta,
           isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta));
-    }
-    if (data.containsKey('tts_status')) {
-      context.handle(_ttsStatusMeta,
-          ttsStatus.isAcceptableOrUnknown(data['tts_status']!, _ttsStatusMeta));
     }
     if (data.containsKey('tts_total')) {
       context.handle(_ttsTotalMeta,
@@ -226,8 +216,9 @@ class $PlansTableTable extends PlansTable
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
       description: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}description']),
-      category: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}category'])!,
+      category: $PlansTableTable.$convertercategory.fromSql(attachedDatabase
+          .typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}category'])!),
       tags: $PlansTableTable.$convertertags.fromSql(attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}tags'])!),
       defaultVoice: attachedDatabase.typeMapping
@@ -243,8 +234,9 @@ class $PlansTableTable extends PlansTable
           .read(DriftSqlType.dateTime, data['${effectivePrefix}last_used_at']),
       isActive: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_active'])!,
-      ttsStatus: attachedDatabase.typeMapping
-          .read(DriftSqlType.string, data['${effectivePrefix}tts_status'])!,
+      ttsStatus: $PlansTableTable.$converterttsStatus.fromSql(attachedDatabase
+          .typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}tts_status'])!),
       ttsTotal: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}tts_total'])!,
       ttsCompleted: attachedDatabase.typeMapping
@@ -259,10 +251,14 @@ class $PlansTableTable extends PlansTable
     return $PlansTableTable(attachedDatabase, alias);
   }
 
+  static TypeConverter<PlanCategory, String> $convertercategory =
+      const PlanCategoryConverter();
   static TypeConverter<List<String>, String> $convertertags =
       const StringListConverter();
   static TypeConverter<List<PlanStep>, String> $convertersteps =
       const StepListConverter();
+  static TypeConverter<String, String> $converterttsStatus =
+      const TtsStatusConverter();
 }
 
 class PlansTableData extends DataClass implements Insertable<PlansTableData> {
@@ -271,8 +267,8 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
   final String name;
   final String? description;
 
-  /// [PlanCategory] stored as its string name.
-  final String category;
+  /// [PlanCategory] stored as its string name, validated by [PlanCategoryConverter].
+  final PlanCategory category;
 
   /// JSON array of tag strings.
   final List<String> tags;
@@ -290,6 +286,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
   final bool isActive;
 
   /// TTS generation status: 'none', 'pending', 'processing', 'completed', 'failed'.
+  /// Validated by [TtsStatusConverter] — throws [StateError] for unknown values.
   final String ttsStatus;
 
   /// Total number of TTS audio files to generate for this plan.
@@ -327,7 +324,10 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
     if (!nullToAbsent || description != null) {
       map['description'] = Variable<String>(description);
     }
-    map['category'] = Variable<String>(category);
+    {
+      map['category'] =
+          Variable<String>($PlansTableTable.$convertercategory.toSql(category));
+    }
     {
       map['tags'] =
           Variable<String>($PlansTableTable.$convertertags.toSql(tags));
@@ -343,7 +343,10 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       map['last_used_at'] = Variable<DateTime>(lastUsedAt);
     }
     map['is_active'] = Variable<bool>(isActive);
-    map['tts_status'] = Variable<String>(ttsStatus);
+    {
+      map['tts_status'] = Variable<String>(
+          $PlansTableTable.$converterttsStatus.toSql(ttsStatus));
+    }
     map['tts_total'] = Variable<int>(ttsTotal);
     map['tts_completed'] = Variable<int>(ttsCompleted);
     if (!nullToAbsent || libraryId != null) {
@@ -385,7 +388,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       description: serializer.fromJson<String?>(json['description']),
-      category: serializer.fromJson<String>(json['category']),
+      category: serializer.fromJson<PlanCategory>(json['category']),
       tags: serializer.fromJson<List<String>>(json['tags']),
       defaultVoice: serializer.fromJson<String>(json['defaultVoice']),
       steps: serializer.fromJson<List<PlanStep>>(json['steps']),
@@ -406,7 +409,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'description': serializer.toJson<String?>(description),
-      'category': serializer.toJson<String>(category),
+      'category': serializer.toJson<PlanCategory>(category),
       'tags': serializer.toJson<List<String>>(tags),
       'defaultVoice': serializer.toJson<String>(defaultVoice),
       'steps': serializer.toJson<List<PlanStep>>(steps),
@@ -425,7 +428,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           {String? id,
           String? name,
           Value<String?> description = const Value.absent(),
-          String? category,
+          PlanCategory? category,
           List<String>? tags,
           String? defaultVoice,
           List<PlanStep>? steps,
@@ -544,7 +547,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
   final Value<String> id;
   final Value<String> name;
   final Value<String?> description;
-  final Value<String> category;
+  final Value<PlanCategory> category;
   final Value<List<String>> tags;
   final Value<String> defaultVoice;
   final Value<List<PlanStep>> steps;
@@ -636,7 +639,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       {Value<String>? id,
       Value<String>? name,
       Value<String?>? description,
-      Value<String>? category,
+      Value<PlanCategory>? category,
       Value<List<String>>? tags,
       Value<String>? defaultVoice,
       Value<List<PlanStep>>? steps,
@@ -682,7 +685,8 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       map['description'] = Variable<String>(description.value);
     }
     if (category.present) {
-      map['category'] = Variable<String>(category.value);
+      map['category'] = Variable<String>(
+          $PlansTableTable.$convertercategory.toSql(category.value));
     }
     if (tags.present) {
       map['tags'] =
@@ -708,7 +712,8 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       map['is_active'] = Variable<bool>(isActive.value);
     }
     if (ttsStatus.present) {
-      map['tts_status'] = Variable<String>(ttsStatus.value);
+      map['tts_status'] = Variable<String>(
+          $PlansTableTable.$converterttsStatus.toSql(ttsStatus.value));
     }
     if (ttsTotal.present) {
       map['tts_total'] = Variable<int>(ttsTotal.value);
@@ -3500,7 +3505,7 @@ typedef $$PlansTableTableCreateCompanionBuilder = PlansTableCompanion Function({
   required String id,
   required String name,
   Value<String?> description,
-  Value<String> category,
+  Value<PlanCategory> category,
   Value<List<String>> tags,
   Value<String> defaultVoice,
   Value<List<PlanStep>> steps,
@@ -3518,7 +3523,7 @@ typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
   Value<String> id,
   Value<String> name,
   Value<String?> description,
-  Value<String> category,
+  Value<PlanCategory> category,
   Value<List<String>> tags,
   Value<String> defaultVoice,
   Value<List<PlanStep>> steps,
@@ -3589,8 +3594,10 @@ class $$PlansTableTableFilterComposer
   ColumnFilters<String> get description => $composableBuilder(
       column: $table.description, builder: (column) => ColumnFilters(column));
 
-  ColumnFilters<String> get category => $composableBuilder(
-      column: $table.category, builder: (column) => ColumnFilters(column));
+  ColumnWithTypeConverterFilters<PlanCategory, PlanCategory, String>
+      get category => $composableBuilder(
+          column: $table.category,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
 
   ColumnWithTypeConverterFilters<List<String>, List<String>, String> get tags =>
       $composableBuilder(
@@ -3617,8 +3624,10 @@ class $$PlansTableTableFilterComposer
   ColumnFilters<bool> get isActive => $composableBuilder(
       column: $table.isActive, builder: (column) => ColumnFilters(column));
 
-  ColumnFilters<String> get ttsStatus => $composableBuilder(
-      column: $table.ttsStatus, builder: (column) => ColumnFilters(column));
+  ColumnWithTypeConverterFilters<String, String, String> get ttsStatus =>
+      $composableBuilder(
+          column: $table.ttsStatus,
+          builder: (column) => ColumnWithTypeConverterFilters(column));
 
   ColumnFilters<int> get ttsTotal => $composableBuilder(
       column: $table.ttsTotal, builder: (column) => ColumnFilters(column));
@@ -3747,7 +3756,7 @@ class $$PlansTableTableAnnotationComposer
   GeneratedColumn<String> get description => $composableBuilder(
       column: $table.description, builder: (column) => column);
 
-  GeneratedColumn<String> get category =>
+  GeneratedColumnWithTypeConverter<PlanCategory, String> get category =>
       $composableBuilder(column: $table.category, builder: (column) => column);
 
   GeneratedColumnWithTypeConverter<List<String>, String> get tags =>
@@ -3771,7 +3780,7 @@ class $$PlansTableTableAnnotationComposer
   GeneratedColumn<bool> get isActive =>
       $composableBuilder(column: $table.isActive, builder: (column) => column);
 
-  GeneratedColumn<String> get ttsStatus =>
+  GeneratedColumnWithTypeConverter<String, String> get ttsStatus =>
       $composableBuilder(column: $table.ttsStatus, builder: (column) => column);
 
   GeneratedColumn<int> get ttsTotal =>
@@ -3855,7 +3864,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<String> id = const Value.absent(),
             Value<String> name = const Value.absent(),
             Value<String?> description = const Value.absent(),
-            Value<String> category = const Value.absent(),
+            Value<PlanCategory> category = const Value.absent(),
             Value<List<String>> tags = const Value.absent(),
             Value<String> defaultVoice = const Value.absent(),
             Value<List<PlanStep>> steps = const Value.absent(),
@@ -3891,7 +3900,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             required String id,
             required String name,
             Value<String?> description = const Value.absent(),
-            Value<String> category = const Value.absent(),
+            Value<PlanCategory> category = const Value.absent(),
             Value<List<String>> tags = const Value.absent(),
             Value<String> defaultVoice = const Value.absent(),
             Value<List<PlanStep>> steps = const Value.absent(),

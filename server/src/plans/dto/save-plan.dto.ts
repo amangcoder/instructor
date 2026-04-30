@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 /**
@@ -12,11 +13,22 @@ export class SavePlanDto {
    * When provided, the existing plan with this ID is updated (if it belongs
    * to the authenticated user). When omitted, a new plan is created.
    */
+  @ApiPropertyOptional({
+    description:
+      'UUID v4 of an existing plan to update. Omit to create a new plan.',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    format: 'uuid',
+  })
   @IsOptional()
   @IsUUID('4', { message: 'planId must be a valid UUID v4' })
   planId?: string;
 
   /** Human-readable plan name shown in plan lists. */
+  @ApiProperty({
+    description: 'Human-readable plan name shown in plan lists',
+    example: '4-Week Morning Meditation',
+    maxLength: 200,
+  })
   @IsString()
   @IsNotEmpty({ message: 'name must not be empty' })
   @MaxLength(200, { message: 'name must be 200 characters or less' })
@@ -26,6 +38,11 @@ export class SavePlanDto {
    * Full plan JSON serialised as a string.
    * 524,288 bytes ≈ 512 KB — hard cap to prevent DoS via oversized payloads.
    */
+  @ApiProperty({
+    description: 'Full plan data serialised as a JSON string (max 512 KB)',
+    example: '{"steps":[{"title":"Breathe","duration":300}]}',
+    maxLength: 524288,
+  })
   @IsString()
   @IsNotEmpty({ message: 'planJson must not be empty' })
   @MaxLength(524288, { message: 'planJson must be 512 KB or less' })

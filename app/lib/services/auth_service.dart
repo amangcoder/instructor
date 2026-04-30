@@ -26,10 +26,20 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import 'package:instructor/exceptions/app_exception.dart';
 import 'package:instructor/models/auth_models.dart';
 import 'package:instructor/services/app_settings.dart';
 
 part 'auth_service.g.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AuthException — backward-compatible alias for AuthAppException
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Backward-compatible alias kept so existing catch clauses continue to work.
+///
+/// New code should throw and catch [AuthAppException] directly.
+typedef AuthException = AuthAppException;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage keys
@@ -49,37 +59,9 @@ abstract final class _StorageKeys {
 // Exceptions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Thrown when an auth API call returns an unexpected response.
-final class AuthException implements Exception {
-  const AuthException(this.message, {this.statusCode, String? userMessage})
-      : userMessage = userMessage ?? message;
-
-  final String message;
-  final int? statusCode;
-
-  /// User-facing message (may differ from raw [message]).
-  final String userMessage;
-
-  @override
-  String toString() => 'AuthException(${statusCode ?? '?'}): $message';
-
-  /// Converts a raw status code + body into a user-friendly message.
-  static AuthException fromResponse(int statusCode, String body) {
-    // Try to extract a server-provided message.
-    try {
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      final serverMsg = json['message']?.toString();
-      if (serverMsg != null && serverMsg.isNotEmpty) {
-        final humanized = _humanize(serverMsg);
-        return AuthException(humanized, statusCode: statusCode, userMessage: humanized);
-      }
-    } catch (_) {}
-
-    final fallback = _httpFallback(statusCode);
-    return AuthException(fallback, statusCode: statusCode, userMessage: fallback);
-  }
-
-  static String _humanize(String raw) {
+/// Helper to convert HTTP responses to user-friendly error messages.
+abstract final class _AuthErrorMessages {
+  static String humanize(String raw) {
     // Convert common server error strings to user-friendly text.
     final lower = raw.toLowerCase();
     if (lower.contains('otp expired') || lower.contains('otp') && lower.contains('expired')) {
@@ -100,7 +82,7 @@ final class AuthException implements Exception {
     return raw;
   }
 
-  static String _httpFallback(int code) {
+  static String httpFallback(int code) {
     switch (code) {
       case 400:
         return 'Invalid request. Please check your input.';
@@ -118,6 +100,35 @@ final class AuthException implements Exception {
         return 'Unexpected error (HTTP $code).';
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper — parse an HTTP response into an AuthAppException
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Converts an HTTP [statusCode] + raw response [body] into a user-friendly
+/// [AuthAppException].
+///
+/// Attempts to extract a `message` or `error` string from a JSON body and
+/// runs it through [_AuthErrorMessages.humanize]. Falls back to
+/// [_AuthErrorMessages.httpFallback] when the body is not parseable.
+///
+/// Replaces the former `AuthException.fromResponse` factory.
+AuthAppException _authExceptionFromResponse(int statusCode, String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) {
+      final raw = decoded['message']?.toString() ??
+          decoded['error']?.toString() ??
+          '';
+      if (raw.isNotEmpty) {
+        return AuthAppException(_AuthErrorMessages.humanize(raw));
+      }
+    }
+  } catch (_) {
+    // Body is not JSON — fall through to status-code-based message.
+  }
+  return AuthAppException(_AuthErrorMessages.httpFallback(statusCode));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -587,7 +598,7 @@ class AuthServiceImpl implements AuthService {
         .timeout(const Duration(seconds: 15));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw AuthException.fromResponse(response.statusCode, response.body);
+      throw _authExceptionFromResponse(response.statusCode, response.body);
     }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -636,7 +647,7 @@ class AuthServiceImpl implements AuthService {
     final response = await http.Response.fromStream(streamed);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw AuthException.fromResponse(response.statusCode, response.body);
+      throw _authExceptionFromResponse(response.statusCode, response.body);
     }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -708,12 +719,12 @@ class AuthServiceImpl implements AuthService {
 
         // 4xx errors are not retried.
         if (response.statusCode < 500) {
-          throw AuthException.fromResponse(
+          throw _authExceptionFromResponse(
               response.statusCode, response.body);
         }
 
         // 5xx — retry.
-        lastError = AuthException.fromResponse(
+        lastError = _authExceptionFromResponse(
             response.statusCode, response.body);
         debugPrint(
             'AuthService: attempt ${attempt + 1} failed with ${response.statusCode}, retrying…');

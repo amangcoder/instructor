@@ -3,10 +3,10 @@ import {
   Logger,
   NotFoundException,
   ConflictException,
+  Inject,
 } from '@nestjs/common';
-import { count, eq, and, ilike, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service';
-import { deletionRequests } from '../database/schema';
+import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
 import type {
   DeletionRequestListResponse,
   DeletionRequestRow,
@@ -38,8 +38,10 @@ const DEFAULT_PAGE_SIZE = 20;
 @Injectable()
 export class DeletionRequestsAdminService {
   private readonly logger = new Logger(DeletionRequestsAdminService.name);
-
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(AdminAnalyticsRepository) private readonly repo: AdminAnalyticsRepository,
+  ) {}
 
   /**
    * List deletion requests with pagination and optional search/status filter.
@@ -51,44 +53,23 @@ export class DeletionRequestsAdminService {
     params: ListDeletionRequestsQueryDto,
   ): Promise<DeletionRequestListResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
-
       const page = Math.max(MIN_PAGE, Math.floor(params.page ?? 1));
       const pageSize = Math.min(
         MAX_PAGE_SIZE,
         Math.floor(params.pageSize ?? DEFAULT_PAGE_SIZE),
       );
-      const offset = (page - 1) * pageSize;
 
-      // Build WHERE clause
-      const conditions: Parameters<typeof and>[0][] = [];
+      let rows: any[];
+      let total: number;
 
-      if (params.search) {
-        conditions.push(ilike(deletionRequests.email, `%${params.search}%`));
-      }
-
-      if (params.status) {
-        conditions.push(eq(deletionRequests.status, params.status));
-      }
-
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-      // Fetch total count
-      const totalResult = await drizzle
-        .select({ value: count() })
-        .from(deletionRequests)
-        .where(whereClause);
-
-      const total = totalResult[0].value;
-
-      // Fetch paginated rows
-      const rows = await drizzle
-        .select()
-        .from(deletionRequests)
-        .where(whereClause)
-        .orderBy(deletionRequests.createdAt)
-        .limit(pageSize)
-        .offset(offset);
+      const result = await this.repo.listDeletionRequests({
+          page,
+          pageSize,
+          search: params.search,
+          status: params.status,
+        });
+        rows = result.rows;
+        total = result.total;
 
       // Mask emails before returning
       const data: DeletionRequestRow[] = rows.map((row) => ({
@@ -122,35 +103,12 @@ export class DeletionRequestsAdminService {
    */
   async processDeletionRequest(id: string): Promise<ProcessedDeletionRequest> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
+      let result: Array<{ id: string; status: string; processedAt: Date | null }>;
 
-      // ATOMIC UPDATE pattern: Update and return in a single query
-      // This prevents race conditions where two admins might process the same request.
-      const result = await drizzle
-        .update(deletionRequests)
-        .set({
-          status: 'processed',
-          processedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(deletionRequests.id, id),
-            eq(deletionRequests.status, 'pending'),
-          ),
-        )
-        .returning({
-          id: deletionRequests.id,
-          status: deletionRequests.status,
-          processedAt: deletionRequests.processedAt,
-        });
+      result = await this.repo.processDeletionRequestById(id);
 
-      // If returning() is empty, the request either doesn't exist or was already processed
       if (result.length === 0) {
-        // Check if it exists with status='processed'
-        const existing = await drizzle
-          .select({ status: deletionRequests.status })
-          .from(deletionRequests)
-          .where(eq(deletionRequests.id, id));
+        const existing = await this.repo.getDeletionRequestStatus(id);
 
         if (existing.length === 0) {
           throw new NotFoundException(`Deletion request ${id} not found`);
@@ -178,16 +136,7 @@ export class DeletionRequestsAdminService {
    */
   async getPendingCount(): Promise<PendingCountResponse> {
     return this.db.withRetry(async () => {
-      const drizzle = this.db.getDb();
-
-      const result = await drizzle
-        .select({ value: count() })
-        .from(deletionRequests)
-        .where(eq(deletionRequests.status, 'pending'));
-
-      return {
-        count: result[0].value,
-      };
+      return { count: await this.repo.getPendingDeletionRequestCount() };
     });
   }
 }

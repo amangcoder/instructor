@@ -20,9 +20,10 @@ const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3071/api';
  * The `code` field maps specific HTTP status codes to symbolic names so
  * that callers can branch on error type without parsing status integers.
  *
- *   'UNAUTHORIZED' — 401: missing or expired token
- *   'FORBIDDEN'    — 403: valid token but insufficient role
- *   string         — any other status text for unexpected errors
+ *   'UNAUTHORIZED'    — 401: missing or expired token
+ *   'FORBIDDEN'       — 403: valid token but insufficient role
+ *   'GATEWAY_TIMEOUT' — 504: backend/database query timed out
+ *   string            — any other status text for unexpected errors
  */
 export class AdminApiError extends Error {
   constructor(
@@ -51,6 +52,7 @@ export class AdminApiError extends Error {
  * Error handling:
  *   401 → throws AdminApiError with code 'UNAUTHORIZED'
  *   403 → throws AdminApiError with code 'FORBIDDEN'
+ *   504 → throws AdminApiError with code 'GATEWAY_TIMEOUT'
  *   non-ok → throws AdminApiError with response statusText as code
  *
  * @param path   Backend path relative to BACKEND_URL (e.g. '/admin/analytics/overview')
@@ -107,6 +109,10 @@ export async function adminFetch<T>(
 
   if (response.status === 403) {
     throw new AdminApiError('Forbidden — admin role required', 'FORBIDDEN');
+  }
+
+  if (response.status === 504) {
+    throw new AdminApiError('Database query timed out', 'GATEWAY_TIMEOUT');
   }
 
   if (!response.ok) {

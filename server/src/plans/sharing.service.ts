@@ -21,9 +21,10 @@
  *   - Web fallback at web/app/s/[token]/page.tsx
  */
 
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, Optional, Inject } from '@nestjs/common';
 import { customAlphabet } from 'nanoid';
 import { DatabaseService } from '../database/database.service';
+import { PlanRepository } from '../database/repositories/plan.repository';
 import { SharedPlanResponseDto } from './dto/shared-plan-response.dto';
 
 // Nanoid instance: URL-safe alphabet, 12 characters
@@ -33,8 +34,14 @@ const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW
 export class SharingService {
   private readonly logger = new Logger(SharingService.name);
   private readonly shareBaseUrl = 'https://instructor.app/s';
+  private readonly repo: PlanRepository | DatabaseService;
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Optional() @Inject(PlanRepository) planRepo?: PlanRepository,
+  ) {
+    this.repo = planRepo ?? db;
+  }
 
   /**
    * Generate a new share token for a plan.
@@ -51,7 +58,7 @@ export class SharingService {
     planId: string,
   ): Promise<{ shareToken: string; shareUrl: string }> {
     // Fetch the plan to verify ownership
-    const plan = await this.db.getPlanById(planId, userId);
+    const plan = await this.repo.getPlanById(planId, userId);
     if (!plan) {
       this.logger.warn(`Ownership verification failed: userId=${userId}, planId=${planId}`);
       throw new NotFoundException('Plan not found');
@@ -67,7 +74,7 @@ export class SharingService {
     const shareToken = nanoid();
 
     // Store the token on the plan
-    await this.db.updatePlanShareToken(planId, shareToken);
+    await this.repo.updatePlanShareToken(planId, shareToken);
 
     const shareUrl = `${this.shareBaseUrl}/${shareToken}`;
     this.logger.debug(`Share token generated: planId=${planId}, token=${shareToken}`);
@@ -85,14 +92,14 @@ export class SharingService {
    */
   async revokeShareToken(userId: string, planId: string): Promise<boolean> {
     // Verify ownership before revoking
-    const plan = await this.db.getPlanById(planId, userId);
+    const plan = await this.repo.getPlanById(planId, userId);
     if (!plan) {
       this.logger.warn(`Ownership verification failed: userId=${userId}, planId=${planId}`);
       throw new NotFoundException('Plan not found');
     }
 
     // Revoke the token
-    const success = await this.db.revokePlanShareToken(userId, planId);
+    const success = await this.repo.revokePlanShareToken(userId, planId);
     if (success) {
       this.logger.debug(`Share token revoked: planId=${planId}`);
     }
@@ -115,7 +122,7 @@ export class SharingService {
     }
 
     try {
-      const planData = await this.db.getSharedPlan(shareToken);
+      const planData = await this.repo.getSharedPlan(shareToken);
       if (!planData) {
         return null;
       }

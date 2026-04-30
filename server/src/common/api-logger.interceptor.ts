@@ -116,6 +116,11 @@ export class ApiLoggerInterceptor implements NestInterceptor {
       (req.headers['x-request-id'] as string | undefined) ?? randomUUID();
     (req as Request & { requestId: string }).requestId = requestId;
 
+    // Echo the correlation ID back on every response so clients can correlate
+    // logs and the AllExceptionsFilter can read it from the request.
+    const res = context.switchToHttp().getResponse<Response>();
+    res.setHeader('X-Request-ID', requestId);
+
     // userId is only available after auth guards have run.
     // We read it lazily in tap() so guards executing after this interceptor
     // starts are still captured.

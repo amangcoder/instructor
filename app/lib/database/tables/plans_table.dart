@@ -21,8 +21,9 @@ class PlansTable extends Table {
 
   TextColumn get description => text().nullable()();
 
-  /// [PlanCategory] stored as its string name.
-  TextColumn get category => text().withDefault(const Constant('custom'))();
+  /// [PlanCategory] stored as its string name, validated by [PlanCategoryConverter].
+  TextColumn get category =>
+      text().map(const PlanCategoryConverter()).withDefault(const Constant('custom'))();
 
   /// JSON array of tag strings.
   TextColumn get tags =>
@@ -45,7 +46,9 @@ class PlansTable extends Table {
   BoolColumn get isActive => boolean().withDefault(const Constant(false))();
 
   /// TTS generation status: 'none', 'pending', 'processing', 'completed', 'failed'.
-  TextColumn get ttsStatus => text().withDefault(const Constant('none'))();
+  /// Validated by [TtsStatusConverter] — throws [StateError] for unknown values.
+  TextColumn get ttsStatus =>
+      text().map(const TtsStatusConverter()).withDefault(const Constant('none'))();
 
   /// Total number of TTS audio files to generate for this plan.
   IntColumn get ttsTotal => integer().withDefault(const Constant(0))();

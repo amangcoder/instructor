@@ -45,6 +45,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/app_database.dart';
+import 'package:instructor/exceptions/app_exception.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
@@ -61,10 +62,12 @@ part 'tts_service.g.dart';
 // ────────────────────────────────────────────────────────────────────────────
 
 /// Thrown when the backend TTS API returns a non-200 status code.
-final class TtsApiException implements Exception {
-  const TtsApiException(this.message, {this.statusCode});
+///
+/// Extends [TtsAppException] so callers catching [AppException] also catch
+/// TTS API errors via the unified exception hierarchy.
+final class TtsApiException extends TtsAppException {
+  const TtsApiException(super.message, {this.statusCode});
 
-  final String message;
   final int? statusCode;
 
   @override
@@ -73,10 +76,11 @@ final class TtsApiException implements Exception {
 
 /// Thrown when platform TTS synthesis fails (e.g. the device does not support
 /// writing TTS output to a file).
-final class TtsFallbackException implements Exception {
-  const TtsFallbackException(this.message);
-
-  final String message;
+///
+/// Extends [TtsAppException] so callers catching [AppException] also catch
+/// TTS fallback errors via the unified exception hierarchy.
+final class TtsFallbackException extends TtsAppException {
+  const TtsFallbackException(super.message);
 
   @override
   String toString() => 'TtsFallbackException: $message';

@@ -61,7 +61,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     } on AuthException catch (e) {
       if (mounted) {
-        setState(() => _errorMessage = e.userMessage);
+        setState(() => _errorMessage = e.message);
       }
     } catch (e) {
       if (mounted) {

@@ -12,9 +12,10 @@
  *   ADMIN_EMAIL — destination address for deletion-request notifications
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../database/database.service';
+import { AdminRepository } from '../database/repositories/admin.repository';
 import { SESEmailService } from '../email/ses-email.service';
 import type { DeletionRequestDto } from './dto/deletion-request.dto';
 
@@ -26,11 +27,18 @@ export interface DeletionRequestResult {
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
+  private readonly repo: AdminRepository | DatabaseService | null;
+  /** Exposed so tests can force noop mode without providing a real DB/repo. */
+  noop: boolean;
 
   constructor(
-    private readonly db: DatabaseService,
+    @Optional() private readonly db: DatabaseService,
     private readonly ses: SESEmailService,
-  ) {}
+    @Optional() @Inject(AdminRepository) adminRepo?: AdminRepository,
+  ) {
+    this.repo = adminRepo ?? db ?? null;
+    this.noop = this.repo ? (this.repo as any).noop ?? false : false;
+  }
 
   /**
    * Process an inbound deletion request:
@@ -44,8 +52,8 @@ export class AdminService {
     const id = uuidv4();
 
     // ── 1. Persist the request ─────────────────────────────────────────────
-    if (!this.db.noop) {
-      await this.db.insertDeletionRequest({
+    if (!this.noop && this.repo) {
+      await this.repo.insertDeletionRequest({
         id,
         email: dto.email.toLowerCase().trim(),
         scope: dto.scope.join(','),

@@ -14,15 +14,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SyncService } from './sync.service';
 import { DatabaseService } from '../database/database.service';
+import { createMockDatabaseService } from '../database/testing';
 
 // ---------------------------------------------------------------------------
-// Mock factories
+// Tests
 // ---------------------------------------------------------------------------
 
-function createMockDatabaseService() {
-  return {
-    upsertSessionCompletions: jest.fn().mockResolvedValue(3),
-    getSessionCompletions: jest.fn().mockResolvedValue([
+describe('SyncService', () => {
+  let service: SyncService;
+  let dbService: ReturnType<typeof createMockDatabaseService>;
+
+  beforeEach(async () => {
+    dbService = createMockDatabaseService();
+
+    // Override shared mock defaults with sync-specific test data
+    dbService.upsertSessionCompletions.mockResolvedValue(3);
+    dbService.getSessionCompletions.mockResolvedValue([
       {
         id: 'completion-uuid-1',
         planId: 'plan-uuid-001',
@@ -35,17 +42,17 @@ function createMockDatabaseService() {
         completedAt: new Date('2026-04-15T12:00:00.000Z'),
         durationMs: 900000,
       },
-    ]),
-    upsertPlanTriggers: jest.fn().mockImplementation(
+    ] as any);
+    dbService.upsertPlanTriggers.mockImplementation(
       (_userId: string, rows: unknown[]) =>
         Promise.resolve(
           rows.map((r, i) => ({
             id: `trigger-uuid-${i}`,
             ...(r as object),
           })),
-        ),
-    ),
-    getPlanTriggers: jest.fn().mockResolvedValue([
+        ) as any,
+    );
+    dbService.getPlanTriggers.mockResolvedValue([
       {
         id: 'trigger-uuid-1',
         clientId: 'client-trigger-1',
@@ -57,21 +64,7 @@ function createMockDatabaseService() {
         deletedAt: null,
         updatedAt: new Date('2026-04-15T10:00:00.000Z'),
       },
-    ]),
-    withRetry: jest.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('SyncService', () => {
-  let service: SyncService;
-  let dbService: ReturnType<typeof createMockDatabaseService>;
-
-  beforeEach(async () => {
-    dbService = createMockDatabaseService();
+    ] as any);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

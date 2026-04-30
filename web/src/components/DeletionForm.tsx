@@ -153,10 +153,12 @@ export default function DeletionForm() {
     setStatus('submitting');
     setErrorMessage('');
 
-    // Map internal scope state to DTO-compatible string[] values
-    const scopePayload: string[] =
+    // Map internal scope state to API-compatible values.
+    // Full account deletion sends 'full' as a plain string.
+    // Selective deletion sends an array of selected data category keys.
+    const scopePayload: string | string[] =
       scope === 'full'
-        ? ['full_account']
+        ? 'full'
         : [
             ...(selectiveItems.plans ? ['plans'] : []),
             ...(selectiveItems.ttsCache ? ['audio_cache'] : []),
@@ -336,7 +338,7 @@ export default function DeletionForm() {
                   Full account deletion
                 </span>
                 <span className="block text-xs text-on-surface-variant mt-0.5">
-                  Permanently removes your account, all plans, TTS cache, tokens, and OTPs
+                  Permanently removes your account and all associated data, including tokens and OTPs
                 </span>
               </span>
             </label>

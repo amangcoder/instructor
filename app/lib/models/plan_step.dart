@@ -1,5 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'package:instructor/data/audio_assets.dart';
 import 'package:instructor/models/enums.dart';
 
 part 'plan_step.freezed.dart';
@@ -101,3 +102,23 @@ sealed class PlanStep with _$PlanStep {
         _ => Duration.zero,
       };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Factory helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Creates a default [PlanStep] for [type] with [id].
+PlanStep defaultStepForType(StepType type, String id) => switch (type) {
+      StepType.say => PlanStep.say(id: id, text: ''),
+      StepType.notify =>
+        PlanStep.notify(id: id, title: '', body: ''),
+      StepType.play =>
+        PlanStep.play(id: id, audioAssetKey: kAmbientRain),
+      StepType.wait =>
+        PlanStep.wait(id: id, duration: const Duration(seconds: 30)),
+      StepType.repeat =>
+        PlanStep.repeat(id: id, count: 3, children: const []),
+      StepType.count =>
+        PlanStep.count(id: id, from: 1, to: 10),
+      StepType.stopAudio => PlanStep.stopAudio(id: id),
+    };

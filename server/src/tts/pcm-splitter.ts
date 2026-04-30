@@ -7,6 +7,44 @@ function align2(offset: number): number {
   return offset % BYTES_PER_SAMPLE === 0 ? offset : offset - 1;
 }
 
+export interface PcmBoundaryMs {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Slice PCM at explicit millisecond boundaries (e.g. from forced alignment).
+ *
+ * Boundaries must be in source order. The first segment starts at offset 0
+ * and the last extends to end-of-buffer, regardless of the boundaries' end_ms,
+ * so a slightly-short alignment never drops the trailing audio.
+ */
+export function splitPcmAtBoundaries(
+  pcm: Buffer,
+  boundaries: PcmBoundaryMs[],
+  sampleRate: number = SAMPLE_RATE,
+): Buffer[] {
+  if (boundaries.length === 0) throw new Error('boundaries must not be empty');
+  if (boundaries.length === 1) return [pcm];
+
+  const msToOffset = (ms: number): number => {
+    const sampleIdx = Math.round((ms / 1000) * sampleRate);
+    const offset = sampleIdx * BYTES_PER_SAMPLE;
+    return Math.max(0, Math.min(pcm.length, align2(offset)));
+  };
+
+  const segs: Buffer[] = [];
+  let prev = 0;
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    let cut = msToOffset(boundaries[i].endMs);
+    if (cut <= prev) cut = Math.min(pcm.length, prev + BYTES_PER_SAMPLE);
+    segs.push(pcm.subarray(prev, cut));
+    prev = cut;
+  }
+  segs.push(pcm.subarray(prev));
+  return segs;
+}
+
 function splitEvenly(pcm: Buffer, count: number): Buffer[] {
   const size = align2(Math.floor(pcm.length / count));
   const segs: Buffer[] = [];

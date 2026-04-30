@@ -20,9 +20,11 @@ import {
   check,
   index,
   integer,
+  numeric,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -45,6 +47,8 @@ export const users = pgTable(
   },
   (table) => [
     check('users_role_check', sql`${table.role} IN ('user', 'admin')`),
+    // Email search index (case-insensitive, for admin panel user search)
+    index('idx_users_email_lower').on(sql`lower(${table.email})`),
     // Analytics: daily signup trends and overview counts — range scan by createdAt
     index('idx_users_created_at').on(table.createdAt),
   ],
@@ -172,6 +176,8 @@ export const plans = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    // CHECK constraint: tts_status must be one of the valid values
+    check('plans_tts_status_check', sql`${table.ttsStatus} IN ('none', 'pending', 'processing', 'completed', 'partial', 'failed')`),
     // Composite index on (userId, createdAt) supersedes the old idx_plans_user_id.
     // Covers all per-user plan list queries and analytics time-range filtering.
     index('idx_plans_user_created').on(table.userId, table.createdAt),
@@ -207,7 +213,7 @@ export const ttsJobs = pgTable(
     voiceId: text('voice_id').notNull(),
     locale: text('locale').notNull(),
     provider: text('provider').notNull(),
-    speechRate: text('speech_rate').notNull().default('1.0'),
+    speechRate: numeric('speech_rate', { precision: 4, scale: 2 }).notNull().default('1.0'),
     s3Key: text('s3_key'),
     status: text('status').notNull().default('pending'), // pending | processing | completed | failed
     error: text('error'),
@@ -216,6 +222,8 @@ export const ttsJobs = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
+    // CHECK constraint: status must be one of the valid values
+    check('tts_jobs_status_check', sql`${table.status} IN ('pending', 'processing', 'completed', 'failed')`),
     index('idx_tts_jobs_plan_id').on(table.planId),
     index('idx_tts_jobs_plan_status').on(table.planId, table.status),
     // Analytics: volume by provider/voice over time — leading createdAt for range scans
@@ -256,6 +264,10 @@ export const deletionRequests = pgTable(
     ipAddress: varchar('ip_address'),
   },
   (table) => [
+    // CHECK constraint: status must be one of the valid values
+    check('deletion_requests_status_check', sql`${table.status} IN ('pending', 'processed')`),
+    // Email search index (case-insensitive, for admin panel)
+    index('idx_deletion_requests_email_lower').on(sql`lower(${table.email})`),
     // Partial index for efficient pending-request queries (sidebar badge count)
     index('idx_deletion_requests_status')
       .on(table.status)
@@ -365,6 +377,8 @@ export const planTriggers = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
+    // CHECK constraint: recurrence must be one of the valid values
+    check('plan_triggers_recurrence_check', sql`${table.recurrence} IN ('none', 'daily', 'weekdays', 'weekly')`),
     // Sync pulls: WHERE user_id = ? AND updated_at > ?
     index('idx_plan_triggers_user_updated').on(table.userId, table.updatedAt),
     // Upcoming triggers lookup: WHERE user_id = ? AND deleted_at IS NULL AND start_utc > NOW()
@@ -387,15 +401,23 @@ export type NewPlanTrigger = typeof planTriggers.$inferInsert;
 // blast-radius protection (DB outage should not block app launches).
 // ---------------------------------------------------------------------------
 
-export const appVersionConfig = pgTable('app_version_config', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  iosMinVersion: varchar('ios_min_version', { length: 20 }),
-  androidMinVersion: varchar('android_min_version', { length: 20 }),
-  iosForceVersion: varchar('ios_force_version', { length: 20 }),
-  androidForceVersion: varchar('android_force_version', { length: 20 }),
-  forceUpdateEnabled: boolean('force_update_enabled').notNull().default(false),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const appVersionConfig = pgTable(
+  'app_version_config',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    iosMinVersion: varchar('ios_min_version', { length: 20 }),
+    androidMinVersion: varchar('android_min_version', { length: 20 }),
+    iosForceVersion: varchar('ios_force_version', { length: 20 }),
+    androidForceVersion: varchar('android_force_version', { length: 20 }),
+    forceUpdateEnabled: boolean('force_update_enabled').notNull().default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Singleton constraint: enforces at most one row in the table.
+    // The expression ((true)) ensures only one row can exist: only one value of true exists.
+    uniqueIndex('idx_app_version_config_singleton').on(sql`true`),
+  ],
+);
 
 export type AppVersionConfig = typeof appVersionConfig.$inferSelect;
 export type NewAppVersionConfig = typeof appVersionConfig.$inferInsert;

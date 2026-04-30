@@ -12,17 +12,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TtsHealthService } from './tts-health.service';
 import { DatabaseService } from '../database/database.service';
-
-function createMockDatabaseService() {
-  const mockDb = {
-    execute: jest.fn(),
-  };
-  return {
-    getDb: jest.fn().mockReturnValue(mockDb),
-    withRetry: jest.fn().mockImplementation(async (fn: () => Promise<any>) => fn()),
-    _mockDb: mockDb,
-  };
-}
+import { createMockDatabaseService } from '../database/testing';
 
 describe('TtsHealthService', () => {
   let service: TtsHealthService;

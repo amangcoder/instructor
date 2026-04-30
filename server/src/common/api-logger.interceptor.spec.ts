@@ -13,12 +13,18 @@ function makeContext(
   user?: { sub: string },
 ): ExecutionContext {
   const req: any = { method, originalUrl: url, headers, user };
-  const res: any = { statusCode: 200 };
+  const responseHeaders: Record<string, string> = {};
+  const res: any = {
+    statusCode: 200,
+    setHeader: (name: string, value: string) => { responseHeaders[name] = value; },
+    _headers: responseHeaders,
+  };
   return {
     switchToHttp: () => ({
       getRequest: () => req,
       getResponse: () => res,
     }),
+    _res: res,
   } as unknown as ExecutionContext;
 }
 
@@ -295,6 +301,52 @@ describe('ApiLoggerInterceptor', () => {
           const output = lines.join('');
           expect(output).not.toContain('secret-token-123');
           expect(output).not.toContain('Bearer');
+          done();
+        },
+      });
+    });
+  });
+
+  describe('X-Request-ID response header', () => {
+    it('sets X-Request-ID on the response when no header is sent by client', (done) => {
+      process.env.LOG_LEVEL = 'info';
+      const interceptor = new ApiLoggerInterceptor();
+      const ctx = makeContext('GET', '/api/plans') as any;
+
+      interceptor.intercept(ctx, makeHandler()).subscribe({
+        complete: () => {
+          const responseHeaders = ctx._res._headers as Record<string, string>;
+          expect(responseHeaders['X-Request-ID']).toBeDefined();
+          expect(typeof responseHeaders['X-Request-ID']).toBe('string');
+          done();
+        },
+      });
+    });
+
+    it('echoes the X-Request-ID header sent by the client unchanged', (done) => {
+      process.env.LOG_LEVEL = 'info';
+      const interceptor = new ApiLoggerInterceptor();
+      const ctx = makeContext('GET', '/api/plans', { 'x-request-id': 'client-req-42' }) as any;
+
+      interceptor.intercept(ctx, makeHandler()).subscribe({
+        complete: () => {
+          const responseHeaders = ctx._res._headers as Record<string, string>;
+          expect(responseHeaders['X-Request-ID']).toBe('client-req-42');
+          done();
+        },
+      });
+    });
+
+    it('requestId on the request object matches the response header', (done) => {
+      process.env.LOG_LEVEL = 'info';
+      const interceptor = new ApiLoggerInterceptor();
+      const ctx = makeContext('GET', '/api/plans') as any;
+      const req = ctx.switchToHttp().getRequest();
+
+      interceptor.intercept(ctx, makeHandler()).subscribe({
+        complete: () => {
+          const responseHeaders = ctx._res._headers as Record<string, string>;
+          expect(req.requestId).toBe(responseHeaders['X-Request-ID']);
           done();
         },
       });
