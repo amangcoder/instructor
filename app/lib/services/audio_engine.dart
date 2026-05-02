@@ -40,6 +40,41 @@ import 'package:instructor/data/audio_assets.dart';
 part 'audio_engine.g.dart';
 
 // ────────────────────────────────────────────────────────────────────────────
+// Platform TTS fallback abstraction
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Injectable fallback that allows [AudioEngineImpl] to continue narration
+/// via on-device TTS when an HTTP TTS request fails mid-session
+/// (REQ-022, AC-016).
+///
+/// [AudioEngine.onTtsHttpError] calls [speakFromCurrentPosition] so the
+/// current plan step is still spoken — transparently, without any user
+/// interaction or session interruption.
+///
+/// ## Production usage
+/// The Riverpod [audioEngine] provider injects a concrete implementation that
+/// wraps [TTSService.speakDirect]. In tests, inject a fake that records calls
+/// and completes immediately.
+///
+/// ## Design rationale
+/// Keeping this as a thin abstract interface (rather than directly injecting
+/// [TTSService]) mirrors the existing [PlatformTtsEngine] pattern in
+/// `tts_service.dart` and avoids a circular dependency between the audio
+/// engine and TTS service layers.
+abstract class PlatformTtsFallback {
+  /// Speaks [text] via the device's on-device TTS engine.
+  ///
+  /// [speed] is the current session playback rate (default: 1.0). Completes
+  /// when the utterance finishes. The method is transparent to the user —
+  /// the session does not pause or display any loading indicator.
+  ///
+  /// May throw if the on-device TTS engine is unavailable; callers in
+  /// [AudioEngineImpl.onTtsHttpError] must catch and log any error so the
+  /// session is not interrupted.
+  Future<void> speakFromCurrentPosition(String text, {double speed = 1.0});
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Exceptions
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -170,6 +205,22 @@ abstract class AudioEngine {
 
   /// Releases all resources. Called by the Riverpod provider's [onDispose].
   Future<void> dispose();
+
+  /// Called by the plan execution layer when an HTTP TTS request fails during
+  /// an active audio session (REQ-022, AC-016).
+  ///
+  /// Invokes the configured [PlatformTtsFallback.speakFromCurrentPosition]
+  /// with [pendingText] so the current step continues to be narrated via the
+  /// device's on-device TTS engine — without pausing the session or requiring
+  /// any user interaction (AC-016).
+  ///
+  /// If no [PlatformTtsFallback] is configured the call is a no-op; the error
+  /// then propagates up to the plan execution engine's existing fallback chain
+  /// ([_platformTtsFallback] / [_speakDirectFallback]).
+  ///
+  /// [pendingText] — the text that the HTTP TTS backend was about to synthesise.
+  /// [speed]       — the current session playback speed (default: 1.0).
+  Future<void> onTtsHttpError(String pendingText, {double speed = 1.0});
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -202,9 +253,11 @@ class AudioEngineImpl implements AudioEngine {
     AudioPlayer? ambientPlayer,
     AudioPlayer? voicePlayer,
     AudioPlayer? silencePlayer,
+    PlatformTtsFallback? platformFallback,
   })  : _ambientPlayer = ambientPlayer ?? AudioPlayer(),
         _voicePlayer = voicePlayer ?? AudioPlayer(),
-        _silencePlayer = silencePlayer ?? AudioPlayer();
+        _silencePlayer = silencePlayer ?? AudioPlayer(),
+        _platformFallback = platformFallback;
 
   // ── Players ──────────────────────────────────────────────────────────────
 
@@ -213,6 +266,10 @@ class AudioEngineImpl implements AudioEngine {
 
   /// Internal player for OS keep-alive during wait steps.
   final AudioPlayer _silencePlayer;
+
+  /// Optional on-device TTS fallback invoked by [onTtsHttpError].
+  /// When null, HTTP TTS errors are handled by the execution engine's chain.
+  final PlatformTtsFallback? _platformFallback;
 
   /// True while the silence keep-alive cycle is active.
   bool _silenceKeepAliveActive = false;
@@ -612,6 +669,53 @@ class AudioEngineImpl implements AudioEngine {
     );
 
     unawaited(_silencePlayer.play());
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // TTS HTTP error fallback (REQ-022, AC-016)
+  // ────────────────────────────────────────────────────────────────────────
+
+  @override
+  Future<void> onTtsHttpError(String pendingText, {double speed = 1.0}) async {
+    if (_disposed) return;
+
+    debugPrint(
+      'AudioEngine: onTtsHttpError — HTTP TTS failure detected for '
+      '"${pendingText.length > 50 ? '${pendingText.substring(0, 50)}…' : pendingText}" '
+      '(REQ-022, AC-016)',
+    );
+
+    if (_platformFallback == null) {
+      // No fallback configured — log and let the execution engine's
+      // existing catch blocks (_platformTtsFallback / _speakDirectFallback)
+      // handle recovery. This maintains full backwards compatibility.
+      debugPrint(
+        'AudioEngine: onTtsHttpError — no platformFallback configured; '
+        'falling back to execution engine error chain.',
+      );
+      return;
+    }
+
+    // Invoke on-device TTS so narration continues transparently (AC-016).
+    // Errors are caught here so the session is never interrupted by a
+    // secondary TTS failure.
+    try {
+      debugPrint(
+        'AudioEngine: onTtsHttpError — invoking '
+        'platformFallback.speakFromCurrentPosition(speed=$speed)',
+      );
+      await _platformFallback!.speakFromCurrentPosition(
+        pendingText,
+        speed: speed,
+      );
+      debugPrint(
+        'AudioEngine: onTtsHttpError — speakFromCurrentPosition completed',
+      );
+    } catch (e) {
+      debugPrint(
+        'AudioEngine: onTtsHttpError — speakFromCurrentPosition failed: $e',
+      );
+    }
   }
 
   // ────────────────────────────────────────────────────────────────────────

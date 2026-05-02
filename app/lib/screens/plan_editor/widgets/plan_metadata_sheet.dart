@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/providers/tts_providers.dart';
+import 'package:instructor/screens/plan_library/widgets/plan_card.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Data class
@@ -21,7 +21,7 @@ class PlanMetadata {
 
   final String name;
   final String? description;
-  final PlanCategory category;
+  final String category;
   final List<String> tags;
   final String defaultVoice;
 }
@@ -37,7 +37,7 @@ Future<PlanMetadata?> showPlanMetadataSheet(
   BuildContext context, {
   required String initialName,
   String? initialDescription,
-  required PlanCategory initialCategory,
+  required String initialCategory,
   required List<String> initialTags,
   required String initialVoice,
   bool voiceLocked = false,
@@ -76,7 +76,7 @@ class _PlanMetadataSheet extends ConsumerStatefulWidget {
 
   final String initialName;
   final String? initialDescription;
-  final PlanCategory initialCategory;
+  final String initialCategory;
   final List<String> initialTags;
   final String initialVoice;
 
@@ -94,7 +94,7 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
   late final TextEditingController _descController;
   final TextEditingController _tagInputController = TextEditingController();
 
-  late PlanCategory _category;
+  late String _category;
   late List<String> _tags;
   late String _voice;
 
@@ -221,19 +221,22 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
               const SizedBox(height: 12),
 
               // ── Category ──────────────────────────────────────────────────
-              DropdownButtonFormField<PlanCategory>(
+              DropdownButtonFormField<String>(
                 value: _category,
                 decoration: const InputDecoration(labelText: 'Category'),
-                items: PlanCategory.values
+                items: const [
+                  'yoga', 'meditation', 'workout', 'cooking',
+                  'routine', 'focus', 'sleep', 'stress', 'custom',
+                ]
                     .map(
                       (c) => DropdownMenuItem(
                         value: c,
-                        child: Text(_categoryLabel(c)),
+                        child: Text(planCategoryLabel(c)),
                       ),
                     )
                     .toList(),
                 onChanged: (c) =>
-                    setState(() => _category = c ?? PlanCategory.custom),
+                    setState(() => _category = c ?? 'custom'),
               ),
               const SizedBox(height: 12),
 
@@ -327,15 +330,6 @@ class _PlanMetadataSheetState extends ConsumerState<_PlanMetadataSheet> {
     return mapped.id.isNotEmpty ? mapped.label : mappedId;
   }
 
-  String _categoryLabel(PlanCategory c) => switch (c) {
-        PlanCategory.yoga => 'Yoga',
-        PlanCategory.meditation => 'Meditation',
-        PlanCategory.workout => 'Workout',
-        PlanCategory.cooking => 'Cooking',
-        PlanCategory.routine => 'Routine',
-        PlanCategory.focus => 'Focus',
-        PlanCategory.custom => 'Custom',
-      };
 
   Widget _buildVoiceDropdown() {
     final voicesAsync = ref.watch(availableVoicesProvider);

@@ -29,15 +29,34 @@
  *   NODE_ENV      — set to "production" to suppress Drizzle query logs
  */
 
-import { Injectable, Logger, NotFoundException, Optional, Inject } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException, Optional, Inject } from '@nestjs/common';
 import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import { and, asc, desc, eq, gt, ilike, or, sql } from 'drizzle-orm';
+import { drizzle as drizzleNeon } from 'drizzle-orm/neon-http';
+import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg';
+import { and, asc, desc, eq, gt, ilike, isNull, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { deletionRequests, libraryPlans, otpRecords, planTriggers, plans, refreshTokens, sessionCompletions, ttsJobs, users } from './schema';
+import { categories, deletionRequests, libraryPlans, otpRecords, planTriggers, plans, refreshTokens, series, seriesSubscriptions, sessionCompletions, ttsJobs, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import type { AppConfig } from '../config/app-config.interface';
+
+/**
+ * Drizzle's query-builder surface (.select / .insert / .update / .delete /
+ * .transaction) is identical across the neon-http and node-postgres adapters,
+ * so callers see the same shape regardless of which driver is wired up at
+ * runtime. We expose the Neon type to keep all existing call sites and
+ * downstream type annotations unchanged.
+ */
+export type AppDb = NeonHttpDatabase<typeof schema>;
+
+/**
+ * Returns true if the URL points at a Neon HTTP endpoint.
+ * Neon hostnames contain ".neon.tech"; local/standard Postgres URLs do not.
+ */
+function isNeonUrl(url: string): boolean {
+  return /\.neon\.tech([:/?]|$)/i.test(url);
+}
 
 // ── Typed result shapes returned to callers ────────────────────────────────
 
@@ -87,6 +106,7 @@ export interface PlanRecord {
   ttsCompleted: number;
   voiceQuality: string;
   sourceLibraryPlanId: string | null;
+  seriesId: string | null;
   shareToken: string | null;
   shareTokenCreatedAt: Date | null;
   createdAt: Date;
@@ -139,6 +159,49 @@ export interface LibraryPlanRecord {
   sortOrder: number;
 }
 
+export interface CategoryRecord {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  sortOrder: number;
+  isPublished: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SeriesRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  /** FK to categories.id — null until backfill assigns existing series (migration 0015). */
+  categoryId: string | null;
+  tags: string;
+  defaultVoice: string;
+  locale: string;
+  isPublished: boolean;
+  sortOrder: number;
+  totalSessions: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SeriesSubscriptionRecord {
+  id: string;
+  userId: string;
+  seriesId: string;
+  status: 'active' | 'paused' | 'completed' | 'cancelled';
+  currentSessionIndex: number;
+  completedSessions: number;
+  subscribedAt: Date;
+  lastSessionCompletedAt: Date | null;
+  unsubscribedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface TtsJobRecord {
   id: string;
   planId: string;
@@ -177,6 +240,7 @@ const PG_UNIQUE_VIOLATION = '23505';
 export class DatabaseService {
   private readonly logger = new Logger(DatabaseService.name);
   private readonly db: NeonHttpDatabase<typeof schema> | null;
+  private readonly usingNeon: boolean;
 
   /**
    * True when DATABASE_URL is absent.
@@ -198,6 +262,7 @@ export class DatabaseService {
       );
       this.noop = true;
       this.db = null;
+      this.usingNeon = false;
       return;
     }
 
@@ -206,15 +271,20 @@ export class DatabaseService {
     const nodeEnv = config?.nodeEnv ?? process.env.NODE_ENV;
     const enableLogger = nodeEnv !== 'production';
 
-    const sqlClient = neon(databaseUrl);
-    this.db = drizzle(sqlClient, {
-      schema,
-      logger: enableLogger,
-    });
+    this.usingNeon = isNeonUrl(databaseUrl);
+    if (this.usingNeon) {
+      const sqlClient = neon(databaseUrl);
+      this.db = drizzleNeon(sqlClient, { schema, logger: enableLogger });
+    } else {
+      // node-postgres's drizzle instance has the same query-builder surface
+      // as the neon-http one; the cast lets callers keep their existing types.
+      const pool = new Pool({ connectionString: databaseUrl });
+      this.db = drizzlePg(pool, { schema, logger: enableLogger }) as unknown as NeonHttpDatabase<typeof schema>;
+    }
 
     this.noop = false;
     this.logger.log(
-      `DatabaseService initialized — Neon HTTP driver (zero idle connections), logger=${enableLogger}`,
+      `DatabaseService initialized — ${this.usingNeon ? 'Neon HTTP' : 'node-postgres'} driver, logger=${enableLogger}`,
     );
   }
 
@@ -245,8 +315,19 @@ export class DatabaseService {
     try {
       return await fn();
     } catch (err) {
+      // Postgres surfaces a 5-char SQLSTATE on every server-side error
+      // (constraint violations, FK errors, etc.). Those are deterministic —
+      // a retry will produce the same failure, so fail fast. Only retry
+      // when the error has no SQLSTATE (network/connection-level failure).
+      const pgCode = (err as { code?: string }).code;
+      if (typeof pgCode === 'string' && /^[0-9A-Z]{5}$/.test(pgCode)) {
+        throw err;
+      }
+      const cause = (err as { cause?: unknown }).cause;
       this.logger.warn(
-        'Neon query failed — retrying once after 1 s (cold start recovery)',
+        `DB query failed — retrying once after 1 s (cold start recovery). ` +
+        `error=${(err as Error)?.message ?? err} ` +
+        `cause=${cause instanceof Error ? cause.message : JSON.stringify(cause)}`,
       );
       await new Promise<void>((resolve) => setTimeout(resolve, 1000));
       return await fn();
@@ -517,7 +598,7 @@ export class DatabaseService {
     const now = new Date();
 
     if (planId) {
-      const rows = await this.withRetry(() =>
+      const updated = await this.withRetry(() =>
         this.db!
           .update(plans)
           .set({ name, planJson, updatedAt: now })
@@ -525,14 +606,32 @@ export class DatabaseService {
           .returning({ id: plans.id, updatedAt: plans.updatedAt }),
       );
 
-      if (rows.length === 0) {
-        throw new NotFoundException(
-          `Plan ${planId} not found or does not belong to the authenticated user`,
+      if (updated.length > 0) {
+        const row = updated[0];
+        this.logger.log(`Plan updated: planId=${row.id}, userId=${userId}`);
+        return { planId: row.id, updatedAt: row.updatedAt };
+      }
+
+      // No row owned by this user — either the plan doesn't exist anywhere
+      // (offline-first client uploading a locally-created plan) or the id
+      // collides with another user's plan. INSERT with the supplied id; on
+      // PK conflict, surface a 409 to the client.
+      const inserted = await this.withRetry(() =>
+        this.db!
+          .insert(plans)
+          .values({ id: planId, userId, name, planJson, createdAt: now, updatedAt: now })
+          .onConflictDoNothing({ target: plans.id })
+          .returning({ id: plans.id, updatedAt: plans.updatedAt }),
+      );
+
+      if (inserted.length === 0) {
+        throw new ConflictException(
+          `Plan ${planId} already exists and is owned by another user`,
         );
       }
 
-      const row = rows[0];
-      this.logger.log(`Plan updated: planId=${row.id}, userId=${userId}`);
+      const row = inserted[0];
+      this.logger.log(`Plan inserted with client id: planId=${row.id}, userId=${userId}`);
       return { planId: row.id, updatedAt: row.updatedAt };
     }
 
@@ -983,6 +1082,573 @@ export class DatabaseService {
     return deleted;
   }
 
+  // ── Categories ──────────────────────────────────────────────────────────────
+
+  async listPublishedCategories(): Promise<CategoryRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(categories)
+        .where(and(eq(categories.isPublished, true), isNull(categories.deletedAt)))
+        .orderBy(asc(categories.sortOrder), asc(categories.createdAt)),
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      icon: row.icon,
+      color: row.color,
+      sortOrder: row.sortOrder,
+      isPublished: row.isPublished,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async listAllCategories(page: number = 1, pageSize: number = 20): Promise<{ categories: CategoryRecord[]; total: number }> {
+    if (this.noop) return { categories: [], total: 0 };
+
+    const offset = (page - 1) * pageSize;
+
+    // Soft-deleted rows (deleted_at IS NOT NULL) are excluded from both count
+    // and paginated results so they vanish from the admin grid after delete.
+    const countResult = await this.withRetry(() =>
+      this.db!
+        .select({ count: sql<number>`count(*)` })
+        .from(categories)
+        .where(isNull(categories.deletedAt)),
+    );
+    const total = countResult[0]?.count ?? 0;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(categories)
+        .where(isNull(categories.deletedAt))
+        .orderBy(asc(categories.sortOrder), asc(categories.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+    );
+
+    const categoryRecords = rows.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      icon: row.icon,
+      color: row.color,
+      sortOrder: row.sortOrder,
+      isPublished: row.isPublished,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    return { categories: categoryRecords, total };
+  }
+
+  async getCategoryById(id: string): Promise<CategoryRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(categories)
+        .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
+        .limit(1),
+    );
+
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
+    return {
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      icon: row.icon,
+      color: row.color,
+      sortOrder: row.sortOrder,
+      isPublished: row.isPublished,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async createCategory(data: {
+    slug: string;
+    name: string;
+    icon?: string | null;
+    color?: string | null;
+    sortOrder?: number;
+    isPublished?: boolean;
+  }): Promise<{ id: string }> {
+    if (this.noop) return { id: uuidv4() };
+
+    const now = new Date();
+    let rows;
+    try {
+      rows = await this.withRetry(() =>
+        this.db!
+          .insert(categories)
+          .values({
+            slug: data.slug,
+            name: data.name,
+            icon: data.icon ?? null,
+            color: data.color ?? null,
+            sortOrder: data.sortOrder ?? 0,
+            isPublished: data.isPublished ?? false,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: categories.id }),
+      );
+    } catch (err) {
+      if ((err as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
+        throw new ConflictException(
+          `Category slug "${data.slug}" already exists`,
+        );
+      }
+      throw err;
+    }
+
+    this.logger.log(`Category created: id=${rows[0].id}, slug="${data.slug}"`);
+    return { id: rows[0].id };
+  }
+
+  async updateCategory(
+    id: string,
+    data: Partial<{
+      slug: string;
+      name: string;
+      icon: string | null;
+      color: string | null;
+      sortOrder: number;
+      isPublished: boolean;
+    }>,
+  ): Promise<CategoryRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .update(categories)
+        .set({ ...data, updatedAt: new Date() })
+        .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
+        .returning(),
+    );
+
+    if (rows.length === 0) return null;
+
+    const row = rows[0];
+    this.logger.log(`Category updated: id=${id}`);
+    return {
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      icon: row.icon,
+      color: row.color,
+      sortOrder: row.sortOrder,
+      isPublished: row.isPublished,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async softDeleteCategory(id: string): Promise<boolean> {
+    if (this.noop) return true;
+
+    const now = new Date();
+    // Stamp deleted_at AND clear is_published so the row is hidden from both
+    // the public surface (which filters on is_published) and the admin grid
+    // (which now filters on deleted_at). Re-deleting an already-deleted row
+    // is a no-op and returns false (rows.length === 0).
+    const rows = await this.withRetry(() =>
+      this.db!
+        .update(categories)
+        .set({ deletedAt: now, isPublished: false, updatedAt: now })
+        .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
+        .returning({ id: categories.id }),
+    );
+
+    const deleted = rows.length > 0;
+    if (deleted) this.logger.log(`Category soft-deleted: id=${id}`);
+    return deleted;
+  }
+
+  async reorderCategories(
+    items: Array<{ id: string; sortOrder: number }>,
+  ): Promise<void> {
+    if (this.noop) return;
+    if (items.length === 0) return;
+
+    const now = new Date();
+
+    // Batch update all categories in a single query
+    await this.withRetry(() =>
+      Promise.all(
+        items.map((item) =>
+          this.db!
+            .update(categories)
+            .set({ sortOrder: item.sortOrder, updatedAt: now })
+            .where(eq(categories.id, item.id)),
+        ),
+      ),
+    );
+
+    this.logger.log(`Categories reordered: ${items.length} items`);
+  }
+
+  // ── Series ─────────────────────────────────────────────────────────────────
+
+  async listPublishedSeries(categorySlug?: string): Promise<SeriesRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() => {
+      if (categorySlug) {
+        return this.db!
+          .select({ series })
+          .from(series)
+          .innerJoin(categories, eq(series.categoryId, categories.id))
+          .where(
+            and(
+              eq(series.isPublished, true),
+              eq(categories.slug, categorySlug),
+              isNull(categories.deletedAt),
+            ),
+          )
+          .orderBy(asc(series.sortOrder), asc(series.createdAt))
+          .then((rs) => rs.map((r) => r.series));
+      }
+      return this.db!
+        .select()
+        .from(series)
+        .where(eq(series.isPublished, true))
+        .orderBy(asc(series.sortOrder), asc(series.createdAt));
+    });
+    return Promise.all(rows.map((row) => this.mapSeriesRow(row)));
+  }
+
+  async listAllSeries(): Promise<SeriesRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(series)
+        .orderBy(asc(series.sortOrder), asc(series.createdAt)),
+    );
+    return Promise.all(rows.map((row) => this.mapSeriesRow(row)));
+  }
+
+  async getSeriesById(id: string): Promise<SeriesRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!.select().from(series).where(eq(series.id, id)).limit(1),
+    );
+    if (rows.length === 0) return null;
+    return this.mapSeriesRow(rows[0]);
+  }
+
+  async createSeries(data: {
+    name: string;
+    description?: string | null;
+    category: string;
+    /** FK to categories.id — optional during rollout while categoryId is being backfilled. */
+    categoryId?: string | null;
+    tags: string;
+    defaultVoice: string;
+    locale: string;
+    isPublished: boolean;
+    sortOrder: number;
+  }): Promise<{ id: string }> {
+    if (this.noop) return { id: uuidv4() };
+
+    const now = new Date();
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(series)
+        .values({
+          ...data,
+          description: data.description ?? null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: series.id }),
+    );
+    this.logger.log(`Series created: id=${rows[0].id}, name="${data.name}"`);
+    return { id: rows[0].id };
+  }
+
+  async updateSeries(
+    id: string,
+    data: Partial<{
+      name: string;
+      description: string | null;
+      category: string;
+      /** FK to categories.id — optional during rollout while categoryId is being backfilled. */
+      categoryId: string | null;
+      tags: string;
+      defaultVoice: string;
+      locale: string;
+      isPublished: boolean;
+      sortOrder: number;
+    }>,
+  ): Promise<SeriesRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .update(series)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(series.id, id))
+        .returning(),
+    );
+    if (rows.length === 0) return null;
+    this.logger.log(`Series updated: id=${id}`);
+    return this.mapSeriesRow(rows[0]);
+  }
+
+  async deleteSeries(id: string): Promise<boolean> {
+    if (this.noop) return false;
+
+    const rows = await this.withRetry(() =>
+      this.db!.delete(series).where(eq(series.id, id)).returning({ id: series.id }),
+    );
+    const deleted = rows.length > 0;
+    if (deleted) this.logger.log(`Series deleted: id=${id}`);
+    return deleted;
+  }
+
+  /**
+   * List all plans in a series, ordered by position (ascending) then createdAt
+   * as a stable tiebreaker. The position field is updated by reorderSeriesPlans
+   * when an admin drag-drops sessions; newly created sessions default to position=0.
+   */
+  async listPlansInSeries(seriesId: string): Promise<PlanRecord[]> {
+    if (this.noop) return [];
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(plans)
+        .where(eq(plans.seriesId, seriesId))
+        .orderBy(asc(plans.position), asc(plans.createdAt)),
+    );
+    return rows.map((row) => this.mapPlanRecord(row));
+  }
+
+  /**
+   * Bulk-update the position field for plan rows that belong to a series.
+   *
+   * Each item is applied only when plans.series_id matches seriesId, so a
+   * rogue planId from a different series is silently ignored — preventing
+   * cross-series position pollution.
+   *
+   * Runs all updates inside a single withRetry wrapper so a transient
+   * connection error retries the whole batch.
+   */
+  async reorderSeriesPlans(
+    seriesId: string,
+    items: Array<{ planId: string; position: number }>,
+  ): Promise<void> {
+    if (this.noop) return;
+    if (items.length === 0) return;
+
+    const now = new Date();
+
+    await this.withRetry(() =>
+      Promise.all(
+        items.map((item) =>
+          this.db!
+            .update(plans)
+            .set({ position: item.position, updatedAt: now })
+            .where(and(eq(plans.id, item.planId), eq(plans.seriesId, seriesId))),
+        ),
+      ),
+    );
+
+    this.logger.log(`Series plans reordered: seriesId=${seriesId} count=${items.length}`);
+  }
+
+  // ── Series subscriptions ───────────────────────────────────────────────────
+
+  async getSubscription(
+    userId: string,
+    seriesId: string,
+  ): Promise<SeriesSubscriptionRecord | null> {
+    if (this.noop) return null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(seriesSubscriptions)
+        .where(
+          and(
+            eq(seriesSubscriptions.userId, userId),
+            eq(seriesSubscriptions.seriesId, seriesId),
+          ),
+        )
+        .limit(1),
+    );
+    if (rows.length === 0) return null;
+    return this.mapSubscriptionRow(rows[0]);
+  }
+
+  async listUserSubscriptions(
+    userId: string,
+    activeOnly = false,
+  ): Promise<SeriesSubscriptionRecord[]> {
+    if (this.noop) return [];
+
+    const where = activeOnly
+      ? and(
+          eq(seriesSubscriptions.userId, userId),
+          eq(seriesSubscriptions.status, 'active'),
+        )
+      : eq(seriesSubscriptions.userId, userId);
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .select()
+        .from(seriesSubscriptions)
+        .where(where)
+        .orderBy(desc(seriesSubscriptions.updatedAt)),
+    );
+    return rows.map((row) => this.mapSubscriptionRow(row));
+  }
+
+  /**
+   * Idempotent subscribe: re-subscribing a cancelled/paused user flips status
+   * back to 'active' on the existing row, preserving prior progress.
+   */
+  async subscribeToSeries(
+    userId: string,
+    seriesId: string,
+  ): Promise<SeriesSubscriptionRecord> {
+    if (this.noop) {
+      const now = new Date();
+      return {
+        id: uuidv4(),
+        userId,
+        seriesId,
+        status: 'active',
+        currentSessionIndex: 0,
+        completedSessions: 0,
+        subscribedAt: now,
+        lastSessionCompletedAt: null,
+        unsubscribedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+
+    const existing = await this.getSubscription(userId, seriesId);
+    const now = new Date();
+
+    if (existing) {
+      const rows = await this.withRetry(() =>
+        this.db!
+          .update(seriesSubscriptions)
+          .set({ status: 'active', unsubscribedAt: null, updatedAt: now })
+          .where(eq(seriesSubscriptions.id, existing.id))
+          .returning(),
+      );
+      this.logger.log(
+        `Series subscription reactivated: user=${userId} series=${seriesId}`,
+      );
+      return this.mapSubscriptionRow(rows[0]);
+    }
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(seriesSubscriptions)
+        .values({
+          userId,
+          seriesId,
+          status: 'active',
+          currentSessionIndex: 0,
+          completedSessions: 0,
+          subscribedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning(),
+    );
+    this.logger.log(`Series subscription created: user=${userId} series=${seriesId}`);
+    return this.mapSubscriptionRow(rows[0]);
+  }
+
+  async setSubscriptionStatus(
+    userId: string,
+    seriesId: string,
+    status: 'active' | 'paused' | 'completed' | 'cancelled',
+  ): Promise<SeriesSubscriptionRecord | null> {
+    if (this.noop) return null;
+
+    const now = new Date();
+    const updates: Record<string, unknown> = { status, updatedAt: now };
+    if (status === 'cancelled') updates.unsubscribedAt = now;
+    if (status === 'active') updates.unsubscribedAt = null;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .update(seriesSubscriptions)
+        .set(updates)
+        .where(
+          and(
+            eq(seriesSubscriptions.userId, userId),
+            eq(seriesSubscriptions.seriesId, seriesId),
+          ),
+        )
+        .returning(),
+    );
+    if (rows.length === 0) return null;
+    this.logger.log(
+      `Series subscription status: user=${userId} series=${seriesId} status=${status}`,
+    );
+    return this.mapSubscriptionRow(rows[0]);
+  }
+
+  /**
+   * Bump progress after a session completes. Flips to 'completed' once
+   * completedSessions >= totalSessions.
+   */
+  async recordSessionProgress(
+    userId: string,
+    seriesId: string,
+    sessionIndex: number,
+  ): Promise<SeriesSubscriptionRecord | null> {
+    if (this.noop) return null;
+
+    const sub = await this.getSubscription(userId, seriesId);
+    if (!sub) return null;
+
+    const seriesRow = await this.getSeriesById(seriesId);
+    const total = seriesRow?.totalSessions ?? 0;
+    const newCompleted = total > 0
+      ? Math.min(total, sub.completedSessions + 1)
+      : sub.completedSessions + 1;
+    const newIndex = Math.max(sub.currentSessionIndex, sessionIndex + 1);
+    const isComplete = total > 0 && newCompleted >= total;
+    const now = new Date();
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .update(seriesSubscriptions)
+        .set({
+          currentSessionIndex: newIndex,
+          completedSessions: newCompleted,
+          lastSessionCompletedAt: now,
+          status: isComplete ? 'completed' : sub.status,
+          updatedAt: now,
+        })
+        .where(eq(seriesSubscriptions.id, sub.id))
+        .returning(),
+    );
+    return this.mapSubscriptionRow(rows[0]);
+  }
+
   // ── TTS jobs ───────────────────────────────────────────────────────────────
 
   async createTtsJobs(
@@ -1143,7 +1809,7 @@ export class DatabaseService {
     const { total, completed, failed } = countRows[0] ?? { total: 0, completed: 0, failed: 0 };
 
     let finalStatus: string;
-    if (failed === 0) {
+    if (failed === 0 && completed === total) {
       finalStatus = 'completed';
     } else if (completed > 0) {
       finalStatus = 'partial';
@@ -1188,8 +1854,55 @@ export class DatabaseService {
       ttsCompleted: row.ttsCompleted,
       voiceQuality: row.voiceQuality,
       sourceLibraryPlanId: row.sourceLibraryPlanId ?? null,
+      seriesId: row.seriesId ?? null,
       shareToken: row.shareToken ?? null,
       shareTokenCreatedAt: row.shareTokenCreatedAt ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private async mapSeriesRow(row: typeof series.$inferSelect): Promise<SeriesRecord> {
+    // Cache: count plans pointing to this series. The partial index
+    // idx_plans_series keeps this cheap.
+    const countRows = await this.withRetry(() =>
+      this.db!
+        .select({ count: sql<number>`count(*)::int` })
+        .from(plans)
+        .where(eq(plans.seriesId, row.id)),
+    );
+    const totalSessions = Number(countRows[0]?.count ?? 0);
+
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description ?? null,
+      category: row.category,
+      categoryId: row.categoryId ?? null,
+      tags: row.tags,
+      defaultVoice: row.defaultVoice,
+      locale: row.locale,
+      isPublished: row.isPublished,
+      sortOrder: row.sortOrder,
+      totalSessions,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private mapSubscriptionRow(
+    row: typeof seriesSubscriptions.$inferSelect,
+  ): SeriesSubscriptionRecord {
+    return {
+      id: row.id,
+      userId: row.userId,
+      seriesId: row.seriesId,
+      status: row.status as SeriesSubscriptionRecord['status'],
+      currentSessionIndex: row.currentSessionIndex,
+      completedSessions: row.completedSessions,
+      subscribedAt: row.subscribedAt,
+      lastSessionCompletedAt: row.lastSessionCompletedAt ?? null,
+      unsubscribedAt: row.unsubscribedAt ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

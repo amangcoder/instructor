@@ -3,7 +3,6 @@ import 'package:uuid/uuid.dart';
 
 import 'package:instructor/database/app_database.dart';
 import 'package:instructor/database/tables/plans_table.dart';
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/services/plan_api_service.dart';
@@ -58,7 +57,7 @@ abstract class PlanRepository {
   /// - [category]: exact match on [Plan.category].
   Stream<List<Plan>> watchUserPlans({
     String? searchQuery,
-    PlanCategory? category,
+    String? category,
   });
 
   /// Updates the [Plan.lastUsedAt] timestamp to now.
@@ -168,7 +167,7 @@ class DriftPlanRepository with PlanRepositoryMixin implements PlanRepository {
   @override
   Stream<List<Plan>> watchUserPlans({
     String? searchQuery,
-    PlanCategory? category,
+    String? category,
   }) {
     final query = _db.select(_db.plansTable)
       ..orderBy([
@@ -188,7 +187,7 @@ class DriftPlanRepository with PlanRepositoryMixin implements PlanRepository {
     }
 
     if (category != null) {
-      query.where((t) => t.category.equals(category.name));
+      query.where((t) => t.category.equals(category));
     }
 
     return query.watch().map((rows) => rows.map(rowToPlan).toList());
@@ -357,7 +356,7 @@ class ApiPlanRepository with PlanRepositoryMixin implements PlanRepository {
   @override
   Stream<List<Plan>> watchUserPlans({
     String? searchQuery,
-    PlanCategory? category,
+    String? category,
   }) {
     final query = _db.select(_db.plansTable)
       ..orderBy([
@@ -376,7 +375,7 @@ class ApiPlanRepository with PlanRepositoryMixin implements PlanRepository {
     }
 
     if (category != null) {
-      query.where((t) => t.category.equals(category.name));
+      query.where((t) => t.category.equals(category));
     }
 
     return query.watch().map((rows) => rows.map(rowToPlan).toList());

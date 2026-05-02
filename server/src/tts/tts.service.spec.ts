@@ -191,17 +191,21 @@ describe('TtsService', () => {
       expect(body.contents[0].parts[0].text).toBe('Hello');
     });
 
-    // SSML <lang> wrapping is exercised through geminiTtsRequestBody, which
-    // invokes the same buildPrompt path used by the live Gemini fetch but
-    // returns a plain object — sidestepping the synthesize() cache + provider
-    // routing that those higher-level tests depend on.
+    // SSML <lang> wrapping is exercised through synthesize() with a fetch spy;
+    // the same buildPrompt path runs in the live Gemini fetch.
 
-    it('wraps SSML body in <lang xml:lang="…"> for SSML input + known locale', () => {
+    it('wraps SSML body in <lang xml:lang="…"> for SSML input + known locale', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeGeminiResponse(silentPcmBase64()),
+      } as unknown as Response);
+
       const ssml = '<speak>step one<break time="2500ms"/>step two</speak>';
-      const out = service.geminiTtsRequestBody(ssml, 'aoede', 'enIN') as {
-        body: { contents: Array<{ parts: Array<{ text: string }> }> };
-      };
-      const text = out.body.contents[0].parts[0].text;
+      await service.synthesize(ssml, 'aoede', 'enIN', 'gemini');
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = JSON.parse((init as RequestInit).body as string);
+      const text: string = body.contents[0].parts[0].text;
       // No plain-text prefix (would clobber <break>).
       expect(text).not.toContain('Say the following');
       // Body wrapped, breaks preserved, root <speak> intact.
@@ -210,22 +214,34 @@ describe('TtsService', () => {
       );
     });
 
-    it('uses the BCP-47 tag for non-English locales in SSML', () => {
+    it('uses the BCP-47 tag for non-English locales in SSML', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeGeminiResponse(silentPcmBase64()),
+      } as unknown as Response);
+
       const ssml = '<speak>hola<break time="1000ms"/>mundo</speak>';
-      const out = service.geminiTtsRequestBody(ssml, 'aoede', 'es') as {
-        body: { contents: Array<{ parts: Array<{ text: string }> }> };
-      };
-      const text = out.body.contents[0].parts[0].text;
+      await service.synthesize(ssml, 'aoede', 'es', 'gemini');
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = JSON.parse((init as RequestInit).body as string);
+      const text: string = body.contents[0].parts[0].text;
       expect(text).toContain('<lang xml:lang="es-ES">');
       expect(text).toContain('<break time="1000ms"/>');
     });
 
-    it('leaves SSML untouched when locale has no BCP-47 mapping', () => {
+    it('leaves SSML untouched when locale has no BCP-47 mapping', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => makeGeminiResponse(silentPcmBase64()),
+      } as unknown as Response);
+
       const ssml = '<speak>hello</speak>';
-      const out = service.geminiTtsRequestBody(ssml, 'aoede', 'enXX') as {
-        body: { contents: Array<{ parts: Array<{ text: string }> }> };
-      };
-      expect(out.body.contents[0].parts[0].text).toBe(ssml);
+      await service.synthesize(ssml, 'aoede', 'enXX', 'gemini');
+
+      const [, init] = fetchSpy.mock.calls[0];
+      const body = JSON.parse((init as RequestInit).body as string);
+      expect(body.contents[0].parts[0].text).toBe(ssml);
     });
   });
 

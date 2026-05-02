@@ -6,17 +6,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/library_plan_summary.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/models/series.dart';
+import 'package:instructor/models/series_subscription.dart';
 import 'package:instructor/models/tts_status_info.dart';
 import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/providers/library_providers.dart' as libProviders;
 import 'package:instructor/providers/plan_providers.dart';
+import 'package:instructor/providers/series_providers.dart';
+import 'package:instructor/providers/categories_providers.dart';
 import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/router.dart';
+import 'package:instructor/screens/plan_editor/plan_editor_screen.dart';
 import 'package:instructor/services/audio_download_service.dart';
 import 'package:instructor/services/plan_api_service.dart' show PlanApiException;
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -24,10 +28,25 @@ import 'package:instructor/theme/app_branding.dart';
 import 'package:instructor/widgets/active_session_dialog.dart';
 import 'package:instructor/widgets/offline_banner.dart';
 import 'package:instructor/widgets/profile_avatar_button.dart';
+import 'package:instructor/widgets/series_card.dart';
 
 import 'widgets/category_filter.dart';
 import 'widgets/countdown_overlay.dart';
 import 'widgets/plan_card.dart';
+
+// Pushing /editor/:planId via context.push from this screen (which lives
+// inside StatefulShellRoute branch 0) into branch 1 triggers the go_router 14
+// keyReservation regression — see flutter/flutter#140586. Pushing a
+// MaterialPageRoute on the root navigator bypasses go_router's cross-branch
+// push path while preserving back-stack UX.
+void _openPlanEditor(BuildContext context, {String? planId}) {
+  Navigator.of(context, rootNavigator: true).push<void>(
+    MaterialPageRoute<void>(
+      builder: (_) =>
+          planId == null ? const PlanEditorScreen() : PlanEditorScreen(planId: planId),
+    ),
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Local Riverpod state providers
@@ -42,7 +61,7 @@ final searchQueryProvider = StateProvider<String>((ref) => '');
 /// Holds the active [PlanCategory] filter, or null when "All" is selected.
 ///
 /// Passed to [planListProvider] for SQLite-side filtering.
-final selectedCategoryProvider = StateProvider<PlanCategory?>((ref) => null);
+final selectedCategoryProvider = StateProvider<String?>((ref) => null);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Network-error detection helper
@@ -188,7 +207,7 @@ class _PlanLibraryScreenState extends ConsumerState<PlanLibraryScreen>
       // FAB only shown on the My Plans tab for authenticated users.
       floatingActionButton: tabIndex == 0 && isLoggedIn
           ? _GradientFab(
-              onPressed: () => context.push(AppRoutes.editorNew),
+              onPressed: () => _openPlanEditor(context),
             )
           : null,
     );
@@ -222,74 +241,108 @@ class _MyPlansTab extends ConsumerWidget {
       ),
     );
 
+    // Programs rail renders only when published series exist; mirror that
+    // condition here so the empty state below can adapt its layout.
+    final hasProgramsRail = ref
+            .watch(publishedSeriesProvider)
+            .valueOrNull
+            ?.isNotEmpty ??
+        false;
+
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
+    Future<void> handleRefresh() async {
+      final repo = ref.read(planRepositoryProvider);
+      try {
+        await repo.refreshFromServer();
+      } catch (e) {
+        if (!context.mounted) return;
+        final message = _isNetworkError(e)
+            ? 'No internet connection — showing cached plans'
+            : 'Could not refresh plans';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+
+    return RefreshIndicator(
+      onRefresh: handleRefresh,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
         // ── "Plan Library" heading ─────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          child: Text(
-            'Plan Library',
-            style: GoogleFonts.manrope(
-              fontSize: 30,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-              color: colorScheme.onSurface,
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Text(
+              'Plan Library',
+              style: GoogleFonts.manrope(
+                fontSize: 30,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+                color: colorScheme.onSurface,
+              ),
             ),
           ),
         ),
 
         // ── Search bar ─────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
-          child: _SearchBar(),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+            child: _SearchBar(),
+          ),
         ),
 
         // ── Category filter chips ──────────────────────────────────────────
-        const CategoryFilter(),
+        const SliverToBoxAdapter(child: CategoryFilter()),
 
         // ── Offline banner (auto-hides when connectivity is restored) ──────
-        const OfflineBanner(tab: LibraryTab.myPlans),
+        const SliverToBoxAdapter(
+          child: OfflineBanner(tab: LibraryTab.myPlans),
+        ),
+
+        // ── Continue your program (only when an active subscription exists) ─
+        if (isLoggedIn)
+          const SliverToBoxAdapter(child: _ContinueProgramCard()),
+
+        // ── My Programs — subscribed series (active, paused, completed) ────
+        if (isLoggedIn)
+          const SliverToBoxAdapter(child: _MyProgramsRail()),
+
+        // ── Programs rail — horizontal carousel of curated series ──────────
+        const SliverToBoxAdapter(child: _ProgramsRail()),
 
         // ── Plan list ─────────────────────────────────────────────────────
-        Expanded(
-          child: plansAsync.when(
-            data: (plans) => _PlanList(
-              plans: plans,
-              isAuthenticated: isLoggedIn,
-              hasActiveFilter:
-                  searchQuery.isNotEmpty || selectedCategory != null,
-              onGoToDiscover: () => ref
-                  .read(libProviders.libraryTabIndexProvider.notifier)
-                  .state = 1,
-              onRefresh: () async {
-                final repo = ref.read(planRepositoryProvider);
-                try {
-                  await repo.refreshFromServer();
-                } catch (e) {
-                  if (!context.mounted) return;
-                  final message = _isNetworkError(e)
-                      ? 'No internet connection \u2014 showing cached plans'
-                      : 'Could not refresh plans';
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(message),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-            ),
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => _ErrorState(
+        plansAsync.when(
+          data: (plans) => _PlanList(
+            plans: plans,
+            isAuthenticated: isLoggedIn,
+            hasActiveFilter:
+                searchQuery.isNotEmpty || selectedCategory != null,
+            hasContentAbove: hasProgramsRail,
+            onGoToDiscover: () => ref
+                .read(libProviders.libraryTabIndexProvider.notifier)
+                .state = 1,
+          ),
+          loading: () => const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (error, _) => SliverFillRemaining(
+            hasScrollBody: false,
+            child: _ErrorState(
               message: error.toString(),
               onRetry: () => ref.invalidate(planListProvider),
             ),
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -572,6 +625,7 @@ class _DiscoverCategoryFilter extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedStr = ref.watch(libProviders.selectedCategoryProvider);
     final colorScheme = Theme.of(context).colorScheme;
+    final categories = ref.watch(categoriesProvider).valueOrNull ?? [];
 
     return SizedBox(
       height: 56,
@@ -593,22 +647,20 @@ class _DiscoverCategoryFilter extends ConsumerWidget {
                         .state = null,
               ),
             ),
-            // One chip per category.
-            ...PlanCategory.values.map((category) {
-              final isSelected = selectedStr == category.name;
+            // One chip per category from categoriesProvider.
+            ...categories.map((cat) {
+              final isSelected = selectedStr == cat.slug;
               return Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: _DiscoverChip(
-                  label: planCategoryLabel(category),
+                  label: cat.name,
                   isSelected: isSelected,
                   colorScheme: colorScheme,
                   onTap: () {
                     final notifier = ref.read(
                       libProviders.selectedCategoryProvider.notifier,
                     );
-                    // Tapping the active chip deselects it ("All").
-                    notifier.state =
-                        isSelected ? null : category.name;
+                    notifier.state = isSelected ? null : cat.slug;
                   },
                 ),
               );
@@ -1072,8 +1124,8 @@ class _PlanList extends ConsumerWidget {
   const _PlanList({
     required this.plans,
     required this.isAuthenticated,
-    required this.onRefresh,
     required this.hasActiveFilter,
+    required this.hasContentAbove,
     required this.onGoToDiscover,
   });
 
@@ -1081,33 +1133,29 @@ class _PlanList extends ConsumerWidget {
   final bool isAuthenticated;
   final bool hasActiveFilter;
 
+  /// True when the programs rail (or other section) renders above the plan
+  /// list. Used by the empty state to switch from a full-screen centered
+  /// layout to a compact inline layout that sits flush below the rail.
+  final bool hasContentAbove;
+
   /// Switches to the Discover tab. Passed to [_EmptyState] when there are no
   /// plans and no active filter so the user can browse public plans.
   final VoidCallback onGoToDiscover;
 
-  /// Called when the user pulls down to refresh. Typically calls
-  /// [PlanRepository.refreshFromServer] to sync plans from the backend.
-  final Future<void> Function() onRefresh;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Empty state — wrapped in a CustomScrollView so pull-to-refresh
-    // works even when there are no items to scroll.
     if (plans.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: onRefresh,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _EmptyState(
-                isFiltered: hasActiveFilter,
-                onGoToDiscover: hasActiveFilter ? null : onGoToDiscover,
-              ),
-            ),
-          ],
-        ),
+      final emptyState = _EmptyState(
+        isFiltered: hasActiveFilter,
+        onGoToDiscover: hasActiveFilter ? null : onGoToDiscover,
+        compact: hasContentAbove,
+      );
+      if (hasContentAbove) {
+        return SliverToBoxAdapter(child: emptyState);
+      }
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: emptyState,
       );
     }
 
@@ -1134,7 +1182,7 @@ class _PlanList extends ConsumerWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: PlanCard(
               plan: plan,
-              onTap: () => context.push('/editor/${plan.id}'),
+              onTap: () => _openPlanEditor(context, planId: plan.id),
               onPlay: () => _onPlanTap(context, ref, plan),
               onPlayWithAiVoice: () {
                 ref.read(ttsPlaybackModeProvider.notifier).state =
@@ -1142,7 +1190,7 @@ class _PlanList extends ConsumerWidget {
                 _onPlanTap(context, ref, plan);
               },
               onEdit: isAuthenticated
-                  ? () => context.push('/editor/${plan.id}')
+                  ? () => _openPlanEditor(context, planId: plan.id)
                   : null,
               onDuplicate: isAuthenticated
                   ? () => _duplicatePlan(context, ref, plan)
@@ -1183,20 +1231,20 @@ class _PlanList extends ConsumerWidget {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-        // AlwaysScrollableScrollPhysics ensures overscroll is detected even
-        // when the list is shorter than the viewport, so pull-to-refresh
-        // triggers reliably regardless of the number of plans.
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          if (userPlans.isNotEmpty) ...[
-            buildSectionHeader('My Plans'),
-            ...userPlans.map(buildPlanCard),
-          ],
-        ],
+    final children = <Widget>[
+      if (userPlans.isNotEmpty) ...[
+        buildSectionHeader('My Plans'),
+        ...userPlans.map(buildPlanCard),
+      ],
+    ];
+
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) => children[index],
+          childCount: children.length,
+        ),
       ),
     );
   }
@@ -1437,6 +1485,7 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState({
     required this.isFiltered,
     this.onGoToDiscover,
+    this.compact = false,
   });
 
   /// True when a search query or category chip is active.
@@ -1446,69 +1495,83 @@ class _EmptyState extends StatelessWidget {
   /// Null when [isFiltered] is true (filter hint is shown instead).
   final VoidCallback? onGoToDiscover;
 
+  /// When true, render a top-aligned, lighter-weight layout suitable for
+  /// sitting flush below another section (e.g. the programs rail). When
+  /// false, the empty state is centered in the available viewport.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isFiltered
+              ? Icons.search_off_outlined
+              : Icons.playlist_play_outlined,
+          size: compact ? 40 : 64,
+          color: colorScheme.primary.withValues(alpha: 0.5),
+        ),
+        SizedBox(height: compact ? 12 : 16),
+        Text(
+          isFiltered ? 'No plans found' : 'No plans yet',
+          style:
+              compact ? theme.textTheme.titleMedium : theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        if (isFiltered)
+          Text(
+            'Try adjusting your search or clearing the category filter.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          )
+        else ...[
+          Text(
+            'Made no plans yet? No problem — head over to the ',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          GestureDetector(
+            onTap: onGoToDiscover,
+            child: Text(
+              'Discover tab',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline,
+                decorationColor: colorScheme.primary,
+              ),
+            ),
+          ),
+          Text(
+            'to browse publicly available plans.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(32, 24, 32, 16),
+        child: content,
+      );
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isFiltered
-                  ? Icons.search_off_outlined
-                  : Icons.playlist_play_outlined,
-              size: 64,
-              color: colorScheme.primary.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              isFiltered ? 'No plans found' : 'No plans yet',
-              style: theme.textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            if (isFiltered)
-              Text(
-                'Try adjusting your search or clearing the category filter.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              )
-            else ...[
-              Text(
-                'Made no plans yet? No problem — head over to the ',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              GestureDetector(
-                onTap: onGoToDiscover,
-                child: Text(
-                  'Discover tab',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                    decoration: TextDecoration.underline,
-                    decorationColor: colorScheme.primary,
-                  ),
-                ),
-              ),
-              Text(
-                'to browse publicly available plans.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ],
-        ),
+        child: content,
       ),
     );
   }
@@ -1604,5 +1667,259 @@ class _GradientFab extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// _ContinueProgramCard — surfaces an active series subscription so the user
+// has a one-tap path back into the program they're mid-way through. Hidden
+// when the user has no active subscriptions; this is the single highest-
+// leverage retention surface for the series feature.
+// ────────────────────────────────────────────────────────────────────────────
+
+class _ContinueProgramCard extends ConsumerWidget {
+  const _ContinueProgramCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeSubsAsync =
+        ref.watch(mySubscriptionsProvider(activeOnly: true));
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return activeSubsAsync.maybeWhen(
+      data: (subs) {
+        if (subs.isEmpty) return const SizedBox.shrink();
+        // Pick the most-recently-updated active sub.
+        final sub = subs.first;
+        final seriesAsync = ref.watch(seriesByIdProvider(sub.seriesId));
+        return seriesAsync.maybeWhen(
+          data: (series) {
+            final next = (sub.currentSessionIndex + 1).clamp(
+              1,
+              series.totalSessions == 0 ? 1 : series.totalSessions,
+            );
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Material(
+                color: colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => context.push('/series/${series.id}'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: colorScheme.primary,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.play_arrow,
+                            color: colorScheme.onPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Continue ${series.name}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: colorScheme.onPrimaryContainer,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Day $next of ${series.totalSessions}',
+                                style: TextStyle(
+                                  color: colorScheme.onPrimaryContainer
+                                      .withValues(alpha: 0.85),
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right,
+                            color: colorScheme.onPrimaryContainer),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+          orElse: () => const SizedBox.shrink(),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// _MyProgramsRail — horizontal carousel of series the user has subscribed to
+// (active, paused, or completed — excludes cancelled). Hidden when the user
+// has no subscriptions. Placed above the catalog Programs rail so the user's
+// own programs are always the first thing they see.
+// ────────────────────────────────────────────────────────────────────────────
+
+class _MyProgramsRail extends ConsumerWidget {
+  const _MyProgramsRail();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subs = ref.watch(mySubscriptionsProvider()).valueOrNull ??
+        const <SeriesSubscription>[];
+    final allSeries =
+        ref.watch(publishedSeriesProvider).valueOrNull ?? const <Series>[];
+
+    final activeSubs = subs
+        .where((s) => s.status != SeriesSubscriptionStatus.cancelled)
+        .toList();
+
+    if (activeSubs.isEmpty) return const SizedBox.shrink();
+
+    final seriesById = {for (final s in allSeries) s.id: s};
+
+    final pairs = <({Series series, SeriesSubscription sub})>[];
+    for (final sub in activeSubs) {
+      final s = seriesById[sub.seriesId];
+      if (s != null) pairs.add((series: s, sub: sub));
+    }
+
+    if (pairs.isEmpty) return const SizedBox.shrink();
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final textScaler = MediaQuery.textScalerOf(context);
+    final railHeight = 200 + (textScaler.scale(60) - 60).clamp(0.0, 60.0);
+    final cardWidth = MediaQuery.sizeOf(context).width - 60;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Text(
+              'MY PROGRAMS',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: colorScheme.outline,
+                letterSpacing: 0.8,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: railHeight,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: pairs.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) {
+                final item = pairs[i];
+                return SeriesCard(
+                  series: item.series,
+                  subscription: item.sub,
+                  width: cardWidth,
+                  onTap: () => context.push('/series/${item.series.id}'),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// _ProgramsRail — horizontal carousel of curated series. Tapping a card opens
+// the SeriesDetailScreen. Subscribed series get a "Day N of M" pill; new
+// users see the category label.
+// ────────────────────────────────────────────────────────────────────────────
+
+class _ProgramsRail extends ConsumerWidget {
+  const _ProgramsRail();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final seriesAsync = ref.watch(publishedSeriesProvider);
+    final subsAsync = ref.watch(mySubscriptionsProvider());
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Card height grows with the user's text scale factor so the rail
+    // accommodates the title + 2-line description + footer label at
+    // accessibility text sizes instead of clipping.
+    final textScaler = MediaQuery.textScalerOf(context);
+    final railHeight = 200 + (textScaler.scale(60) - 60).clamp(0.0, 60.0);
+    final cardWidth = MediaQuery.sizeOf(context).width - 60;
+
+    return seriesAsync.maybeWhen(
+      data: (seriesList) {
+        if (seriesList.isEmpty) return const SizedBox.shrink();
+        final subs = subsAsync.valueOrNull ?? const <SeriesSubscription>[];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text(
+                  'PROGRAMS',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: colorScheme.outline,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: railHeight,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: seriesList.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (_, i) {
+                    final s = seriesList[i];
+                    final sub = _findSubscription(subs, s);
+                    return SeriesCard(
+                      series: s,
+                      subscription: sub,
+                      width: cardWidth,
+                      onTap: () => context.push('/series/${s.id}'),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
+  SeriesSubscription? _findSubscription(
+      List<SeriesSubscription> subs, Series series) {
+    for (final s in subs) {
+      if (s.seriesId == series.id) return s;
+    }
+    return null;
   }
 }

@@ -61,6 +61,7 @@ function buildConfig(): AppConfig {
     nodeEnv,
     isLocal: process.env.IS_LOCAL === 'true' || process.env.IS_LOCAL === '1',
     lambdaFunctionName: process.env.AWS_LAMBDA_FUNCTION_NAME ?? '',
+    usePlanVoicesGate: process.env.USE_PLAN_VOICES_GATE === 'true' || process.env.USE_PLAN_VOICES_GATE === '1',
   };
 }
 

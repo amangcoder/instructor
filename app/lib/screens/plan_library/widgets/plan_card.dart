@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/widgets/tts_status_badge.dart';
 
@@ -9,41 +8,51 @@ import 'package:instructor/widgets/tts_status_badge.dart';
 // Shared category helpers (used by PlanCard and CategoryFilter)
 // ────────────────────────────────────────────────────────────────────────────
 
-IconData planCategoryIcon(PlanCategory category) {
+IconData planCategoryIcon(String category) {
   switch (category) {
-    case PlanCategory.yoga:
+    case 'yoga':
       return Icons.self_improvement;
-    case PlanCategory.meditation:
+    case 'meditation':
       return Icons.spa;
-    case PlanCategory.workout:
+    case 'workout':
       return Icons.fitness_center;
-    case PlanCategory.cooking:
+    case 'cooking':
       return Icons.restaurant;
-    case PlanCategory.routine:
+    case 'routine':
       return Icons.checklist;
-    case PlanCategory.focus:
+    case 'focus':
       return Icons.center_focus_strong;
-    case PlanCategory.custom:
+    case 'sleep':
+      return Icons.bedtime;
+    case 'stress':
+      return Icons.mood;
+    default:
       return Icons.star_outline;
   }
 }
 
-String planCategoryLabel(PlanCategory category) {
+String planCategoryLabel(String category) {
   switch (category) {
-    case PlanCategory.yoga:
+    case 'yoga':
       return 'Yoga';
-    case PlanCategory.meditation:
+    case 'meditation':
       return 'Meditation';
-    case PlanCategory.workout:
+    case 'workout':
       return 'Workout';
-    case PlanCategory.cooking:
+    case 'cooking':
       return 'Cooking';
-    case PlanCategory.routine:
+    case 'routine':
       return 'Routine';
-    case PlanCategory.focus:
+    case 'focus':
       return 'Focus';
-    case PlanCategory.custom:
-      return 'Custom';
+    case 'sleep':
+      return 'Sleep';
+    case 'stress':
+      return 'Stress';
+    default:
+      return category.isNotEmpty
+          ? '${category[0].toUpperCase()}${category.substring(1)}'
+          : 'Custom';
   }
 }
 
@@ -86,32 +95,30 @@ String formatRelativeTime(DateTime? dateTime) {
 }
 
 /// Returns a tonal container color appropriate for [category].
-Color categoryBadgeColor(PlanCategory category, ColorScheme cs) {
+Color categoryBadgeColor(String category, ColorScheme cs) {
   switch (category) {
-    case PlanCategory.yoga:
-    case PlanCategory.meditation:
+    case 'yoga':
+    case 'meditation':
+    case 'sleep':
       return cs.tertiaryContainer;
-    case PlanCategory.workout:
-    case PlanCategory.cooking:
+    case 'workout':
+    case 'cooking':
       return cs.secondaryContainer;
-    case PlanCategory.focus:
-    case PlanCategory.routine:
-    case PlanCategory.custom:
+    default:
       return cs.primaryContainer;
   }
 }
 
-Color categoryBadgeForeground(PlanCategory category, ColorScheme cs) {
+Color categoryBadgeForeground(String category, ColorScheme cs) {
   switch (category) {
-    case PlanCategory.yoga:
-    case PlanCategory.meditation:
+    case 'yoga':
+    case 'meditation':
+    case 'sleep':
       return cs.onTertiaryContainer;
-    case PlanCategory.workout:
-    case PlanCategory.cooking:
+    case 'workout':
+    case 'cooking':
       return cs.onSecondaryContainer;
-    case PlanCategory.focus:
-    case PlanCategory.routine:
-    case PlanCategory.custom:
+    default:
       return cs.onPrimaryContainer;
   }
 }

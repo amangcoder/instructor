@@ -225,7 +225,7 @@ export class AuthService {
 
   async refreshAccessToken(
     token: string,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+  ): Promise<AuthResult> {
     const hashedToken = this.hashRefreshToken(token);
 
     // Look up the refresh token by its hash.
@@ -247,7 +247,16 @@ export class AuthService {
     const tokens = await this.issueTokens(user.id, user.email, user.role ?? 'user');
 
     this.logger.log(`Tokens rotated for user ${user.id}`);
-    return tokens;
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name ?? null,
+        username: user.username ?? null,
+        photoUrl: this.resolvePhotoUrl(user.photoUrl ?? null),
+      },
+    };
   }
 
   // ── Logout / token revocation ─────────────────────────────────────────────

@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
 
 /// Converts a [List<PlanStep>] to/from a JSON string for storage in a Drift
@@ -82,27 +81,13 @@ class TtsStatusConverter extends TypeConverter<String, String> {
   }
 }
 
-/// Converts a [PlanCategory] enum to/from its string name in the database.
-///
-/// Throws [StateError] for any unrecognised string value, so that invalid
-/// data in the database surfaces as an explicit error rather than silently
-/// degrading to [PlanCategory.custom].
-class PlanCategoryConverter extends TypeConverter<PlanCategory, String> {
+/// Pass-through converter — category is stored and retrieved as a plain slug string.
+class PlanCategoryConverter extends TypeConverter<String, String> {
   const PlanCategoryConverter();
 
   @override
-  PlanCategory fromSql(String fromDb) {
-    final value =
-        PlanCategory.values.where((e) => e.name == fromDb).firstOrNull;
-    if (value == null) {
-      throw StateError(
-        'Unknown PlanCategory value: "$fromDb". '
-        'Expected one of: ${PlanCategory.values.map((e) => e.name).join(', ')}',
-      );
-    }
-    return value;
-  }
+  String fromSql(String fromDb) => fromDb;
 
   @override
-  String toSql(PlanCategory value) => value.name;
+  String toSql(String value) => value;
 }

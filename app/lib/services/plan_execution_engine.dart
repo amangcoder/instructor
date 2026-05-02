@@ -481,6 +481,13 @@ class PlanExecutionEngineImpl
       await stop();
     }
 
+    // Reset preview speed-up. `stop()` already does this, but it's only
+    // invoked above when another session was running/paused. After a preview
+    // ends naturally (status → completed/idle without an explicit stop),
+    // `_speedMultiplier` would otherwise leak into the next plan and play it
+    // 4× too fast. `startPreview` re-applies 4× after this method returns.
+    _speedMultiplier = 1.0;
+
     _currentPlan = plan;
     _flatSteps = _flattenPlan(plan.steps);
     _currentStepIndex = 0;
@@ -504,6 +511,9 @@ class PlanExecutionEngineImpl
       await stop();
     }
 
+    // Reset preview speed-up — see startPlan() for rationale.
+    _speedMultiplier = 1.0;
+
     _currentPlan = plan;
     _flatSteps = _flattenPlan(plan.steps);
 
@@ -525,8 +535,12 @@ class PlanExecutionEngineImpl
 
   @override
   Future<void> startPreview(Plan plan) async {
-    _speedMultiplier = 4.0;
+    // startPlan resets `_speedMultiplier` to 1.0, so apply the preview
+    // override AFTER it returns. Safe: `_runFromCurrentStep` is scheduled via
+    // `unawaited` and reads `_speedMultiplier` only deep inside step execution
+    // (after several awaits), well after this assignment lands.
     await startPlan(plan);
+    _speedMultiplier = 4.0;
   }
 
   @override
@@ -1913,6 +1927,22 @@ class PlanExecutionEngineImpl
     final plan = _currentPlan;
     if (plan == null) return;
 
+    // Guard: the plans table FK requires the plan row to exist. If
+    // refreshFromServer removed this plan while the session was active,
+    // skip persistence rather than throwing a FK constraint violation.
+    // The session continues; crash recovery is unavailable for this run.
+    final planExists = await (_db.select(_db.plansTable)
+          ..where((t) => t.id.equals(plan.id)))
+        .getSingleOrNull() !=
+        null;
+    if (!planExists) {
+      debugPrint(
+        '[ExecutionEngine] _persistState: plan ${plan.id} absent from '
+        'local DB — session state not persisted.',
+      );
+      return;
+    }
+
     final flatStep = _currentStepIndex < _flatSteps.length
         ? _flatSteps[_currentStepIndex]
         : null;
@@ -2005,10 +2035,7 @@ class PlanExecutionEngineImpl
       id: row.id,
       name: row.name,
       description: row.description,
-      category: PlanCategory.values.firstWhere(
-        (c) => c.name == row.category,
-        orElse: () => PlanCategory.custom,
-      ),
+      category: row.category,
       tags: row.tags,
       defaultVoice: row.defaultVoice,
       steps: row.steps,

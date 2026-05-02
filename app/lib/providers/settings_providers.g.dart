@@ -7,7 +7,7 @@ part of 'settings_providers.dart';
 // **************************************************************************
 
 String _$defaultVoiceSettingHash() =>
-    r'bf9cfd9b73c31833b0669e5fd2cb7fb89abf53f2';
+    r'e70719cd776970687fc8a050b693cced3b4839a4';
 
 /// Reactive stream of the user's preferred TTS voice.
 ///
@@ -16,7 +16,7 @@ String _$defaultVoiceSettingHash() =>
 /// Copied from [defaultVoiceSetting].
 @ProviderFor(defaultVoiceSetting)
 final defaultVoiceSettingProvider =
-    AutoDisposeStreamProvider<PlanVoice>.internal(
+    AutoDisposeStreamProvider<TtsVoiceId>.internal(
   defaultVoiceSetting,
   name: r'defaultVoiceSettingProvider',
   debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
@@ -28,7 +28,7 @@ final defaultVoiceSettingProvider =
 
 @Deprecated('Will be removed in 3.0. Use Ref instead')
 // ignore: unused_element
-typedef DefaultVoiceSettingRef = AutoDisposeStreamProviderRef<PlanVoice>;
+typedef DefaultVoiceSettingRef = AutoDisposeStreamProviderRef<TtsVoiceId>;
 String _$ambientVolumeSettingHash() =>
     r'79d037dc991080b1465217823009456e85f7c44e';
 

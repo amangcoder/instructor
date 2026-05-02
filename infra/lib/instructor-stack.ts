@@ -102,7 +102,14 @@ export class InstructorStack extends cdk.Stack {
     } else {
       this.bucket = new s3.Bucket(this, 'InstructorBucket', {
         bucketName,
-        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        // Block public ACLs (we don't grant access via ACLs) but allow a bucket
+        // policy to grant public read on the avatars/ prefix below.
+        blockPublicAccess: new s3.BlockPublicAccess({
+          blockPublicAcls: true,
+          ignorePublicAcls: true,
+          blockPublicPolicy: false,
+          restrictPublicBuckets: false,
+        }),
         encryption: s3.BucketEncryption.S3_MANAGED,
         enforceSSL: true,
         versioned: true,
@@ -148,6 +155,20 @@ export class InstructorStack extends cdk.Stack {
           },
         ],
       });
+
+      // Profile photos are referenced by plain virtual-hosted S3 URLs
+      // (see AuthService.buildPublicPhotoUrl). Grant unauthenticated GET
+      // on the avatars/ prefix so the Flutter NetworkImage loader can read
+      // them without signed credentials.
+      this.bucket.addToResourcePolicy(
+        new iam.PolicyStatement({
+          sid: 'PublicReadAvatars',
+          effect: iam.Effect.ALLOW,
+          principals: [new iam.AnyPrincipal()],
+          actions: ['s3:GetObject'],
+          resources: [this.bucket.arnForObjects('avatars/*')],
+        }),
+      );
     }
 
     // ── 2. IAM User (NestJS backend — Docker / local dev) ─────────────────────

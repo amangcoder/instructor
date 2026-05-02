@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/library_plan_summary.dart';
 import 'package:instructor/screens/plan_library/widgets/plan_card.dart';
 
@@ -179,32 +178,8 @@ class LibraryPlanCard extends StatelessWidget {
 // Private category colour helpers (mirrors plan_card.dart)
 // ─────────────────────────────────────────────────────────────────────────────
 
-Color _categoryBadgeColor(PlanCategory category, ColorScheme cs) {
-  switch (category) {
-    case PlanCategory.yoga:
-    case PlanCategory.meditation:
-      return cs.tertiaryContainer;
-    case PlanCategory.workout:
-    case PlanCategory.cooking:
-      return cs.secondaryContainer;
-    case PlanCategory.focus:
-    case PlanCategory.routine:
-    case PlanCategory.custom:
-      return cs.primaryContainer;
-  }
-}
+Color _categoryBadgeColor(String category, ColorScheme cs) =>
+    categoryBadgeColor(category, cs);
 
-Color _categoryBadgeForeground(PlanCategory category, ColorScheme cs) {
-  switch (category) {
-    case PlanCategory.yoga:
-    case PlanCategory.meditation:
-      return cs.onTertiaryContainer;
-    case PlanCategory.workout:
-    case PlanCategory.cooking:
-      return cs.onSecondaryContainer;
-    case PlanCategory.focus:
-    case PlanCategory.routine:
-    case PlanCategory.custom:
-      return cs.onPrimaryContainer;
-  }
-}
+Color _categoryBadgeForeground(String category, ColorScheme cs) =>
+    categoryBadgeForeground(category, cs);

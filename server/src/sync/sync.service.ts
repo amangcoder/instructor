@@ -36,6 +36,14 @@ import {
   TriggerResponseDto,
   UploadTriggersResponseDto,
 } from './dto/sync-triggers.dto';
+import {
+  CategoryDto,
+  GetCategoriesResponseDto,
+  VoiceDto,
+  GetVoicesResponseDto,
+  PlanVoiceDto,
+  GetPlanVoicesResponseDto,
+} from './dto/sync-content.dto';
 
 /** Input shape for a single completion when calling uploadCompletions. */
 export interface CompletionInput {
@@ -179,6 +187,120 @@ export class SyncService {
 
     return {
       triggers: rows.map((r) => this.toTriggerResponse(r)),
+    };
+  }
+
+  // ── Content cache sync (TASK-018) ─────────────────────────────────────────
+
+  /**
+   * Fetch published categories for mobile cache sync.
+   *
+   * Full sync (no since): returns all is_published=true categories ordered by
+   *   sortOrder ASC.
+   * Delta sync (since provided): returns categories updated after `since` that
+   *   are still published, PLUS deletedIds of categories unpublished since `since`
+   *   so the client can evict them from its local Drift cache.
+   *
+   * Delegates to SyncRepository.getCategories() which enforces the publish gate
+   * (REQ-023, AC-021).
+   */
+  async getCategories(since?: Date): Promise<GetCategoriesResponseDto> {
+    const result = await (this.repo as SyncRepository).getCategories(since);
+
+    this.logger.debug(
+      `Categories sync: rows=${result.rows.length}, deletedIds=${result.deletedIds.length}, since=${since?.toISOString() ?? 'full'}`,
+    );
+
+    return {
+      categories: result.rows.map(
+        (c): CategoryDto => ({
+          id: c.id,
+          slug: c.slug,
+          name: c.name,
+          icon: c.icon ?? null,
+          color: c.color ?? null,
+          sortOrder: c.sortOrder,
+          isPublished: c.isPublished,
+          createdAt: c.createdAt.toISOString(),
+          updatedAt: c.updatedAt.toISOString(),
+        }),
+      ),
+      deletedIds: result.deletedIds,
+    };
+  }
+
+  /**
+   * Fetch published voices for mobile cache sync.
+   *
+   * Full sync (no since): returns all is_published=true voices ordered by
+   *   locale ASC, displayName ASC.
+   * Delta sync (since provided): returns voices updated after `since` that are
+   *   still published, PLUS deletedIds for voices unpublished since `since`.
+   *
+   * Delegates to SyncRepository.getVoices() (REQ-023, AC-021).
+   */
+  async getVoices(since?: Date): Promise<GetVoicesResponseDto> {
+    const result = await (this.repo as SyncRepository).getVoices(since);
+
+    this.logger.debug(
+      `Voices sync: rows=${result.rows.length}, deletedIds=${result.deletedIds.length}, since=${since?.toISOString() ?? 'full'}`,
+    );
+
+    return {
+      voices: result.rows.map(
+        (v): VoiceDto => ({
+          id: v.id,
+          slug: v.slug,
+          displayName: v.displayName,
+          locale: v.locale,
+          provider: v.provider,
+          sampleUrl: v.sampleUrl ?? null,
+          isPublished: v.isPublished,
+          createdAt: v.createdAt.toISOString(),
+          updatedAt: v.updatedAt.toISOString(),
+        }),
+      ),
+      deletedIds: result.deletedIds,
+    };
+  }
+
+  /**
+   * Fetch ready plan-voice renditions for mobile cache sync.
+   *
+   * Only plan_voices rows where status='ready' AND the parent plan has
+   * is_published=true are returned — the mobile visibility gate (REQ-023,
+   * AC-021, AC-013).
+   *
+   * Full sync (no since): returns all ready+published plan_voice rows.
+   * Delta sync (since provided): returns rows where plan_voices.updatedAt > since
+   *   that still pass the gate, PLUS deletedIds for rows that no longer qualify
+   *   (status changed away from ready, or parent plan was unpublished).
+   *
+   * Delegates to SyncRepository.getPlanVoices() which enforces the gate.
+   */
+  async getPlanVoices(since?: Date): Promise<GetPlanVoicesResponseDto> {
+    const result = await (this.repo as SyncRepository).getPlanVoices(since);
+
+    this.logger.debug(
+      `PlanVoices sync: rows=${result.rows.length}, deletedIds=${result.deletedIds.length}, since=${since?.toISOString() ?? 'full'}`,
+    );
+
+    return {
+      planVoices: result.rows.map(
+        (pv): PlanVoiceDto => ({
+          id: pv.id,
+          planId: pv.planId,
+          voiceId: pv.voiceId,
+          locale: pv.locale,
+          status: pv.status,
+          audioUrl: pv.audioUrl ?? null,
+          durationMs: pv.durationMs ?? null,
+          generatedAt: pv.generatedAt ? pv.generatedAt.toISOString() : null,
+          createdAt: pv.createdAt.toISOString(),
+          updatedAt: pv.updatedAt.toISOString(),
+        }),
+      ),
+      deletedIds: result.deletedIds,
     };
   }
 

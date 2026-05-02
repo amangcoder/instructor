@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/app_database.dart';
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/repositories/plan_repository.dart';
 import 'package:instructor/services/api_client.dart';
@@ -21,14 +20,14 @@ part 'plan_providers.g.dart';
 /// final plans = ref.watch(planListProvider());
 /// final filtered = ref.watch(planListProvider(
 ///   searchQuery: 'yoga',
-///   category: PlanCategory.yoga,
+///   category: 'yoga',
 /// ));
 /// ```
 @riverpod
 Stream<List<Plan>> planList(
   Ref ref, {
   String? searchQuery,
-  PlanCategory? category,
+  String? category,
 }) {
   final repo = ref.watch(planRepositoryProvider);
   return repo.watchUserPlans(searchQuery: searchQuery, category: category);

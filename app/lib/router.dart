@@ -12,7 +12,12 @@ import 'package:instructor/screens/onboarding/onboarding_screen.dart';
 import 'package:instructor/screens/plan_editor/plan_editor_screen.dart';
 import 'package:instructor/screens/plan_generation/plan_generation_screen.dart';
 import 'package:instructor/screens/plan_generation/plan_review_screen.dart';
+import 'package:instructor/screens/create_plan/create_plan_screen.dart';
+import 'package:instructor/screens/discover/category_screen.dart';
+import 'package:instructor/screens/discover/discover_screen.dart';
+import 'package:instructor/screens/plan_detail/plan_detail_screen.dart';
 import 'package:instructor/screens/plan_library/plan_library_screen.dart';
+import 'package:instructor/screens/series/series_detail_screen.dart';
 import 'package:instructor/screens/settings/settings_screen.dart';
 import 'package:instructor/screens/shared_plan/shared_plan_preview_screen.dart';
 import 'package:instructor/services/app_settings.dart';
@@ -52,12 +57,50 @@ abstract final class AppRoutes {
 
   /// Builds the concrete path for a given share [token].
   static String sharedPlanPath(String token) => '/shared/$token';
+
+  // ── Series ───────────────────────────────────────────────────────────────
+
+  /// Route pattern for a series detail screen.
+  static const String seriesDetail = '/series/:id';
+
+  /// Builds the concrete path for a given series [id].
+  static String seriesDetailPath(String id) => '/series/$id';
+
+  // ── Discover ─────────────────────────────────────────────────────────────
+
+  /// Top-level Discover screen — shows admin-curated category grid.
+  ///
+  /// Only reachable when `remoteConfig.discoverEnabled == true`; the redirect
+  /// guard falls back to [library] otherwise.
+  static const String discover = '/discover';
+
+  /// Route pattern for a single category detail screen.
+  static const String categoryDetail = '/discover/:categorySlug';
+
+  /// Builds the concrete path for a given category [slug].
+  static String categoryDetailPath(String slug) => '/discover/$slug';
+
+  // ── Plan Detail ──────────────────────────────────────────────────────────
+
+  /// Route pattern for a full plan detail screen (tree + voice picker).
+  static const String planDetail = '/plans/:id';
+
+  /// Builds the concrete path for a given plan [id].
+  static String planDetailPath(String id) => '/plans/$id';
+
+  // ── Create Plan ──────────────────────────────────────────────────────────
+
+  /// Route for the user-authored private plan creation form.
+  ///
+  /// Auth-gated — unauthenticated users are redirected to [login].
+  static const String createPlan = '/create-plan';
 }
 
 /// Routes that require an authenticated user.
 const _kAuthGatedRoutes = {
   AppRoutes.generatePlan,
   AppRoutes.generatePlanReview,
+  AppRoutes.createPlan,
 };
 
 /// Returns true if [location] requires authentication.
@@ -186,26 +229,7 @@ GoRouter router(Ref ref) {
               ),
             ],
           ),
-          // Branch 2: AI Genius / Generate Plan
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: AppRoutes.generatePlan,
-                builder: (BuildContext context, GoRouterState state) =>
-                    const PlanGenerationScreen(),
-                routes: [
-                  GoRoute(
-                    path: 'review',
-                    builder: (BuildContext context, GoRouterState state) {
-                      final payload = state.extra as GeneratedPlanPayload?;
-                      return PlanReviewScreen(payload: payload);
-                    },
-                  ),
-                ],
-              ),
-            ],
-          ),
-          // Branch 3: Settings / Profile
+          // Branch 2: Settings / Profile
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -214,6 +238,37 @@ GoRouter router(Ref ref) {
                     const SettingsScreen(),
               ),
             ],
+          ),
+          // Branch 3: Discover
+          // Visible only when remoteConfig.discoverEnabled == true.
+          // The redirect guard falls back to AppRoutes.library when the flag
+          // is disabled so this branch is never entered accidentally.
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.discover,
+                builder: (BuildContext context, GoRouterState state) =>
+                    const DiscoverScreen(),
+              ),
+            ],
+          ),
+        ],
+      ),
+
+      // ── AI Genius / Generate Plan (full-screen, hidden from bottom nav) ───
+      // Kept reachable for deep links and tests, but not exposed via the
+      // current UI surface.
+      GoRoute(
+        path: AppRoutes.generatePlan,
+        builder: (BuildContext context, GoRouterState state) =>
+            const PlanGenerationScreen(),
+        routes: [
+          GoRoute(
+            path: 'review',
+            builder: (BuildContext context, GoRouterState state) {
+              final payload = state.extra as GeneratedPlanPayload?;
+              return PlanReviewScreen(payload: payload);
+            },
           ),
         ],
       ),
@@ -237,6 +292,40 @@ GoRouter router(Ref ref) {
           final token = state.pathParameters['token'] ?? '';
           return SharedPlanPreviewScreen(shareToken: token);
         },
+      ),
+
+      // ── Series detail (full-screen, no bottom nav) ───────────────────────
+      GoRoute(
+        path: AppRoutes.seriesDetail,
+        builder: (BuildContext context, GoRouterState state) {
+          final id = state.pathParameters['id'] ?? '';
+          return SeriesDetailScreen(seriesId: id);
+        },
+      ),
+
+      // ── Discover: category detail (full-screen, no bottom nav) ───────────
+      GoRoute(
+        path: AppRoutes.categoryDetail,
+        builder: (BuildContext context, GoRouterState state) {
+          final slug = state.pathParameters['categorySlug'] ?? '';
+          return CategoryScreen(categorySlug: slug);
+        },
+      ),
+
+      // ── Plan detail (full-screen, no bottom nav) ─────────────────────────
+      GoRoute(
+        path: AppRoutes.planDetail,
+        builder: (BuildContext context, GoRouterState state) {
+          final id = state.pathParameters['id'] ?? '';
+          return PlanDetailScreen(planId: id);
+        },
+      ),
+
+      // ── Create plan (full-screen, auth-gated) ─────────────────────────────
+      GoRoute(
+        path: AppRoutes.createPlan,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CreatePlanScreen(),
       ),
 
       // ── Auth routes ──────────────────────────────────────────────────────

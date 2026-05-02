@@ -29,12 +29,12 @@ class $PlansTableTable extends PlansTable
       'description', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
   @override
-  late final GeneratedColumnWithTypeConverter<PlanCategory, String> category =
+  late final GeneratedColumnWithTypeConverter<String, String> category =
       GeneratedColumn<String>('category', aliasedName, false,
               type: DriftSqlType.string,
               requiredDuringInsert: false,
               defaultValue: const Constant('custom'))
-          .withConverter<PlanCategory>($PlansTableTable.$convertercategory);
+          .withConverter<String>($PlansTableTable.$convertercategory);
   @override
   late final GeneratedColumnWithTypeConverter<List<String>, String> tags =
       GeneratedColumn<String>('tags', aliasedName, false,
@@ -251,7 +251,7 @@ class $PlansTableTable extends PlansTable
     return $PlansTableTable(attachedDatabase, alias);
   }
 
-  static TypeConverter<PlanCategory, String> $convertercategory =
+  static TypeConverter<String, String> $convertercategory =
       const PlanCategoryConverter();
   static TypeConverter<List<String>, String> $convertertags =
       const StringListConverter();
@@ -268,7 +268,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
   final String? description;
 
   /// [PlanCategory] stored as its string name, validated by [PlanCategoryConverter].
-  final PlanCategory category;
+  final String category;
 
   /// JSON array of tag strings.
   final List<String> tags;
@@ -388,7 +388,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       description: serializer.fromJson<String?>(json['description']),
-      category: serializer.fromJson<PlanCategory>(json['category']),
+      category: serializer.fromJson<String>(json['category']),
       tags: serializer.fromJson<List<String>>(json['tags']),
       defaultVoice: serializer.fromJson<String>(json['defaultVoice']),
       steps: serializer.fromJson<List<PlanStep>>(json['steps']),
@@ -409,7 +409,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'description': serializer.toJson<String?>(description),
-      'category': serializer.toJson<PlanCategory>(category),
+      'category': serializer.toJson<String>(category),
       'tags': serializer.toJson<List<String>>(tags),
       'defaultVoice': serializer.toJson<String>(defaultVoice),
       'steps': serializer.toJson<List<PlanStep>>(steps),
@@ -428,7 +428,7 @@ class PlansTableData extends DataClass implements Insertable<PlansTableData> {
           {String? id,
           String? name,
           Value<String?> description = const Value.absent(),
-          PlanCategory? category,
+          String? category,
           List<String>? tags,
           String? defaultVoice,
           List<PlanStep>? steps,
@@ -547,7 +547,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
   final Value<String> id;
   final Value<String> name;
   final Value<String?> description;
-  final Value<PlanCategory> category;
+  final Value<String> category;
   final Value<List<String>> tags;
   final Value<String> defaultVoice;
   final Value<List<PlanStep>> steps;
@@ -639,7 +639,7 @@ class PlansTableCompanion extends UpdateCompanion<PlansTableData> {
       {Value<String>? id,
       Value<String>? name,
       Value<String?>? description,
-      Value<PlanCategory>? category,
+      Value<String>? category,
       Value<List<String>>? tags,
       Value<String>? defaultVoice,
       Value<List<PlanStep>>? steps,
@@ -3505,7 +3505,7 @@ typedef $$PlansTableTableCreateCompanionBuilder = PlansTableCompanion Function({
   required String id,
   required String name,
   Value<String?> description,
-  Value<PlanCategory> category,
+  Value<String> category,
   Value<List<String>> tags,
   Value<String> defaultVoice,
   Value<List<PlanStep>> steps,
@@ -3523,7 +3523,7 @@ typedef $$PlansTableTableUpdateCompanionBuilder = PlansTableCompanion Function({
   Value<String> id,
   Value<String> name,
   Value<String?> description,
-  Value<PlanCategory> category,
+  Value<String> category,
   Value<List<String>> tags,
   Value<String> defaultVoice,
   Value<List<PlanStep>> steps,
@@ -3594,8 +3594,8 @@ class $$PlansTableTableFilterComposer
   ColumnFilters<String> get description => $composableBuilder(
       column: $table.description, builder: (column) => ColumnFilters(column));
 
-  ColumnWithTypeConverterFilters<PlanCategory, PlanCategory, String>
-      get category => $composableBuilder(
+  ColumnWithTypeConverterFilters<String, String, String> get category =>
+      $composableBuilder(
           column: $table.category,
           builder: (column) => ColumnWithTypeConverterFilters(column));
 
@@ -3756,7 +3756,7 @@ class $$PlansTableTableAnnotationComposer
   GeneratedColumn<String> get description => $composableBuilder(
       column: $table.description, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<PlanCategory, String> get category =>
+  GeneratedColumnWithTypeConverter<String, String> get category =>
       $composableBuilder(column: $table.category, builder: (column) => column);
 
   GeneratedColumnWithTypeConverter<List<String>, String> get tags =>
@@ -3864,7 +3864,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             Value<String> id = const Value.absent(),
             Value<String> name = const Value.absent(),
             Value<String?> description = const Value.absent(),
-            Value<PlanCategory> category = const Value.absent(),
+            Value<String> category = const Value.absent(),
             Value<List<String>> tags = const Value.absent(),
             Value<String> defaultVoice = const Value.absent(),
             Value<List<PlanStep>> steps = const Value.absent(),
@@ -3900,7 +3900,7 @@ class $$PlansTableTableTableManager extends RootTableManager<
             required String id,
             required String name,
             Value<String?> description = const Value.absent(),
-            Value<PlanCategory> category = const Value.absent(),
+            Value<String> category = const Value.absent(),
             Value<List<String>> tags = const Value.absent(),
             Value<String> defaultVoice = const Value.absent(),
             Value<List<PlanStep>> steps = const Value.absent(),

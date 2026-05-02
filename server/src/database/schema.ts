@@ -8,11 +8,15 @@
  *   - plans           — user-created plans stored server-side for cross-device recovery
  *   - library_plans   — curated global plan library (admin-managed)
  *   - tts_jobs        — per-plan TTS pre-generation job tracking
+ *   - categories      — content taxonomy top-level nodes for the Discover surface
+ *   - voices          — TTS voice registry (provider / locale / slug)
+ *   - plan_voices     — per-plan per-voice TTS gate (replaces plans.tts_status gate)
  *
  * Index strategy:
  *   - otp_records: composite (email, used, expires_at) — equality on email+used, range on expires_at
  *   - refresh_tokens: partial index on (user_id) WHERE revoked = false — much smaller than full
  *     composite index since only 1-2 active tokens exist per user vs 50-100 lifetime tokens
+ *   - plan_voices: composite (plan_id, status) covers the EXISTS subquery in v_published_plans
  */
 
 import {
@@ -145,6 +149,86 @@ export type LibraryPlan = typeof libraryPlans.$inferSelect;
 export type NewLibraryPlan = typeof libraryPlans.$inferInsert;
 
 // ---------------------------------------------------------------------------
+// categories
+//
+// Top-level taxonomy nodes that group series and plans on the Discover
+// surface. sort_order drives display order (ascending, lower = first).
+// icon and color are optional branding hints for the mobile UI chrome.
+// is_published gates whether the category appears in the mobile Discover
+// surface; admin always sees all categories regardless.
+// ---------------------------------------------------------------------------
+
+export const categories = pgTable(
+  'categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').unique().notNull(),
+    name: text('name').notNull(),
+    icon: text('icon'),
+    color: varchar('color', { length: 20 }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isPublished: boolean('is_published').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    // deleted_at is the soft-delete tombstone. NULL = live record; non-NULL = hidden
+    // from every read path (admin and public). Distinct from is_published, which
+    // gates draft-vs-live visibility for live records.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    // Sort-order scan: ORDER BY sort_order ASC for category list endpoints.
+    index('idx_categories_sort_order').on(table.sortOrder),
+    // Mobile Discover surface fetches only published, non-deleted categories.
+    index('idx_categories_published_sort').on(table.sortOrder).where(sql`${table.isPublished} = true AND ${table.deletedAt} IS NULL`),
+  ],
+);
+
+export type Category = typeof categories.$inferSelect;
+export type NewCategory = typeof categories.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// series
+//
+// A series groups a sequence of plans (e.g. "10 Days to Meditate", "Couch to
+// 5K"). Individual sessions live in the plans / library_plans tables and
+// reference their series via plans.series_id.
+//
+// The series row itself only describes the wrapper — name, category, voice,
+// publishing flags. Per-session content stays in plans so the existing
+// generation, TTS, and sharing pipelines work unchanged.
+// ---------------------------------------------------------------------------
+
+export const series = pgTable(
+  'series',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    description: text('description'),
+    category: text('category').notNull(),
+    tags: text('tags').notNull().default(''),
+    defaultVoice: text('default_voice').notNull(),
+    locale: text('locale').notNull().default('enUS'),
+    isPublished: boolean('is_published').notNull().default(false),
+    sortOrder: integer('sort_order').notNull().default(0),
+    // Nullable FK to categories — NULL until backfill assigns existing series.
+    // The old free-text series.category column is kept until migration 0015.
+    categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_series_category').on(table.category),
+    index('idx_series_published').on(table.isPublished),
+    // Partial index: only series linked to a category use this lookup.
+    // Powers "list all series in category X" queries on the Discover surface.
+    index('idx_series_category_id').on(table.categoryId).where(sql`${table.categoryId} IS NOT NULL`),
+  ],
+);
+
+export type Series = typeof series.$inferSelect;
+export type NewSeries = typeof series.$inferInsert;
+
+// ---------------------------------------------------------------------------
 // plans
 //
 // Stores user-created plans server-side for cross-device recovery.
@@ -163,6 +247,8 @@ export const plans = pgTable(
     planJson: text('plan_json').notNull(),
     // Library / activation fields
     sourceLibraryPlanId: uuid('source_library_plan_id').references(() => libraryPlans.id),
+    // Series membership — null for standalone plans
+    seriesId: uuid('series_id').references(() => series.id),
     isActive: boolean('is_active').notNull().default(false),
     // TTS pre-generation tracking
     ttsStatus: text('tts_status').notNull().default('none'), // none | pending | processing | completed | partial | failed
@@ -172,12 +258,35 @@ export const plans = pgTable(
     // Plan sharing — optional share token for generating shareable links
     shareToken: varchar('share_token', { length: 20 }).unique(),
     shareTokenCreatedAt: timestamp('share_token_created_at', { withTimezone: true }),
+    // Content hierarchy additions (migration 0014) -------------------------
+    // Nullable self-FK enabling a sub-plan tree (max depth 3, enforced in service layer).
+    // ON DELETE CASCADE: removing a parent removes its entire sub-plan tree.
+    parentPlanId: uuid('parent_plan_id').references((): any => plans.id, { onDelete: 'cascade' }),
+    // Sort order within a parent plan (sub-plans) or admin-curated top-level list.
+    position: integer('position').notNull().default(0),
+    // Plan lifecycle: private (author-only) | pending_review (in admin queue) | public (approved)
+    // Defaults to 'public' so admin-curated plans are immediately eligible for v_published_plans
+    // once is_published=true is set. User-authored plans start as 'private' (set explicitly).
+    visibility: text('visibility').notNull().default('public'),
+    // Nullable UUID of the plan_request that originated this plan (NULL for user-created plans).
+    // UNIQUE constraint makes the promote INSERT idempotent — a retry after a partial failure
+    // hits the ON CONFLICT guard and re-uses the already-created plan row.
+    planRequestId: uuid('plan_request_id').unique(),
+    // Nullable FK to users — set for user-authored plans, NULL for admin-curated plans.
+    // ON DELETE SET NULL: deleting a user preserves the plan for admin review.
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'set null' }),
+    // Explicit admin publish toggle — requires is_published=true + visibility='public' +
+    // at least one plan_voices row with status='ready' for end-user visibility.
+    isPublished: boolean('is_published').notNull().default(false),
+    // ----------------------------------------------------------------------
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     // CHECK constraint: tts_status must be one of the valid values
     check('plans_tts_status_check', sql`${table.ttsStatus} IN ('none', 'pending', 'processing', 'completed', 'partial', 'failed')`),
+    // CHECK constraint: visibility must be one of the valid values
+    check('plans_visibility_check', sql`${table.visibility} IN ('private', 'pending_review', 'public')`),
     // Composite index on (userId, createdAt) supersedes the old idx_plans_user_id.
     // Covers all per-user plan list queries and analytics time-range filtering.
     index('idx_plans_user_created').on(table.userId, table.createdAt),
@@ -187,11 +296,79 @@ export const plans = pgTable(
     index('idx_plans_created_at').on(table.createdAt),
     // Analytics: funnel queries scoped to a library plan, with date filtering
     index('idx_plans_source_library').on(table.sourceLibraryPlanId, table.createdAt).where(sql`${table.sourceLibraryPlanId} IS NOT NULL`),
+    // Per-series session lookup — partial keeps it small since most plans are standalone
+    index('idx_plans_series').on(table.seriesId).where(sql`${table.seriesId} IS NOT NULL`),
+    // Sub-plan tree: WHERE parent_plan_id = ? ORDER BY position ASC.
+    // Partial keeps index small — most plans are top-level.
+    index('idx_plans_parent_position').on(table.parentPlanId, table.position).where(sql`${table.parentPlanId} IS NOT NULL`),
+    // Admin plan-requests queue: WHERE visibility = 'pending_review'.
+    index('idx_plans_visibility_pending').on(table.visibility).where(sql`${table.visibility} = 'pending_review'`),
+    // Unique partial index on plan_request_id — enables idempotent promote re-tries.
+    // Partial (WHERE NOT NULL) keeps the index small; most plans are user-created (NULL).
+    uniqueIndex('idx_plans_plan_request_id').on(table.planRequestId).where(sql`${table.planRequestId} IS NOT NULL`),
   ],
 );
 
 export type Plan = typeof plans.$inferSelect;
 export type NewPlan = typeof plans.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// series_subscriptions
+//
+// Tracks a user's opt-in to a series and their progress through it. One row
+// per (user, series) — re-subscribing reactivates the same row rather than
+// inserting a duplicate, so historical progress is preserved.
+//
+// Status lifecycle:
+//   active     -> user is currently progressing through the series
+//   paused     -> user temporarily stopped (kept for resume)
+//   completed  -> all sessions done
+//   cancelled  -> user opted out; unsubscribed_at set
+//
+// completedSessions and currentSessionIndex are denormalized read-path caches.
+// They're updated when a session completion lands; the source of truth for
+// completion history is session_completions joined via plans.series_id.
+// ---------------------------------------------------------------------------
+
+export const seriesSubscriptions = pgTable(
+  'series_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    seriesId: uuid('series_id')
+      .references(() => series.id, { onDelete: 'cascade' })
+      .notNull(),
+    status: text('status').notNull().default('active'), // active | paused | completed | cancelled
+    currentSessionIndex: integer('current_session_index').notNull().default(0),
+    completedSessions: integer('completed_sessions').notNull().default(0),
+    subscribedAt: timestamp('subscribed_at', { withTimezone: true }).defaultNow().notNull(),
+    lastSessionCompletedAt: timestamp('last_session_completed_at', { withTimezone: true }),
+    unsubscribedAt: timestamp('unsubscribed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'series_subscriptions_status_check',
+      sql`${table.status} IN ('active', 'paused', 'completed', 'cancelled')`,
+    ),
+    // One subscription row per user/series pair — reactivation updates in place
+    uniqueIndex('idx_series_subscriptions_user_series').on(table.userId, table.seriesId),
+    // "My active series" — partial index keeps it small (cancelled rows pile up over time)
+    index('idx_series_subscriptions_user_active')
+      .on(table.userId)
+      .where(sql`${table.status} = 'active'`),
+    // Series-level analytics: total subscribers, conversion funnels
+    index('idx_series_subscriptions_series').on(table.seriesId),
+    // Sync pulls: WHERE user_id = ? AND updated_at > ?
+    index('idx_series_subscriptions_user_updated').on(table.userId, table.updatedAt),
+  ],
+);
+
+export type SeriesSubscription = typeof seriesSubscriptions.$inferSelect;
+export type NewSeriesSubscription = typeof seriesSubscriptions.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // tts_jobs
@@ -237,6 +414,96 @@ export type TtsJob = typeof ttsJobs.$inferSelect;
 export type NewTtsJob = typeof ttsJobs.$inferInsert;
 
 // ---------------------------------------------------------------------------
+// voices
+//
+// Registry of TTS voice profiles. Each row represents a distinct
+// (provider, locale, voice-slug) combination that can be associated with
+// plans via the plan_voices join table.
+// is_published controls whether the voice appears in admin voice-selector
+// dropdowns; internal/deprecated voices can be hidden without deletion.
+// ---------------------------------------------------------------------------
+
+export const voices = pgTable(
+  'voices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: text('slug').unique().notNull(),
+    displayName: text('display_name').notNull(),
+    locale: text('locale').notNull(),
+    provider: text('provider').notNull(),
+    sampleUrl: text('sample_url'),
+    isPublished: boolean('is_published').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Locale-filtered voice lookups: WHERE locale = ? (e.g. 'en-IN', 'en-US').
+    index('idx_voices_locale').on(table.locale),
+    // Admin voice-selector: WHERE is_published = true — partial keeps it small.
+    index('idx_voices_published').on(table.isPublished).where(sql`${table.isPublished} = true`),
+  ],
+);
+
+export type Voice = typeof voices.$inferSelect;
+export type NewVoice = typeof voices.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// plan_voices
+//
+// Per-plan TTS gate table. Each row tracks the synthesis status of one
+// (plan, voice, locale) rendition. This table is the authoritative source
+// for whether a plan has synthesisable audio and thus whether it is
+// visible to end-users (via v_published_plans).
+//
+// Status lifecycle:
+//   pending    → TTS job queued, not yet started
+//   processing → TTS worker is actively synthesising this rendition
+//   ready      → Synthesis complete; audio_url and duration_ms populated
+//   failed     → Synthesis failed; error_msg set; eligible for retry
+//
+// UNIQUE (plan_id, voice_id, locale) prevents duplicate renditions and
+// enables idempotent upserts during backfill and TTS retry operations.
+// ON DELETE CASCADE on both FKs: deleting a plan/voice cleans up rows.
+// ---------------------------------------------------------------------------
+
+export const planVoices = pgTable(
+  'plan_voices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planId: uuid('plan_id')
+      .references(() => plans.id, { onDelete: 'cascade' })
+      .notNull(),
+    voiceId: uuid('voice_id')
+      .references(() => voices.id, { onDelete: 'cascade' })
+      .notNull(),
+    locale: text('locale').notNull(),
+    status: text('status').notNull().default('pending'), // pending | processing | ready | failed
+    audioUrl: text('audio_url'),
+    durationMs: integer('duration_ms'),
+    errorMsg: text('error_msg'),
+    generatedAt: timestamp('generated_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // CHECK constraint: status must be one of the valid values
+    check('plan_voices_status_check', sql`${table.status} IN ('pending', 'processing', 'ready', 'failed')`),
+    // UNIQUE (plan_id, voice_id, locale) — prevents duplicate renditions; enables idempotent upserts
+    uniqueIndex('plan_voices_plan_id_voice_id_locale_unique').on(table.planId, table.voiceId, table.locale),
+    // Composite index (plan_id, status) covers:
+    //   • EXISTS subquery in v_published_plans: plan_id = ? AND status = 'ready'
+    //   • Admin voice-grid per-plan: WHERE plan_id = ?  (plan_id prefix used alone)
+    //   • Status-filtered per-plan: WHERE plan_id = ? AND status = 'failed'
+    index('idx_plan_voices_plan_status').on(table.planId, table.status),
+    // Status-only index covers cross-plan admin queries and monitoring aggregations.
+    index('idx_plan_voices_status').on(table.status),
+  ],
+);
+
+export type PlanVoice = typeof planVoices.$inferSelect;
+export type NewPlanVoice = typeof planVoices.$inferInsert;
+
+// ---------------------------------------------------------------------------
 // deletion_requests
 //
 // Stores data-deletion requests submitted via the public website form.
@@ -279,6 +546,42 @@ export const deletionRequests = pgTable(
 
 export type DeletionRequest = typeof deletionRequests.$inferSelect;
 export type NewDeletionRequest = typeof deletionRequests.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// plan_requests
+//
+// Stores user-submitted requests for plans/schedules that aren't currently in
+// the curated Discover library. Submitted from the in-app "Request a Plan"
+// screen. Notifications go to ADMIN_EMAIL; the admin dashboard surfaces
+// pending requests.
+// ---------------------------------------------------------------------------
+
+export const planRequests = pgTable(
+  'plan_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id),
+    email: varchar('email').notNull(),
+    title: varchar('title', { length: 200 }).notNull(),
+    description: text('description').notNull(),
+    category: varchar('category', { length: 50 }),
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check('plan_requests_status_check', sql`${table.status} IN ('pending', 'processed', 'rejected')`),
+    // Partial index for admin sidebar pending-count badge.
+    index('idx_plan_requests_status_pending')
+      .on(table.status)
+      .where(sql`${table.status} = 'pending'`),
+    // Activity feed / list ordering.
+    index('idx_plan_requests_created_at').on(table.createdAt),
+  ],
+);
+
+export type PlanRequest = typeof planRequests.$inferSelect;
+export type NewPlanRequest = typeof planRequests.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // session_completions

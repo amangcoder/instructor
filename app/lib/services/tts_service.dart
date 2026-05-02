@@ -87,6 +87,33 @@ final class TtsFallbackException extends TtsAppException {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Plan voice gate abstraction
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Abstraction over the local plan_voices cache that allows [TTSServiceImpl]
+/// to check whether at least one ready voice synthesis exists for a given plan
+/// without taking a direct Drift dependency on the plan_voices repository.
+///
+/// Inject a concrete implementation (backed by the plan_voices Drift table
+/// added in TASK-025) via [TTSServiceImpl]'s [planVoiceChecker] constructor
+/// parameter. Pass `null` (the default) to disable the gate — all plans will
+/// continue to route through the HTTP TTS backend as before.
+///
+/// ## Why abstract?
+/// - Enables pure-Dart unit tests without a real database
+/// - Decouples the TTS rendering path from the sync/repository layer
+/// - Matches the existing [PlatformTtsEngine] pattern in this file
+abstract class PlanVoiceChecker {
+  /// Returns `true` if the local plan_voices cache contains at least one
+  /// entry for [planId] with `status = 'ready'`.
+  ///
+  /// Returns `false` when no ready voice exists — meaning [TTSServiceImpl]
+  /// will invoke the platform TTS engine directly and bypass the HTTP backend
+  /// entirely (AC-017, REQ-022).
+  Future<bool> hasReadyVoice(String planId);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Platform TTS abstraction (enables mocking in tests)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -245,6 +272,37 @@ abstract class TTSService {
 
   /// Stops any in-progress platform TTS speech immediately.
   Future<void> stopSpeaking();
+
+  /// Renders TTS for a plan step with an optional plan-voice gate pre-check.
+  ///
+  /// ### Gate logic (REQ-022, AC-016, AC-017)
+  ///
+  /// When a [PlanVoiceChecker] is configured on the concrete implementation:
+  ///
+  /// 1. **No ready voice** — if [PlanVoiceChecker.hasReadyVoice] returns
+  ///    `false` for [planId], the method invokes the on-device TTS engine
+  ///    directly via [speakDirect] **without** making any HTTP request.
+  ///    Returns `null` to indicate that audio delivery has already been
+  ///    handled; the caller must not attempt to play a file.
+  ///
+  /// 2. **Ready voice exists** — delegates to [renderTTS] with the supplied
+  ///    [voiceId] and [mode], following the normal backend-HTTP path.
+  ///
+  /// When no [PlanVoiceChecker] is configured (the default), this method
+  /// always delegates to [renderTTS] for full backwards compatibility.
+  ///
+  /// Applies to both admin-curated and user-authored plans (REQ-022).
+  ///
+  /// [planId]  — the plan whose plan_voices cache is checked.
+  /// [voiceId] — the voice to use for genai rendering (ignored when gate
+  ///             triggers platform TTS).
+  /// [mode]    — passed through to [renderTTS] when the gate is not triggered.
+  Future<String?> renderTTSForPlan(
+    String text,
+    String planId,
+    String voiceId,
+    TtsPlaybackMode mode,
+  );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -272,17 +330,23 @@ class TTSServiceImpl implements TTSService {
     required AuthService authService,
     http.Client? httpClient,
     PlatformTtsEngine? ttsEngine,
+    PlanVoiceChecker? planVoiceChecker,
   })  : _db = db,
         _audioDirectory = audioDirectory,
         _auth = authService,
         _httpClient = httpClient ?? http.Client(),
-        _ttsEngine = ttsEngine ?? FlutterTtsEngine();
+        _ttsEngine = ttsEngine ?? FlutterTtsEngine(),
+        _planVoiceChecker = planVoiceChecker;
 
   final AppDatabase _db;
   final String _audioDirectory;
   final AuthService _auth;
   final http.Client _httpClient;
   final PlatformTtsEngine _ttsEngine;
+
+  /// Optional gate that checks the local plan_voices cache before allowing
+  /// an HTTP TTS request. When null the gate is disabled (backwards compat).
+  final PlanVoiceChecker? _planVoiceChecker;
 
   /// In-flight requests keyed by cache hash — prevents duplicate concurrent
   /// API calls for the same text+voice.
@@ -454,6 +518,81 @@ class TTSServiceImpl implements TTSService {
   @override
   Future<void> stopSpeaking() async {
     await _ttsEngine.stop();
+  }
+
+  @override
+  Future<String?> renderTTSForPlan(
+    String text,
+    String planId,
+    String voiceId,
+    TtsPlaybackMode mode,
+  ) async {
+    if (text.trim().isEmpty) {
+      throw ArgumentError.value(text, 'text', 'must not be empty');
+    }
+    if (planId.trim().isEmpty) {
+      throw ArgumentError.value(planId, 'planId', 'must not be empty');
+    }
+
+    debugPrint(
+      'TTSService.renderTTSForPlan: ENTER planId=$planId, voice=$voiceId, '
+      'text="${text.length > 30 ? '${text.substring(0, 30)}…' : text}"',
+    );
+
+    // ── Plan voice gate (REQ-022, AC-016, AC-017) ─────────────────────────
+    // When a PlanVoiceChecker is configured, query the local plan_voices cache
+    // to decide whether to route through HTTP TTS or speak directly.
+    if (_planVoiceChecker != null) {
+      bool hasReady;
+      try {
+        hasReady = await _planVoiceChecker!.hasReadyVoice(planId);
+      } catch (e) {
+        // Gate check failure is non-fatal: log and fall through to HTTP.
+        debugPrint(
+          'TTSService.renderTTSForPlan: gate check failed ($e) — '
+          'falling through to renderTTS()',
+        );
+        hasReady = true; // Treat as "ready" so HTTP is attempted normally.
+      }
+
+      if (!hasReady) {
+        // No ready plan_voice exists for this plan — skip HTTP entirely and
+        // speak directly via the on-device TTS engine (AC-017).
+        debugPrint(
+          'TTSService.renderTTSForPlan: no ready voice for plan $planId — '
+          'invoking platformTts.speak() without HTTP (AC-017, REQ-022)',
+        );
+        try {
+          // Use a conservative fixed speed (0.5) consistent with the
+          // renderWithPlatformTTS() path for natural-sounding output.
+          await _ttsEngine.speak(text, speed: 0.5);
+          debugPrint(
+            'TTSService.renderTTSForPlan: platformTts.speak() completed',
+          );
+        } catch (e) {
+          debugPrint(
+            'TTSService.renderTTSForPlan: platformTts.speak() failed ($e)',
+          );
+          rethrow;
+        }
+        // Return null: audio was delivered via speak(); caller must not play
+        // a file. Mirrors renderTTS() returning null in platform mode.
+        return null;
+      }
+
+      debugPrint(
+        'TTSService.renderTTSForPlan: ready voice found for plan $planId — '
+        'delegating to renderTTS() (HTTP path)',
+      );
+    } else {
+      debugPrint(
+        'TTSService.renderTTSForPlan: no gate configured — '
+        'delegating to renderTTS()',
+      );
+    }
+
+    // Gate passed or not configured — use the standard render flow.
+    return renderTTS(text, voiceId, mode);
   }
 
   // ── Private helpers ────────────────────────────────────────────────────

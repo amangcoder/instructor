@@ -6,18 +6,26 @@ import TimeSeriesChart from '@/components/admin/TimeSeriesChart';
 import ChartErrorBoundary from '@/components/admin/ChartErrorBoundary';
 import TtsHealthBanner from '@/components/admin/TtsHealthBanner';
 import DataTableToggle from '@/components/admin/DataTableToggle';
+import PlanVoiceJobTable from '@/components/admin/PlanVoiceJobTable';
 import type {
   TtsVolumeResponse,
   TtsErrorsResponse,
 } from '@/types/analytics';
+import type { PlanVoiceJobsResponse } from '@/types/plan-voices';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
 interface TtsPageProps {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; pvPage?: string }>;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Constants
+// ────────────────────────────────────────────────────────────────────────────
+
+const PLAN_VOICES_PAGE_SIZE = 20;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -49,12 +57,24 @@ function errorMessage(err: unknown): string {
 export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
   const params = await searchParams;
   const range = params.range ?? '30d';
+  const pvPage = Math.max(
+    1,
+    Number.parseInt(params.pvPage ?? '1', 10) || 1,
+  );
 
   // ── Parallel fetch ────────────────────────────────────────────────────────
-  const [volumeResult, errorsResult] = await Promise.allSettled([
-    adminFetch<TtsVolumeResponse>('/admin/analytics/tts/volume', { range }),
-    adminFetch<TtsErrorsResponse>('/admin/analytics/tts/errors', { range }),
-  ]);
+  const [volumeResult, errorsResult, planVoicesResult] =
+    await Promise.allSettled([
+      adminFetch<TtsVolumeResponse>('/admin/analytics/tts/volume', { range }),
+      adminFetch<TtsErrorsResponse>('/admin/analytics/tts/errors', { range }),
+      adminFetch<PlanVoiceJobsResponse>('/admin/plan-voices', {
+        query: {
+          status: 'failed',
+          page: pvPage,
+          pageSize: PLAN_VOICES_PAGE_SIZE,
+        },
+      }),
+    ]);
 
   const volumeData =
     volumeResult.status === 'fulfilled' ? volumeResult.value : null;
@@ -68,6 +88,13 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
   const errorsError =
     errorsResult.status === 'rejected'
       ? errorMessage(errorsResult.reason)
+      : null;
+
+  const planVoicesData =
+    planVoicesResult.status === 'fulfilled' ? planVoicesResult.value : null;
+  const planVoicesError =
+    planVoicesResult.status === 'rejected'
+      ? errorMessage(planVoicesResult.reason)
       : null;
 
   // ── Derived values ────────────────────────────────────────────────────────
@@ -254,6 +281,38 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
               />
             </div>
           </>
+        )}
+      </section>
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* Failed Voice Jobs Section (REQ-018, AC-019)                        */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      <section aria-labelledby="failed-voice-jobs-heading" className="mb-10">
+        <h2
+          id="failed-voice-jobs-heading"
+          className="text-lg font-semibold text-on-surface mb-4"
+        >
+          Failed Voice Jobs
+        </h2>
+
+        {/* Error state */}
+        {planVoicesError && (
+          <div
+            className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-4"
+            role="alert"
+          >
+            <p className="font-medium">Failed to load voice job data</p>
+            <p className="mt-1">{planVoicesError}</p>
+          </div>
+        )}
+
+        {planVoicesData && (
+          <PlanVoiceJobTable
+            rows={planVoicesData.items}
+            total={planVoicesData.total}
+            page={planVoicesData.page}
+            pageSize={planVoicesData.pageSize}
+          />
         )}
       </section>
 

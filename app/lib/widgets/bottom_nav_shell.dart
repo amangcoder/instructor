@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/providers/remote_config_providers.dart';
 import 'package:instructor/services/notification_service.dart';
 import 'package:instructor/services/plans_migration.dart';
 import 'package:instructor/widgets/mini_player_bar.dart';
@@ -12,7 +13,7 @@ import 'package:instructor/widgets/mini_player_bar.dart';
 /// Glassmorphic bottom navigation bar matching the Stitch design:
 /// bg-white/70, backdrop-blur-3xl, shadow, rounded-t-2xl.
 ///
-/// 4 destinations: Library, Create, AI Genius, Profile.
+/// 3 destinations: Library, Create, Profile.
 /// Active item: gradient bg (primary → primaryContainer), white text/icon.
 /// Inactive: primary/60 color.
 /// Labels: Inter 11px semibold uppercase tracking-0.5.
@@ -52,12 +53,34 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
   /// session.
   bool _migrationFailureWarningShown = false;
 
-  static const _destinations = [
-    _NavItem(icon: Icons.auto_stories, label: 'Library', route: '/'),
-    _NavItem(icon: Icons.edit_note, label: 'Create', route: '/editor/new'),
-    _NavItem(icon: Icons.psychology, label: 'AI Genius', route: '/generate-plan'),
-    _NavItem(icon: Icons.person, label: 'Profile', route: '/settings'),
-  ];
+  // Branch indices below match the [StatefulShellRoute] branch order in
+  // [router.dart] (Library=0, Create=1, Profile=2, Discover=3). Visual order
+  // can differ from branch order — Profile is always rendered last so it
+  // anchors the rightmost slot regardless of whether Discover is shown.
+  static const _libraryDestination = _NavItem(
+    icon: Icons.auto_stories,
+    label: 'Library',
+    route: '/',
+    branchIndex: 0,
+  );
+  static const _createDestination = _NavItem(
+    icon: Icons.edit_note,
+    label: 'Create',
+    route: '/editor/new',
+    branchIndex: 1,
+  );
+  static const _profileDestination = _NavItem(
+    icon: Icons.person,
+    label: 'Profile',
+    route: '/settings',
+    branchIndex: 2,
+  );
+  static const _discoverDestination = _NavItem(
+    icon: Icons.explore,
+    label: 'Discover',
+    route: '/discover',
+    branchIndex: 3,
+  );
 
   @override
   void initState() {
@@ -157,6 +180,19 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
     final colorScheme = Theme.of(context).colorScheme;
     final hasSession = ref.watch(hasActiveSessionProvider);
 
+    // Discover tab is gated on the runtime feature flag from /api/app-config.
+    // While loading or on error the provider yields false → tab stays hidden.
+    // When shown it sits between Create and Profile so Profile remains the
+    // rightmost slot.
+    final discoverEnabled =
+        ref.watch(discoverEnabledProvider).valueOrNull ?? false;
+    final destinations = [
+      _libraryDestination,
+      _createDestination,
+      if (discoverEnabled) _discoverDestination,
+      _profileDestination,
+    ];
+
     return Scaffold(
       body: widget.navigationShell,
       extendBody: true,
@@ -194,17 +230,18 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: List.generate(_destinations.length, (i) {
-                    final item = _destinations[i];
-                    final isActive = i == widget.navigationShell.currentIndex;
-                    return _NavButton(
-                      icon: item.icon,
-                      label: item.label,
-                      isActive: isActive,
-                      colorScheme: colorScheme,
-                      onTap: () => widget.navigationShell.goBranch(i),
-                    );
-                  }),
+                  children: [
+                    for (final item in destinations)
+                      _NavButton(
+                        icon: item.icon,
+                        label: item.label,
+                        isActive: item.branchIndex ==
+                            widget.navigationShell.currentIndex,
+                        colorScheme: colorScheme,
+                        onTap: () =>
+                            widget.navigationShell.goBranch(item.branchIndex),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -222,11 +259,17 @@ class _NavItem {
     required this.icon,
     required this.label,
     required this.route,
+    required this.branchIndex,
   });
 
   final IconData icon;
   final String label;
   final String route;
+
+  /// Index into the [StatefulShellRoute] branch list in [router.dart]. The
+  /// visual order of nav items can differ from the branch order, so this
+  /// value is what gets passed to [StatefulNavigationShell.goBranch].
+  final int branchIndex;
 }
 
 class _NavButton extends StatelessWidget {

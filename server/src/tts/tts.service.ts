@@ -497,46 +497,6 @@ export class TtsService {
     return audio;
   }
 
-  // ── Batch pre-gen helpers (used by TtsBatchPregenService only) ───────────
-
-  /** Returns raw PCM bytes from a Gemini call (no WAV header). For batch pre-gen use only. */
-  async synthesizeGeminiRaw(text: string, voice: string, locale?: string): Promise<Buffer> {
-    const wav = await this.synthesizeGemini(text, voice, locale);
-    return wav.subarray(44); // strip standard 44-byte WAV header
-  }
-
-
-  /** Writes a completed WAV buffer to L1 (disk) + L2 (S3) under the given cache key. */
-  async writeToCacheByKey(cacheKey: string, audio: Buffer): Promise<void> {
-    await this.writeCache(cacheKey, audio);
-  }
-
-  /** Writes arbitrary bytes directly to S3 under a full key (no prefix added). No-op if S3 is not configured. */
-  async writeRawToS3(key: string, content: Buffer, contentType = 'application/octet-stream'): Promise<void> {
-    if (!this.s3 || !this.bucket) return;
-    try {
-      await this.s3.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: content, ContentType: contentType }));
-    } catch (err: any) {
-      this.logger.warn(`writeRawToS3 failed for ${key}: ${err.message}`);
-    }
-  }
-
-  /** Returns the exact JSON body that will be sent to the Gemini TTS API. */
-  geminiTtsRequestBody(text: string, rawVoice: string, locale?: string): object {
-    const voiceName = rawVoice.charAt(0).toUpperCase() + rawVoice.slice(1);
-    const prompt = this.buildPrompt(text, locale);
-    return {
-      url: GEMINI_TTS_URL,
-      body: {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-        },
-      },
-    };
-  }
-
   // ── Gemini TTS ────────────────────────────────────────────────────────────
 
   private async synthesizeGemini(

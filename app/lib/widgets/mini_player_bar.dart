@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/providers/series_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
 
@@ -129,9 +130,12 @@ class _MiniPlayerContent extends ConsumerWidget {
                               mainAxisAlignment: MainAxisAlignment.center,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                // Plan name
+                                // Plan name — when this plan belongs to a
+                                // series the user is subscribed to, render
+                                // "{Series Name} · Day N" so the user always
+                                // knows where they are in the program.
                                 Text(
-                                  state.plan.name,
+                                  _displayTitle(ref, state),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
@@ -268,5 +272,21 @@ class _MiniPlayerContent extends ConsumerWidget {
       default:
         return 'Running…';
     }
+  }
+
+  /// Returns the title to show in the mini player. When the plan belongs to
+  /// a series the user is subscribed to, prepend the series name and the
+  /// 1-indexed day position. Falls back to the plain plan name otherwise.
+  String _displayTitle(WidgetRef ref, ExecutionState state) {
+    final seriesId = state.plan.seriesId;
+    if (seriesId == null) return state.plan.name;
+
+    final seriesAsync = ref.watch(seriesByIdProvider(seriesId));
+    final subAsync = ref.watch(mySubscriptionForProvider(seriesId));
+    final series = seriesAsync.valueOrNull;
+    final sub = subAsync.valueOrNull;
+    if (series == null) return state.plan.name;
+    final day = sub == null ? 1 : sub.currentSessionIndex + 1;
+    return '${series.name} · Day $day';
   }
 }

@@ -6,7 +6,7 @@ part of 'plan_providers.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$planListHash() => r'074466f0eb98760c6347368a1b45d111ca23566d';
+String _$planListHash() => r'7cd0845e7aa7bd1549557d9f41c180cd034d973c';
 
 /// Copied from Dart SDK
 class _SystemHash {
@@ -40,7 +40,7 @@ class _SystemHash {
 /// final plans = ref.watch(planListProvider());
 /// final filtered = ref.watch(planListProvider(
 ///   searchQuery: 'yoga',
-///   category: PlanCategory.yoga,
+///   category: 'yoga',
 /// ));
 /// ```
 ///
@@ -59,7 +59,7 @@ const planListProvider = PlanListFamily();
 /// final plans = ref.watch(planListProvider());
 /// final filtered = ref.watch(planListProvider(
 ///   searchQuery: 'yoga',
-///   category: PlanCategory.yoga,
+///   category: 'yoga',
 /// ));
 /// ```
 ///
@@ -76,7 +76,7 @@ class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
   /// final plans = ref.watch(planListProvider());
   /// final filtered = ref.watch(planListProvider(
   ///   searchQuery: 'yoga',
-  ///   category: PlanCategory.yoga,
+  ///   category: 'yoga',
   /// ));
   /// ```
   ///
@@ -94,14 +94,14 @@ class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
   /// final plans = ref.watch(planListProvider());
   /// final filtered = ref.watch(planListProvider(
   ///   searchQuery: 'yoga',
-  ///   category: PlanCategory.yoga,
+  ///   category: 'yoga',
   /// ));
   /// ```
   ///
   /// Copied from [planList].
   PlanListProvider call({
     String? searchQuery,
-    PlanCategory? category,
+    String? category,
   }) {
     return PlanListProvider(
       searchQuery: searchQuery,
@@ -145,7 +145,7 @@ class PlanListFamily extends Family<AsyncValue<List<Plan>>> {
 /// final plans = ref.watch(planListProvider());
 /// final filtered = ref.watch(planListProvider(
 ///   searchQuery: 'yoga',
-///   category: PlanCategory.yoga,
+///   category: 'yoga',
 /// ));
 /// ```
 ///
@@ -162,14 +162,14 @@ class PlanListProvider extends AutoDisposeStreamProvider<List<Plan>> {
   /// final plans = ref.watch(planListProvider());
   /// final filtered = ref.watch(planListProvider(
   ///   searchQuery: 'yoga',
-  ///   category: PlanCategory.yoga,
+  ///   category: 'yoga',
   /// ));
   /// ```
   ///
   /// Copied from [planList].
   PlanListProvider({
     String? searchQuery,
-    PlanCategory? category,
+    String? category,
   }) : this._internal(
           (ref) => planList(
             ref as PlanListRef,
@@ -200,7 +200,7 @@ class PlanListProvider extends AutoDisposeStreamProvider<List<Plan>> {
   }) : super.internal();
 
   final String? searchQuery;
-  final PlanCategory? category;
+  final String? category;
 
   @override
   Override overrideWith(
@@ -250,7 +250,7 @@ mixin PlanListRef on AutoDisposeStreamProviderRef<List<Plan>> {
   String? get searchQuery;
 
   /// The parameter `category` of this provider.
-  PlanCategory? get category;
+  String? get category;
 }
 
 class _PlanListProviderElement
@@ -260,7 +260,7 @@ class _PlanListProviderElement
   @override
   String? get searchQuery => (origin as PlanListProvider).searchQuery;
   @override
-  PlanCategory? get category => (origin as PlanListProvider).category;
+  String? get category => (origin as PlanListProvider).category;
 }
 
 String _$planByIdHash() => r'4794472ca254454d962cf1779bb8bcafc70eb9b4';

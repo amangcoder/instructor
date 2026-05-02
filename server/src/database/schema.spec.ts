@@ -7,8 +7,30 @@
  */
 
 import { getTableName } from 'drizzle-orm';
-import { users, otpRecords, refreshTokens, plans, ttsJobs, sessionCompletions, streakFreezes } from './schema';
-import type { User, OtpRecord, RefreshToken, Plan, SessionCompletion, StreakFreeze } from './schema';
+import {
+  users,
+  otpRecords,
+  refreshTokens,
+  plans,
+  ttsJobs,
+  sessionCompletions,
+  streakFreezes,
+  categories,
+  voices,
+  planVoices,
+  series,
+} from './schema';
+import type {
+  User,
+  OtpRecord,
+  RefreshToken,
+  Plan,
+  SessionCompletion,
+  StreakFreeze,
+  Category,
+  Voice,
+  PlanVoice,
+} from './schema';
 
 // ---------------------------------------------------------------------------
 // users
@@ -291,6 +313,329 @@ describe('streak_freezes table', () => {
 });
 
 // ---------------------------------------------------------------------------
+// categories (migration 0014)
+// ---------------------------------------------------------------------------
+
+describe('categories table', () => {
+  it('has correct table name', () => {
+    expect(getTableName(categories)).toBe('categories');
+  });
+
+  it('id column: UUID primary key with default random', () => {
+    const col = categories.id;
+    expect(col.name).toBe('id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.primary).toBe(true);
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
+  });
+
+  it('slug column: text unique not null', () => {
+    const col = categories.slug;
+    expect(col.name).toBe('slug');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+    expect(col.isUnique).toBe(true);
+  });
+
+  it('name column: text not null', () => {
+    const col = categories.name;
+    expect(col.name).toBe('name');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('icon column: text nullable', () => {
+    const col = categories.icon;
+    expect(col.name).toBe('icon');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('color column: varchar(20) nullable', () => {
+    const col = categories.color;
+    expect(col.name).toBe('color');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('sort_order column: integer not null with default 0', () => {
+    const col = categories.sortOrder;
+    expect(col.name).toBe('sort_order');
+    expect(col.columnType).toBe('PgInteger');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('is_published column: boolean not null with default false', () => {
+    const col = categories.isPublished;
+    expect(col.name).toBe('is_published');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('created_at column: timestamptz not null with default now', () => {
+    const col = categories.createdAt;
+    expect(col.name).toBe('created_at');
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
+  });
+
+  it('updated_at column: timestamptz not null with default now', () => {
+    const col = categories.updatedAt;
+    expect(col.name).toBe('updated_at');
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
+  });
+
+  it('deleted_at column: timestamptz nullable (soft-delete tombstone)', () => {
+    const col = categories.deletedAt;
+    expect(col.name).toBe('deleted_at');
+    expect(col.notNull).toBe(false);
+    expect(col.hasDefault).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// voices (migration 0014)
+// ---------------------------------------------------------------------------
+
+describe('voices table', () => {
+  it('has correct table name', () => {
+    expect(getTableName(voices)).toBe('voices');
+  });
+
+  it('id column: UUID primary key with default random', () => {
+    const col = voices.id;
+    expect(col.name).toBe('id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.primary).toBe(true);
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
+  });
+
+  it('slug column: text unique not null', () => {
+    const col = voices.slug;
+    expect(col.name).toBe('slug');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+    expect(col.isUnique).toBe(true);
+  });
+
+  it('display_name column: text not null', () => {
+    const col = voices.displayName;
+    expect(col.name).toBe('display_name');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('locale column: text not null', () => {
+    const col = voices.locale;
+    expect(col.name).toBe('locale');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('provider column: text not null', () => {
+    const col = voices.provider;
+    expect(col.name).toBe('provider');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('sample_url column: text nullable', () => {
+    const col = voices.sampleUrl;
+    expect(col.name).toBe('sample_url');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('is_published column: boolean not null with default true', () => {
+    const col = voices.isPublished;
+    expect(col.name).toBe('is_published');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plan_voices (migration 0014)
+// ---------------------------------------------------------------------------
+
+describe('plan_voices table', () => {
+  it('has correct table name', () => {
+    expect(getTableName(planVoices)).toBe('plan_voices');
+  });
+
+  it('id column: UUID primary key with default random', () => {
+    const col = planVoices.id;
+    expect(col.name).toBe('id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.primary).toBe(true);
+    expect(col.hasDefault).toBe(true);
+    expect(col.notNull).toBe(true);
+  });
+
+  it('plan_id column: UUID not null with FK reference to plans', () => {
+    const col = planVoices.planId;
+    expect(col.name).toBe('plan_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('voice_id column: UUID not null with FK reference to voices', () => {
+    const col = planVoices.voiceId;
+    expect(col.name).toBe('voice_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('locale column: text not null', () => {
+    const col = planVoices.locale;
+    expect(col.name).toBe('locale');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+  });
+
+  it('status column: text not null with default "pending"', () => {
+    const col = planVoices.status;
+    expect(col.name).toBe('status');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('audio_url column: text nullable (set when ready)', () => {
+    const col = planVoices.audioUrl;
+    expect(col.name).toBe('audio_url');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('duration_ms column: integer nullable (set when ready)', () => {
+    const col = planVoices.durationMs;
+    expect(col.name).toBe('duration_ms');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('error_msg column: text nullable (set on failure)', () => {
+    const col = planVoices.errorMsg;
+    expect(col.name).toBe('error_msg');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('generated_at column: timestamptz nullable (set when first ready)', () => {
+    const col = planVoices.generatedAt;
+    expect(col.name).toBe('generated_at');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('has UNIQUE index on (plan_id, voice_id, locale)', () => {
+    function getIndexNames(table: any): string[] {
+      const sym = Object.getOwnPropertySymbols(table).find(
+        (s) => s.toString() === 'Symbol(drizzle:Indexes)',
+      );
+      if (!sym) return [];
+      const indexes = table[sym] as Record<string, { config: { name: string } }>;
+      return Object.values(indexes).map((idx) => idx.config.name);
+    }
+    const names = getIndexNames(planVoices);
+    expect(names).toContain('plan_voices_plan_id_voice_id_locale_unique');
+  });
+
+  it('has idx_plan_voices_plan_status composite index', () => {
+    function getIndexNames(table: any): string[] {
+      const sym = Object.getOwnPropertySymbols(table).find(
+        (s) => s.toString() === 'Symbol(drizzle:Indexes)',
+      );
+      if (!sym) return [];
+      const indexes = table[sym] as Record<string, { config: { name: string } }>;
+      return Object.values(indexes).map((idx) => idx.config.name);
+    }
+    const names = getIndexNames(planVoices);
+    expect(names).toContain('idx_plan_voices_plan_status');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// series — new category_id column (migration 0014)
+// ---------------------------------------------------------------------------
+
+describe('series table — migration 0014 additions', () => {
+  it('category_id column: UUID nullable FK to categories', () => {
+    const col = series.categoryId;
+    expect(col.name).toBe('category_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plans — new columns (migration 0014)
+// ---------------------------------------------------------------------------
+
+describe('plans table — migration 0014 additions', () => {
+  it('parent_plan_id column: UUID nullable (self-FK for sub-plans)', () => {
+    const col = plans.parentPlanId;
+    expect(col.name).toBe('parent_plan_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('position column: integer not null with default 0', () => {
+    const col = plans.position;
+    expect(col.name).toBe('position');
+    expect(col.columnType).toBe('PgInteger');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('visibility column: text not null with default "private"', () => {
+    const col = plans.visibility;
+    expect(col.name).toBe('visibility');
+    expect(col.columnType).toBe('PgText');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('owner_user_id column: UUID nullable FK to users', () => {
+    const col = plans.ownerUserId;
+    expect(col.name).toBe('owner_user_id');
+    expect(col.columnType).toBe('PgUUID');
+    expect(col.notNull).toBe(false);
+  });
+
+  it('is_published column: boolean not null with default false', () => {
+    const col = plans.isPublished;
+    expect(col.name).toBe('is_published');
+    expect(col.notNull).toBe(true);
+    expect(col.hasDefault).toBe(true);
+  });
+
+  it('has idx_plans_parent_position partial index', () => {
+    function getIndexNames(table: any): string[] {
+      const sym = Object.getOwnPropertySymbols(table).find(
+        (s) => s.toString() === 'Symbol(drizzle:Indexes)',
+      );
+      if (!sym) return [];
+      const indexes = table[sym] as Record<string, { config: { name: string } }>;
+      return Object.values(indexes).map((idx) => idx.config.name);
+    }
+    const names = getIndexNames(plans);
+    expect(names).toContain('idx_plans_parent_position');
+  });
+
+  it('has idx_plans_visibility_pending partial index', () => {
+    function getIndexNames(table: any): string[] {
+      const sym = Object.getOwnPropertySymbols(table).find(
+        (s) => s.toString() === 'Symbol(drizzle:Indexes)',
+      );
+      if (!sym) return [];
+      const indexes = table[sym] as Record<string, { config: { name: string } }>;
+      return Object.values(indexes).map((idx) => idx.config.name);
+    }
+    const names = getIndexNames(plans);
+    expect(names).toContain('idx_plans_visibility_pending');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Analytics indexes
 // ---------------------------------------------------------------------------
 
@@ -420,6 +765,45 @@ describe('TypeScript inferred types', () => {
       expiresAt: new Date(),
       consumedAt: null,
       createdAt: new Date(),
+    };
+    expect(_).toBeDefined();
+  });
+
+  it('Category type has required fields (migration 0014)', () => {
+    const _: Pick<Category, 'id' | 'slug' | 'name' | 'sortOrder' | 'isPublished' | 'createdAt' | 'updatedAt'> = {
+      id: '00000000-0000-0000-0000-000000000000',
+      slug: 'meditation',
+      name: 'Meditation',
+      sortOrder: 0,
+      isPublished: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(_).toBeDefined();
+  });
+
+  it('Voice type has required fields (migration 0014)', () => {
+    const _: Pick<Voice, 'id' | 'slug' | 'displayName' | 'locale' | 'provider' | 'isPublished' | 'createdAt'> = {
+      id: '00000000-0000-0000-0000-000000000000',
+      slug: 'en-us-aria',
+      displayName: 'Aria (US English)',
+      locale: 'en-US',
+      provider: 'azure',
+      isPublished: true,
+      createdAt: new Date(),
+    };
+    expect(_).toBeDefined();
+  });
+
+  it('PlanVoice type has required fields (migration 0014)', () => {
+    const _: Pick<PlanVoice, 'id' | 'planId' | 'voiceId' | 'locale' | 'status' | 'createdAt' | 'updatedAt'> = {
+      id: '00000000-0000-0000-0000-000000000000',
+      planId: '00000000-0000-0000-0000-000000000001',
+      voiceId: '00000000-0000-0000-0000-000000000002',
+      locale: 'en-US',
+      status: 'pending',
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
     expect(_).toBeDefined();
   });

@@ -26,6 +26,9 @@ import { UserRepository } from '../repositories/user.repository';
 import { LibraryRepository } from '../repositories/library.repository';
 import { SyncRepository } from '../repositories/sync.repository';
 import { AdminRepository } from '../repositories/admin.repository';
+import { CategoryRepository } from '../repositories/category.repository';
+import { VoiceRepository } from '../repositories/voice.repository';
+import { PlanVoicesRepository } from '../repositories/plan-voices.repository';
 
 /**
  * Create a fully-mocked DatabaseService with all methods returning sensible defaults.
@@ -104,6 +107,15 @@ export function createMockDatabaseService(): jest.Mocked<DatabaseService> {
     listAllLibraryPlans: jest.fn().mockResolvedValue([]),
     updateLibraryPlan: jest.fn().mockResolvedValue(undefined),
     deleteLibraryPlan: jest.fn().mockResolvedValue(false),
+
+    // Category operations
+    listPublishedCategories: jest.fn().mockResolvedValue([]),
+    listAllCategories: jest.fn().mockResolvedValue({ categories: [], total: 0 }),
+    getCategoryById: jest.fn().mockResolvedValue(null),
+    createCategory: jest.fn().mockResolvedValue({ id: 'category-1' }),
+    updateCategory: jest.fn().mockResolvedValue(null),
+    softDeleteCategory: jest.fn().mockResolvedValue(true),
+    reorderCategories: jest.fn().mockResolvedValue(undefined),
 
     // TTS job operations
     createTtsJobs: jest.fn().mockResolvedValue([]),
@@ -226,6 +238,9 @@ export function createMockSyncRepository(): jest.Mocked<SyncRepository> {
     getSessionCompletions: jest.fn().mockResolvedValue([]),
     upsertPlanTriggers: jest.fn().mockResolvedValue([]),
     getPlanTriggers: jest.fn().mockResolvedValue([]),
+    getCategories: jest.fn().mockResolvedValue({ rows: [], deletedIds: [] }),
+    getVoices: jest.fn().mockResolvedValue({ rows: [], deletedIds: [] }),
+    getPlanVoices: jest.fn().mockResolvedValue({ rows: [], deletedIds: [] }),
   } as unknown as jest.Mocked<SyncRepository>;
 }
 
@@ -235,4 +250,44 @@ export function createMockAdminRepository(): jest.Mocked<AdminRepository> {
     noop: false,
     insertDeletionRequest: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AdminRepository>;
+}
+
+/** Create a fully-mocked CategoryRepository. */
+export function createMockCategoryRepository(): jest.Mocked<CategoryRepository> {
+  return {
+    listPublished: jest.fn().mockResolvedValue([]),
+    listAll: jest.fn().mockResolvedValue({ categories: [], total: 0 }),
+    findById: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({ id: 'category-1' }),
+    update: jest.fn().mockResolvedValue(null),
+    softDelete: jest.fn().mockResolvedValue(true),
+    reorder: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<CategoryRepository>;
+}
+
+/** Create a fully-mocked VoiceRepository. */
+export function createMockVoiceRepository(): jest.Mocked<VoiceRepository> {
+  return {
+    noop: false,
+    listPublished: jest.fn().mockResolvedValue([]),
+    listAll: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+    findById: jest.fn().mockResolvedValue(null),
+    findBySlug: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({ id: 'voice-1', slug: 'mock-voice', displayName: 'Mock Voice', locale: 'en-US', provider: 'mock', sampleUrl: null, isPublished: true, createdAt: new Date(), updatedAt: new Date() }),
+    update: jest.fn().mockResolvedValue(null),
+  } as unknown as jest.Mocked<VoiceRepository>;
+}
+
+/** Create a fully-mocked PlanVoicesRepository. */
+export function createMockPlanVoicesRepository(): jest.Mocked<PlanVoicesRepository> {
+  return {
+    noop: false,
+    upsertPlanVoice: jest.fn().mockResolvedValue({ id: 'pv-1', planId: 'plan-1', voiceId: 'voice-1', locale: 'en-US', status: 'pending', audioUrl: null, durationMs: null, errorMsg: null, generatedAt: null, createdAt: new Date(), updatedAt: new Date() }),
+    updateStatus: jest.fn().mockResolvedValue(undefined),
+    listByPlan: jest.fn().mockResolvedValue([]),
+    listFailed: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+    hasReadyVoice: jest.fn().mockResolvedValue(false),
+    backfillFromTtsStatus: jest.fn().mockResolvedValue({ id: 'pv-1', planId: 'plan-1', voiceId: 'voice-1', locale: 'en-US', status: 'pending', audioUrl: null, durationMs: null, errorMsg: null, generatedAt: null, createdAt: new Date(), updatedAt: new Date() }),
+    createBatch: jest.fn().mockResolvedValue([]),
+  } as unknown as jest.Mocked<PlanVoicesRepository>;
 }

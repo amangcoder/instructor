@@ -12,7 +12,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/database/type_converters.dart';
 import 'package:instructor/models/auth_models.dart';
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/providers/plan_providers.dart';
@@ -249,11 +248,7 @@ Plan parseLegacyPlan(Map<String, dynamic> raw) {
     tags = const [];
   }
 
-  final categoryStr = raw['category'] as String? ?? 'custom';
-  final category = PlanCategory.values.firstWhere(
-    (c) => c.name == categoryStr,
-    orElse: () => PlanCategory.custom,
-  );
+  final category = raw['category'] as String? ?? 'custom';
 
   final voice = raw['default_voice'] as String?;
 

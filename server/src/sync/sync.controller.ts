@@ -1,13 +1,20 @@
 /**
- * SyncController — session completion sync endpoints.
+ * SyncController — session completion, plan-trigger, and content-cache sync endpoints.
  *
  * Routes:
- *   - POST /api/sync/completions — upload completions (auth required)
- *   - GET /api/sync/completions — download completions (auth required, optional since param)
+ *   - POST /api/sync/completions     — upload completions (auth required)
+ *   - GET  /api/sync/completions     — download completions (auth required, optional since param)
+ *   - POST /api/sync/triggers        — upload plan triggers (auth required)
+ *   - GET  /api/sync/triggers        — download plan triggers (auth required, optional since param)
+ *   - GET  /api/sync/categories      — published categories for mobile cache (auth required)
+ *   - GET  /api/sync/voices          — published voices for mobile cache (auth required)
+ *   - GET  /api/sync/plan-voices     — ready plan-voice renditions for mobile cache (auth required)
  *
  * SECURITY:
- *   - Both endpoints require JwtAuthGuard
- *   - userId derived from JWT, never from request body
+ *   - All endpoints require JwtAuthGuard
+ *   - userId derived from JWT, never from request body (completions / triggers)
+ *   - Content-cache endpoints (categories, voices, plan-voices) return global
+ *     published content — not user-scoped, but still require authentication
  *   - No cross-user data leakage
  *   - Rate limiting considered for future (not in MVP)
  */
@@ -39,6 +46,11 @@ import {
   UploadTriggersDto,
   UploadTriggersResponseDto,
 } from './dto/sync-triggers.dto';
+import {
+  GetCategoriesResponseDto,
+  GetVoicesResponseDto,
+  GetPlanVoicesResponseDto,
+} from './dto/sync-content.dto';
 
 @Controller('sync')
 @UseGuards(JwtAuthGuard)
@@ -189,6 +201,121 @@ export class SyncController {
       return await this.syncService.getPlanTriggers(userId, { since: sinceDate });
     } catch (error) {
       throw new InternalServerErrorException('Failed to retrieve triggers');
+    }
+  }
+
+  // ── Content cache sync ───────────────────────────────────────────────────
+
+  /**
+   * GET /api/sync/categories?since=ISO8601
+   * Download published categories for mobile Drift cache sync.
+   *
+   * Query params:
+   *   - since (optional): ISO 8601 timestamp.
+   *       Omitted  → full sync:  all is_published=true categories.
+   *       Provided → delta sync: categories with updatedAt > since that are
+   *                  still published, PLUS deletedIds of any that were
+   *                  unpublished after `since` (client must evict them).
+   *
+   * Returns: { categories: CategoryDto[], deletedIds: string[] }
+   *
+   * Auth: Required (JwtAuthGuard). Not user-scoped — returns global published
+   * content identical for every authenticated caller.
+   */
+  @Get('categories')
+  @HttpCode(HttpStatus.OK)
+  async getCategories(
+    @Query('since') since?: string,
+  ): Promise<GetCategoriesResponseDto> {
+    let sinceDate: Date | undefined;
+    if (since) {
+      const parsed = new Date(since);
+      if (isNaN(parsed.getTime())) {
+        throw new BadRequestException('Invalid since timestamp. Use ISO 8601 format.');
+      }
+      sinceDate = parsed;
+    }
+
+    try {
+      return await this.syncService.getCategories(sinceDate);
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to retrieve categories');
+    }
+  }
+
+  /**
+   * GET /api/sync/voices?since=ISO8601
+   * Download published voices for mobile Drift cache sync.
+   *
+   * Query params:
+   *   - since (optional): ISO 8601 timestamp.
+   *       Omitted  → full sync:  all is_published=true voices.
+   *       Provided → delta sync: voices with updatedAt > since that are
+   *                  still published, PLUS deletedIds for unpublished voices.
+   *
+   * Returns: { voices: VoiceDto[], deletedIds: string[] }
+   *
+   * Auth: Required (JwtAuthGuard). Global published content — not user-scoped.
+   */
+  @Get('voices')
+  @HttpCode(HttpStatus.OK)
+  async getVoices(
+    @Query('since') since?: string,
+  ): Promise<GetVoicesResponseDto> {
+    let sinceDate: Date | undefined;
+    if (since) {
+      const parsed = new Date(since);
+      if (isNaN(parsed.getTime())) {
+        throw new BadRequestException('Invalid since timestamp. Use ISO 8601 format.');
+      }
+      sinceDate = parsed;
+    }
+
+    try {
+      return await this.syncService.getVoices(sinceDate);
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to retrieve voices');
+    }
+  }
+
+  /**
+   * GET /api/sync/plan-voices?since=ISO8601
+   * Download ready plan-voice renditions for mobile Drift cache sync.
+   *
+   * Only plan_voices with status='ready' for is_published=true plans are
+   * returned — these are the rows that gate audio playback on the client
+   * (REQ-023, AC-021).
+   *
+   * Query params:
+   *   - since (optional): ISO 8601 timestamp.
+   *       Omitted  → full sync:  all ready+published plan_voice rows.
+   *       Provided → delta sync: rows where plan_voices.updatedAt > since
+   *                  that are still ready+published, PLUS deletedIds for
+   *                  rows that no longer qualify (status changed, or parent
+   *                  plan unpublished — client must evict them).
+   *
+   * Returns: { planVoices: PlanVoiceDto[], deletedIds: string[] }
+   *
+   * Auth: Required (JwtAuthGuard). Global published content — not user-scoped.
+   */
+  @Get('plan-voices')
+  @HttpCode(HttpStatus.OK)
+  async getPlanVoices(
+    @Query('since') since?: string,
+  ): Promise<GetPlanVoicesResponseDto> {
+    let sinceDate: Date | undefined;
+    if (since) {
+      const parsed = new Date(since);
+      if (isNaN(parsed.getTime())) {
+        throw new BadRequestException('Invalid since timestamp. Use ISO 8601 format.');
+      }
+      sinceDate = parsed;
+    }
+
+    try {
+      return await this.syncService.getPlanVoices(sinceDate);
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to retrieve plan voices');
     }
   }
 }

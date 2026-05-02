@@ -10,11 +10,8 @@ _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
       id: json['id'] as String,
       name: json['name'] as String,
       description: json['description'] as String?,
-      category: $enumDecodeNullable(_$PlanCategoryEnumMap, json['category']) ??
-          PlanCategory.custom,
-      tags:
-          (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
-              const [],
+      category: json['category'] as String? ?? 'custom',
+      tags: json['tags'] == null ? const [] : tagsFromJson(json['tags']),
       defaultVoice: json['defaultVoice'] as String? ?? 'aoede',
       steps: (json['steps'] as List<dynamic>?)
               ?.map((e) => PlanStep.fromJson(e as Map<String, dynamic>))
@@ -30,6 +27,20 @@ _$PlanImpl _$$PlanImplFromJson(Map<String, dynamic> json) => _$PlanImpl(
       ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? 0,
       ttsCompleted: (json['ttsCompleted'] as num?)?.toInt() ?? 0,
       libraryId: json['libraryId'] as String?,
+      seriesId: json['seriesId'] as String?,
+      parentPlanId: json['parentPlanId'] as String?,
+      position: (json['position'] as num?)?.toInt() ?? 0,
+      children: (json['children'] as List<dynamic>?)
+              ?.map((e) => Plan.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      voices: (json['voices'] as List<dynamic>?)
+              ?.map((e) => PlanVoice.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      visibility: json['visibility'] as String? ?? 'public',
+      isPublished: json['isPublished'] as bool? ?? false,
+      ownerId: json['ownerId'] as String?,
     );
 
 Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
@@ -37,8 +48,8 @@ Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
       'id': instance.id,
       'name': instance.name,
       'description': instance.description,
-      'category': _$PlanCategoryEnumMap[instance.category]!,
-      'tags': instance.tags,
+      'category': instance.category,
+      'tags': tagsToJson(instance.tags),
       'defaultVoice': instance.defaultVoice,
       'steps': instance.steps,
       'createdAt': instance.createdAt.toIso8601String(),
@@ -49,14 +60,12 @@ Map<String, dynamic> _$$PlanImplToJson(_$PlanImpl instance) =>
       'ttsTotal': instance.ttsTotal,
       'ttsCompleted': instance.ttsCompleted,
       'libraryId': instance.libraryId,
+      'seriesId': instance.seriesId,
+      'parentPlanId': instance.parentPlanId,
+      'position': instance.position,
+      'children': instance.children,
+      'voices': instance.voices,
+      'visibility': instance.visibility,
+      'isPublished': instance.isPublished,
+      'ownerId': instance.ownerId,
     };
-
-const _$PlanCategoryEnumMap = {
-  PlanCategory.yoga: 'yoga',
-  PlanCategory.meditation: 'meditation',
-  PlanCategory.workout: 'workout',
-  PlanCategory.cooking: 'cooking',
-  PlanCategory.routine: 'routine',
-  PlanCategory.focus: 'focus',
-  PlanCategory.custom: 'custom',
-};

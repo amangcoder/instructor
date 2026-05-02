@@ -119,5 +119,15 @@ export async function adminFetch<T>(
     throw new AdminApiError(response.statusText || 'Request failed', String(response.status));
   }
 
-  return response.json() as Promise<T>;
+  // 204 No Content or an empty body — common for void-returning NestJS handlers
+  // (e.g. reorder-plans, delete). response.json() would throw "Unexpected end
+  // of JSON input" on these, so short-circuit and return undefined.
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  const text = await response.text();
+  if (text.length === 0) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }

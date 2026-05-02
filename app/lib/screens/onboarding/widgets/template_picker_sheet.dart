@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:instructor/data/starter_templates.dart';
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/providers/plan_providers.dart';
@@ -242,7 +241,7 @@ class _CategorySection extends StatelessWidget {
     required this.onSelect,
   });
 
-  final PlanCategory category;
+  final String category;
   final List<StarterTemplate> templates;
   final ValueChanged<StarterTemplate> onSelect;
 
@@ -287,12 +286,21 @@ class _CategorySection extends StatelessWidget {
 class _CategoryIcon extends StatelessWidget {
   const _CategoryIcon({required this.category});
 
-  final PlanCategory category;
+  final String category;
 
   @override
   Widget build(BuildContext context) {
-    final (IconData icon, Color color) = _iconData(context);
     final colorScheme = Theme.of(context).colorScheme;
+    final (IconData icon, Color color) = switch (category) {
+      'yoga' => (Icons.self_improvement, Colors.green.shade600),
+      'meditation' => (Icons.spa, Colors.purple.shade400),
+      'workout' => (Icons.fitness_center, Colors.orange.shade600),
+      'cooking' => (Icons.restaurant, Colors.red.shade500),
+      'routine' => (Icons.wb_sunny, Colors.amber.shade600),
+      'focus' => (Icons.timer, colorScheme.primary),
+      'sleep' => (Icons.bedtime, Colors.indigo.shade400),
+      _ => (Icons.edit, colorScheme.onSurfaceVariant),
+    };
 
     return Container(
       width: 40,
@@ -303,25 +311,5 @@ class _CategoryIcon extends StatelessWidget {
       ),
       child: Icon(icon, color: color, size: 20),
     );
-  }
-
-  (IconData, Color) _iconData(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    switch (category) {
-      case PlanCategory.yoga:
-        return (Icons.self_improvement, Colors.green.shade600);
-      case PlanCategory.meditation:
-        return (Icons.spa, Colors.purple.shade400);
-      case PlanCategory.workout:
-        return (Icons.fitness_center, Colors.orange.shade600);
-      case PlanCategory.cooking:
-        return (Icons.restaurant, Colors.red.shade500);
-      case PlanCategory.routine:
-        return (Icons.wb_sunny, Colors.amber.shade600);
-      case PlanCategory.focus:
-        return (Icons.timer, colorScheme.primary);
-      case PlanCategory.custom:
-        return (Icons.edit, colorScheme.onSurfaceVariant);
-    }
   }
 }

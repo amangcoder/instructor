@@ -1,0 +1,35 @@
+-- Migration 0015: Drop plans.tts_status after plan_voices gate rollout
+--
+-- PREREQUISITE: This migration must only be applied AFTER:
+--   1. Migration 0014 (plan_voices table) has been applied.
+--   2. The backfill script (server/scripts/backfill-plan-voices.ts) has been
+--      run and all plans have at least one plan_voices row.
+--   3. The `use_plan_voices_gate` feature flag has been set to TRUE for at
+--      least one full release cycle with no regressions.
+--   4. No mobile client versions in active use still read plans.tts_status.
+--
+-- ROLLBACK RISK: This migration is NOT reversible without a data-loss
+-- recovery from backup. Do not apply until the above conditions are met.
+--
+-- STUB — intentionally left empty.
+-- Fill in the body when Phase 3 of the rollout is approved.
+--
+-- Expected body when activated:
+--
+-- BEGIN;
+--
+-- -- Remove the tts_status CHECK constraint before dropping the column.
+-- ALTER TABLE plans DROP CONSTRAINT IF EXISTS plans_tts_status_check;
+--
+-- -- Drop the legacy per-plan TTS tracking columns.
+-- -- User-visible plan visibility is now gated exclusively by plan_voices.status.
+-- ALTER TABLE plans
+--   DROP COLUMN IF EXISTS tts_status,
+--   DROP COLUMN IF EXISTS tts_total,
+--   DROP COLUMN IF EXISTS tts_completed;
+--
+-- -- Drop associated indexes that are no longer needed.
+-- -- (The plan_voices table provides its own optimised indexes.)
+-- DROP INDEX IF EXISTS idx_tts_jobs_plan_status;  -- now covered by plan_voices indexes
+--
+-- COMMIT;

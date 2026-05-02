@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TtsBatchPregenService, chunkJobsForGemini } from './tts-batch-pregen.service';
+import { TtsBatchPregenService } from './tts-batch-pregen.service';
 import { DatabaseService } from '../database/database.service';
 import { TtsService } from './tts.service';
 import { TtsEnumerationService } from './tts-enumeration.service';
 import { WorkerDispatchService } from '../worker-dispatch/worker-dispatch.service';
-import { TtsAlignmentService } from './tts-alignment.service';
+import { PlanVoicesRepository } from '../database/repositories/plan-voices.repository';
+import { VoiceRepository } from '../database/repositories/voice.repository';
 import { createMockDatabaseService } from '../database/testing/database.service.mock';
 import type { TtsBatchPregenWorkerTask } from '../worker-dispatch/worker-task.interface';
 
@@ -19,29 +20,6 @@ jest.mock('@aws-sdk/client-s3', () => ({
   HeadObjectCommand: jest.fn().mockImplementation((params) => params),
 }));
 
-// Mock pcm-splitter: returns equal-sized buffers by default.
-const splitEvenly = (pcm: Buffer, count: number): Buffer[] => {
-  const size = Math.floor(pcm.length / count);
-  const segments: Buffer[] = [];
-  for (let i = 0; i < count; i++) {
-    const start = i * size;
-    const end = i === count - 1 ? pcm.length : (i + 1) * size;
-    segments.push(pcm.subarray(start, end));
-  }
-  return segments;
-};
-jest.mock('./pcm-splitter', () => ({
-  splitPcmOnSilence: jest.fn((pcm: Buffer, count: number) => splitEvenly(pcm, count)),
-  splitPcmAtBoundaries: jest.fn((pcm: Buffer, boundaries: Array<{ startMs: number; endMs: number }>) =>
-    splitEvenly(pcm, boundaries.length),
-  ),
-}));
-
-// Mock wav-utils: prepends a 44-byte header to the PCM buffer.
-jest.mock('./wav-utils', () => ({
-  buildWav: jest.fn((pcm: Buffer) => Buffer.concat([Buffer.alloc(44), pcm])),
-}));
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -50,10 +28,6 @@ function createMockTtsService() {
   return {
     synthesize: jest.fn().mockResolvedValue(Buffer.alloc(64)),
     cacheKey: jest.fn((...args: string[]) => `ck_${args.join('_')}`),
-    synthesizeGeminiRaw: jest.fn().mockResolvedValue(Buffer.alloc(200)),
-    writeToCacheByKey: jest.fn().mockResolvedValue(undefined),
-    writeRawToS3: jest.fn().mockResolvedValue(undefined),
-    geminiTtsRequestBody: jest.fn().mockReturnValue({ contents: [] }),
   };
 }
 
@@ -69,10 +43,46 @@ function createMockWorkerDispatch() {
   };
 }
 
-function createMockAlignmentService() {
+/** Create a minimal mock of PlanVoicesRepository for injection. */
+function createMockPlanVoicesRepo() {
   return {
-    align: jest.fn().mockResolvedValue(undefined),
-  };
+    upsertPlanVoice: jest.fn().mockResolvedValue({ id: 'pv-1', status: 'ready' }),
+    updateStatus: jest.fn().mockResolvedValue(undefined),
+    listByPlan: jest.fn().mockResolvedValue([]),
+    hasReadyVoice: jest.fn().mockResolvedValue(false),
+    listFailed: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+    backfillFromTtsStatus: jest.fn().mockResolvedValue(undefined),
+    createBatch: jest.fn().mockResolvedValue([]),
+    noop: false,
+  } as unknown as jest.Mocked<PlanVoicesRepository>;
+}
+
+/**
+ * Create a minimal VoiceRepository mock for injection. findBySlug returns a
+ * voice whose `id` echoes the input slug so existing test assertions that
+ * compare against the slug-style fixture (e.g. `voice-uuid-regen`) still pass
+ * after writePlanVoiceStatus resolves slug → UUID.
+ */
+function createMockVoiceRepo() {
+  return {
+    noop: false,
+    listPublished: jest.fn().mockResolvedValue([]),
+    listAll: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+    findById: jest.fn().mockResolvedValue(null),
+    findBySlug: jest.fn().mockImplementation(async (slug: string) => ({
+      id: slug,
+      slug,
+      displayName: slug,
+      locale: 'enUS',
+      provider: 'gemini',
+      sampleUrl: null,
+      isPublished: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })),
+    create: jest.fn().mockResolvedValue(null),
+    update: jest.fn().mockResolvedValue(null),
+  } as unknown as jest.Mocked<VoiceRepository>;
 }
 
 /** Build a TtsPair-like object for enumeration results. */
@@ -90,6 +100,50 @@ function makePair(overrides: Partial<{
   };
 }
 
+/** Build a service via the NestJS test module. */
+async function buildService({
+  usePlanVoicesGate = false,
+  mockDb,
+  mockTtsService,
+  mockEnumService,
+  mockWorkerDispatch,
+  mockPlanVoicesRepo,
+}: {
+  usePlanVoicesGate?: boolean;
+  mockDb: jest.Mocked<DatabaseService>;
+  mockTtsService: ReturnType<typeof createMockTtsService>;
+  mockEnumService: ReturnType<typeof createMockEnumService>;
+  mockWorkerDispatch: ReturnType<typeof createMockWorkerDispatch>;
+  mockPlanVoicesRepo?: jest.Mocked<PlanVoicesRepository> | null;
+}) {
+  const providers: any[] = [
+    TtsBatchPregenService,
+    { provide: DatabaseService, useValue: mockDb },
+    { provide: TtsService, useValue: mockTtsService },
+    { provide: TtsEnumerationService, useValue: mockEnumService },
+    { provide: WorkerDispatchService, useValue: mockWorkerDispatch },
+    {
+      provide: 'APP_CONFIG',
+      useValue: {
+        awsS3Bucket: 'test-bucket',
+        awsRegion: 'us-east-1',
+        usePlanVoicesGate,
+      },
+    },
+  ];
+
+  if (mockPlanVoicesRepo !== null) {
+    providers.push({ provide: PlanVoicesRepository, useValue: mockPlanVoicesRepo ?? createMockPlanVoicesRepo() });
+  }
+
+  // VoiceRepository is required to resolve voice slugs → UUIDs before writing
+  // to plan_voices.voice_id. Always inject the mock; tests use slug fixtures.
+  providers.push({ provide: VoiceRepository, useValue: createMockVoiceRepo() });
+
+  const module: TestingModule = await Test.createTestingModule({ providers }).compile();
+  return module.get<TtsBatchPregenService>(TtsBatchPregenService);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -100,10 +154,9 @@ describe('TtsBatchPregenService', () => {
   let mockTtsService: ReturnType<typeof createMockTtsService>;
   let mockEnumService: ReturnType<typeof createMockEnumService>;
   let mockWorkerDispatch: ReturnType<typeof createMockWorkerDispatch>;
-  let mockAlignmentService: ReturnType<typeof createMockAlignmentService>;
 
   beforeEach(async () => {
-    // Reset call counts on module-level mocks (pcm-splitter, wav-utils, S3).
+    // Reset call counts on module-level mocks (S3).
     // restoreAllMocks in afterEach only restores spies, not factory mocks.
     jest.clearAllMocks();
 
@@ -115,7 +168,6 @@ describe('TtsBatchPregenService', () => {
     mockTtsService = createMockTtsService();
     mockEnumService = createMockEnumService();
     mockWorkerDispatch = createMockWorkerDispatch();
-    mockAlignmentService = createMockAlignmentService();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -124,7 +176,6 @@ describe('TtsBatchPregenService', () => {
         { provide: TtsService, useValue: mockTtsService },
         { provide: TtsEnumerationService, useValue: mockEnumService },
         { provide: WorkerDispatchService, useValue: mockWorkerDispatch },
-        { provide: TtsAlignmentService, useValue: mockAlignmentService },
       ],
     }).compile();
 
@@ -305,10 +356,41 @@ describe('TtsBatchPregenService', () => {
   });
 
   // =========================================================================
-  // processGroupIndividual (via processTask with non-gemini provider)
+  // processGroupIndividual (the only group-processing path)
   // =========================================================================
 
   describe('processGroupIndividual', () => {
+    it('marks jobs completed on successful per-step synthesis', async () => {
+      const jobs = [
+        { id: 'j1', text: 'step 1', cacheKey: 'ck1', voiceId: 'aoede', locale: 'enUS', provider: 'gemini', speechRate: '1.0' },
+        { id: 'j2', text: 'step 2', cacheKey: 'ck2', voiceId: 'aoede', locale: 'enUS', provider: 'gemini', speechRate: '1.0' },
+      ];
+      mockDb.getTtsJobsByIds.mockResolvedValue(jobs as any);
+
+      mockS3Send.mockRejectedValue(new Error('NotFound'));
+
+      mockDb.getPlanTtsStatus.mockResolvedValue({
+        status: 'processing', total: 2, completed: 2, failed: 0, ready: false, updatedAt: new Date(),
+      });
+
+      const task: TtsBatchPregenWorkerTask = {
+        task: 'ttsBatchPregen',
+        planId: 'plan-1',
+        groups: [{ voiceId: 'aoede', locale: 'enUS', provider: 'gemini', jobIds: ['j1', 'j2'] }],
+      };
+
+      await service.processTask(task);
+
+      // One synthesize call per job.
+      expect(mockTtsService.synthesize).toHaveBeenCalledTimes(2);
+      expect(mockTtsService.synthesize).toHaveBeenCalledWith('step 1', 'aoede', 'enUS', 'gemini', '1.0');
+      expect(mockTtsService.synthesize).toHaveBeenCalledWith('step 2', 'aoede', 'enUS', 'gemini', '1.0');
+
+      expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith('j1', 'completed', 'tts/ck1.wav');
+      expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith('j2', 'completed', 'tts/ck2.wav');
+      expect(mockDb.incrementTtsCompleted).toHaveBeenCalledTimes(2);
+    });
+
     it('marks failed jobs in DB after max attempts', async () => {
       const job = {
         id: 'j1', text: 'hello', cacheKey: 'ck1',
@@ -425,194 +507,6 @@ describe('TtsBatchPregenService', () => {
   });
 
   // =========================================================================
-  // synthesizeBatchGemini
-  // =========================================================================
-
-  describe('synthesizeBatchGemini', () => {
-    it('skips already-cached pairs', async () => {
-      // All pairs cached.
-      mockS3Send.mockResolvedValue({});
-
-      const pairs = [
-        { text: 'hello', cacheKey: 'ck1' },
-        { text: 'world', cacheKey: 'ck2' },
-      ];
-
-      await service.synthesizeBatchGemini(pairs, 'aoede', 'enUS');
-
-      expect(mockTtsService.synthesizeGeminiRaw).not.toHaveBeenCalled();
-      expect(mockTtsService.writeToCacheByKey).not.toHaveBeenCalled();
-    });
-
-    it('calls synthesizeGeminiRaw with combined SSML', async () => {
-      // None cached.
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-
-      const rawPcm = Buffer.alloc(200);
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(rawPcm);
-
-      const pairs = [
-        { text: 'step one', cacheKey: 'ck1' },
-        { text: 'step two', cacheKey: 'ck2' },
-      ];
-
-      await service.synthesizeBatchGemini(pairs, 'aoede', 'enUS');
-
-      expect(mockTtsService.synthesizeGeminiRaw).toHaveBeenCalledTimes(1);
-      const ssml = mockTtsService.synthesizeGeminiRaw.mock.calls[0][0] as string;
-      expect(ssml).toContain('<speak>');
-      expect(ssml).toContain('step one');
-      expect(ssml).toContain('<break time="2500ms"/>');
-      expect(ssml).toContain('step two');
-      // Locale is forwarded so buildPrompt can wrap the SSML in <lang xml:lang="…">.
-      expect(mockTtsService.synthesizeGeminiRaw.mock.calls[0][2]).toBe('enUS');
-    });
-
-    it('splits PCM and writes individual cache entries', async () => {
-      // None cached.
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-
-      const rawPcm = Buffer.alloc(200);
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(rawPcm);
-
-      const pairs = [
-        { text: 'step one', cacheKey: 'ck1' },
-        { text: 'step two', cacheKey: 'ck2' },
-      ];
-
-      await service.synthesizeBatchGemini(pairs, 'aoede', 'enUS');
-
-      // Should write the combined audio + each individual segment.
-      // 1 combined + 2 individual = 3 calls.
-      expect(mockTtsService.writeToCacheByKey).toHaveBeenCalledTimes(3);
-
-      // Combined key: first cacheKey + _batch + count.
-      expect(mockTtsService.writeToCacheByKey).toHaveBeenCalledWith(
-        'ck1_batch2',
-        expect.any(Buffer),
-      );
-
-      // Individual cache entries.
-      expect(mockTtsService.writeToCacheByKey).toHaveBeenCalledWith('ck1', expect.any(Buffer));
-      expect(mockTtsService.writeToCacheByKey).toHaveBeenCalledWith('ck2', expect.any(Buffer));
-    });
-
-    it('saves the prompt JSON to S3 before synthesizing', async () => {
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-
-      const rawPcm = Buffer.alloc(100);
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(rawPcm);
-      mockTtsService.geminiTtsRequestBody.mockReturnValue({ prompt: 'test' });
-
-      const pairs = [{ text: 'hello', cacheKey: 'ck1' }];
-
-      await service.synthesizeBatchGemini(pairs, 'aoede', 'enUS');
-
-      expect(mockTtsService.writeRawToS3).toHaveBeenCalledWith(
-        'tts/ck1_batch1_prompt.json',
-        expect.any(Buffer),
-        'application/json',
-      );
-    });
-
-    it('uses forced-alignment boundaries when alignment succeeds', async () => {
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-      const rawPcm = Buffer.alloc(200);
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(rawPcm);
-
-      mockAlignmentService.align.mockResolvedValue({
-        boundaries: [
-          { startMs: 0, endMs: 1500 },
-          { startMs: 1500, endMs: 3000 },
-        ],
-        durationMs: 3000,
-      });
-
-      const { splitPcmAtBoundaries, splitPcmOnSilence } = jest.requireMock('./pcm-splitter');
-
-      await service.synthesizeBatchGemini(
-        [
-          { text: 'step one', cacheKey: 'ck1' },
-          { text: 'step two', cacheKey: 'ck2' },
-        ],
-        'aoede',
-        'enUS',
-      );
-
-      expect(mockAlignmentService.align).toHaveBeenCalledWith(
-        expect.objectContaining({
-          texts: ['step one', 'step two'],
-          sampleRate: 24_000,
-          language: 'eng',
-        }),
-      );
-      expect(splitPcmAtBoundaries).toHaveBeenCalledTimes(1);
-      expect(splitPcmOnSilence).not.toHaveBeenCalled();
-    });
-
-    it('falls back to silence splitting when alignment returns undefined', async () => {
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-      const rawPcm = Buffer.alloc(200);
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(rawPcm);
-
-      // Alignment unavailable (e.g. Modal unreachable).
-      mockAlignmentService.align.mockResolvedValue(undefined);
-
-      const { splitPcmAtBoundaries, splitPcmOnSilence } = jest.requireMock('./pcm-splitter');
-
-      await service.synthesizeBatchGemini(
-        [
-          { text: 'step one', cacheKey: 'ck1' },
-          { text: 'step two', cacheKey: 'ck2' },
-        ],
-        'aoede',
-        'enUS',
-      );
-
-      expect(splitPcmAtBoundaries).not.toHaveBeenCalled();
-      expect(splitPcmOnSilence).toHaveBeenCalledTimes(1);
-    });
-
-    it('skips alignment for a single-pair batch', async () => {
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(Buffer.alloc(80));
-
-      await service.synthesizeBatchGemini(
-        [{ text: 'only one', cacheKey: 'ck1' }],
-        'aoede',
-        'enUS',
-      );
-
-      expect(mockAlignmentService.align).not.toHaveBeenCalled();
-    });
-
-    it('maps non-English locales to ISO-639-3 for the aligner', async () => {
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(Buffer.alloc(120));
-      mockAlignmentService.align.mockResolvedValue({
-        boundaries: [
-          { startMs: 0, endMs: 60 },
-          { startMs: 60, endMs: 120 },
-        ],
-        durationMs: 120,
-      });
-
-      await service.synthesizeBatchGemini(
-        [
-          { text: 'hola', cacheKey: 'ck1' },
-          { text: 'mundo', cacheKey: 'ck2' },
-        ],
-        'aoede',
-        'es',
-      );
-
-      expect(mockAlignmentService.align).toHaveBeenCalledWith(
-        expect.objectContaining({ language: 'spa' }),
-      );
-    });
-  });
-
-  // =========================================================================
   // recoverIfStale (via getStatus)
   // =========================================================================
 
@@ -690,213 +584,540 @@ describe('TtsBatchPregenService', () => {
       expect(mockDb.getPlanTtsStatus).toHaveBeenCalledTimes(2);
     });
   });
+});
 
-  // =========================================================================
-  // processGroupGemini (via processTask with gemini provider)
-  // =========================================================================
+// ===========================================================================
+// Feature-flag tests: use_plan_voices_gate = false  (dual-write / AC-006)
+// ===========================================================================
 
-  describe('processGroupGemini', () => {
-    it('marks all jobs completed on successful batch synthesis', async () => {
-      const jobs = [
-        { id: 'j1', text: 'step 1', cacheKey: 'ck1' },
-        { id: 'j2', text: 'step 2', cacheKey: 'ck2' },
-      ];
-      mockDb.getTtsJobsByIds.mockResolvedValue(jobs as any);
+describe('TtsBatchPregenService — flag=false (dual-write AC-006)', () => {
+  let mockDb: jest.Mocked<DatabaseService>;
+  let mockTtsService: ReturnType<typeof createMockTtsService>;
+  let mockEnumService: ReturnType<typeof createMockEnumService>;
+  let mockWorkerDispatch: ReturnType<typeof createMockWorkerDispatch>;
+  let mockPlanVoicesRepo: jest.Mocked<PlanVoicesRepository>;
+  let service: TtsBatchPregenService;
 
-      // S3 checks in synthesizeBatchGemini — not cached.
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
 
-      const rawPcm = Buffer.alloc(200);
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(rawPcm);
+    mockDb = createMockDatabaseService();
+    mockTtsService = createMockTtsService();
+    mockEnumService = createMockEnumService();
+    mockWorkerDispatch = createMockWorkerDispatch();
+    mockPlanVoicesRepo = createMockPlanVoicesRepo();
 
-      mockDb.getPlanTtsStatus.mockResolvedValue({
-        status: 'processing', total: 2, completed: 2, failed: 0, ready: false, updatedAt: new Date(),
-      });
+    service = await buildService({
+      usePlanVoicesGate: false,
+      mockDb,
+      mockTtsService,
+      mockEnumService,
+      mockWorkerDispatch,
+      mockPlanVoicesRepo,
+    });
+  });
 
-      const task: TtsBatchPregenWorkerTask = {
-        task: 'ttsBatchPregen',
-        planId: 'plan-1',
-        groups: [{ voiceId: 'aoede', locale: 'enUS', provider: 'gemini', jobIds: ['j1', 'j2'] }],
-      };
+  afterEach(() => {
+    jest.restoreAllMocks();
+    mockS3Send.mockReset();
+  });
 
-      await service.processTask(task);
+  it('writes both tts_status and plan_voices when no pairs exist', async () => {
+    mockEnumService.enumerate.mockReturnValue([]);
 
-      expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith('j1', 'completed', 'tts/ck1.wav');
-      expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith('j2', 'completed', 'tts/ck2.wav');
-      expect(mockDb.incrementTtsCompleted).toHaveBeenCalledTimes(2);
+    await service.startBatchPregen('plan-1', '{}', 'voice-uuid-1', 'enUS', 'gemini', '1.00');
+
+    // Legacy write
+    expect(mockDb.setTtsStatus).toHaveBeenCalledWith('plan-1', 'completed', 0, 0);
+    // New plan_voices write
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', voiceId: 'voice-uuid-1', locale: 'enUS', status: 'ready' }),
+    );
+  });
+
+  it('writes both tts_status and plan_voices when all pairs are S3-cached', async () => {
+    mockEnumService.enumerate.mockReturnValue([makePair({ cacheKey: 'cached1' })]);
+    mockS3Send.mockResolvedValue({}); // all cached
+
+    await service.startBatchPregen('plan-1', '{}', 'voice-uuid-1', 'enUS', 'gemini', '1.00');
+
+    // Legacy write
+    expect(mockDb.setTtsStatus).toHaveBeenCalledWith('plan-1', 'completed', 0, 0);
+    // New plan_voices write → 'ready' because all steps have S3 audio
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', status: 'ready' }),
+    );
+  });
+
+  it('writes both tts_status=processing and plan_voices=processing when jobs created', async () => {
+    mockEnumService.enumerate.mockReturnValue([makePair({ cacheKey: 'ck1' })]);
+    mockS3Send.mockRejectedValue(new Error('NotFound')); // not cached
+    mockDb.createTtsJobs.mockResolvedValue([{ id: 'j1', cacheKey: 'ck1' }] as any);
+
+    await service.startBatchPregen('plan-1', '{}', 'voice-uuid-1', 'enUS', 'gemini', '1.00');
+
+    expect(mockDb.setTtsStatus).toHaveBeenCalledWith('plan-1', 'processing', 1, 0);
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', status: 'processing' }),
+    );
+  });
+
+  it('calls incrementTtsCompleted (legacy counter) when flag=false', async () => {
+    const job = {
+      id: 'j1', text: 'hello', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 1, failed: 0, ready: false, updatedAt: new Date(),
     });
 
-    it('marks all jobs failed after max attempts when synthesis fails', async () => {
-      const jobs = [
-        { id: 'j1', text: 'step 1', cacheKey: 'ck1' },
-        { id: 'j2', text: 'step 2', cacheKey: 'ck2' },
-      ];
-      mockDb.getTtsJobsByIds.mockResolvedValue(jobs as any);
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
 
-      // synthesizeBatchGemini will call checkS3Exists first, then synthesizeGeminiRaw.
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-      mockTtsService.synthesizeGeminiRaw.mockRejectedValue(new Error('Gemini API error'));
+    await service.processTask(task);
 
-      mockDb.getPlanTtsStatus.mockResolvedValue({
-        status: 'processing', total: 2, completed: 0, failed: 2, ready: false, updatedAt: new Date(),
-      });
+    expect(mockDb.incrementTtsCompleted).toHaveBeenCalledWith('plan-1');
+  });
 
-      const task: TtsBatchPregenWorkerTask = {
-        task: 'ttsBatchPregen',
-        planId: 'plan-1',
-        groups: [{ voiceId: 'aoede', locale: 'enUS', provider: 'gemini', jobIds: ['j1', 'j2'] }],
-      };
-
-      await service.processTask(task);
-
-      // Should have retried 3 times.
-      expect(mockTtsService.synthesizeGeminiRaw).toHaveBeenCalledTimes(3);
-
-      // Both jobs failed.
-      expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith(
-        'j1', 'failed', undefined, 'Gemini API error',
-      );
-      expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith(
-        'j2', 'failed', undefined, 'Gemini API error',
-      );
+  it('writes plan_voices=ready after successful group processing', async () => {
+    const job = {
+      id: 'j1', text: 'hello', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 1, failed: 0, ready: false, updatedAt: new Date(),
     });
 
-    it('splits a 20-step group into multiple sub-batches and makes one Gemini call per sub-batch', async () => {
-      const jobs = Array.from({ length: 20 }, (_, i) => ({
-        id: `j${i}`,
-        text: `step ${i}`,
-        cacheKey: `ck${i}`,
-      }));
-      mockDb.getTtsJobsByIds.mockResolvedValue(jobs as any);
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
 
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
-      mockTtsService.synthesizeGeminiRaw.mockResolvedValue(Buffer.alloc(200));
-      mockAlignmentService.align.mockResolvedValue({
-        boundaries: jobs.map((_, i) => ({ startMs: i * 10, endMs: (i + 1) * 10 })),
-        durationMs: 200,
-      });
+    await service.processTask(task);
 
-      mockDb.getPlanTtsStatus.mockResolvedValue({
-        status: 'processing', total: 20, completed: 20, failed: 0, ready: false, updatedAt: new Date(),
-      });
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', voiceId: 'voice-uuid-1', locale: 'enUS', status: 'ready' }),
+    );
+  });
 
-      const task: TtsBatchPregenWorkerTask = {
-        task: 'ttsBatchPregen',
-        planId: 'plan-1',
-        groups: [{ voiceId: 'aoede', locale: 'enUS', provider: 'gemini', jobIds: jobs.map((j) => j.id) }],
-      };
-
-      await service.processTask(task);
-
-      // 20 jobs / 6 max per sub-batch → 4 sub-batches → 4 Gemini calls.
-      expect(mockTtsService.synthesizeGeminiRaw).toHaveBeenCalledTimes(4);
-      // All 20 jobs marked completed.
-      expect(mockDb.incrementTtsCompleted).toHaveBeenCalledTimes(20);
+  it('writes plan_voices=failed after failed group processing', async () => {
+    const job = {
+      id: 'j1', text: 'fail me', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockTtsService.synthesize.mockRejectedValue(new Error('TTS down'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 0, failed: 1, ready: false, updatedAt: new Date(),
     });
 
-    it('isolates sub-batch failures: bad sub-batch fails only its jobs', async () => {
-      const jobs = Array.from({ length: 12 }, (_, i) => ({
-        id: `j${i}`,
-        text: `step ${i}`,
-        cacheKey: `ck${i}`,
-      }));
-      mockDb.getTtsJobsByIds.mockResolvedValue(jobs as any);
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
 
-      mockS3Send.mockRejectedValue(new Error('NotFound'));
+    await service.processTask(task);
 
-      // First sub-batch (6 jobs) succeeds; second sub-batch (6 jobs) fails on every retry.
-      let call = 0;
-      mockTtsService.synthesizeGeminiRaw.mockImplementation(async () => {
-        call++;
-        // Sub-batch 1 = call 1 (success).
-        // Sub-batch 2 = calls 2,3,4 (fail × 3 retries).
-        if (call === 1) return Buffer.alloc(200);
-        throw new Error('429 quota exhausted');
-      });
-      mockAlignmentService.align.mockResolvedValue({
-        boundaries: Array.from({ length: 6 }, (_, i) => ({ startMs: i * 10, endMs: (i + 1) * 10 })),
-        durationMs: 60,
-      });
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', voiceId: 'voice-uuid-1', locale: 'enUS', status: 'failed' }),
+    );
+  });
 
-      mockDb.getPlanTtsStatus.mockResolvedValue({
-        status: 'processing', total: 12, completed: 6, failed: 6, ready: false, updatedAt: new Date(),
-      });
-
-      const task: TtsBatchPregenWorkerTask = {
-        task: 'ttsBatchPregen',
-        planId: 'plan-1',
-        groups: [{ voiceId: 'aoede', locale: 'enUS', provider: 'gemini', jobIds: jobs.map((j) => j.id) }],
-      };
-
-      await service.processTask(task);
-
-      // 1 success + 3 retries on failure = 4 Gemini calls total.
-      expect(mockTtsService.synthesizeGeminiRaw).toHaveBeenCalledTimes(4);
-      // First 6 jobs marked completed.
-      for (let i = 0; i < 6; i++) {
-        expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith(`j${i}`, 'completed', `tts/ck${i}.wav`);
-      }
-      // Last 6 jobs marked failed with the upstream error message.
-      for (let i = 6; i < 12; i++) {
-        expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith(
-          `j${i}`, 'failed', undefined, '429 quota exhausted',
-        );
-      }
+  it('calls finalizePlanTtsStatus (legacy finalization) when flag=false', async () => {
+    mockDb.getTtsJobsByIds.mockResolvedValue([]);
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 2, completed: 1, failed: 1, ready: false, updatedAt: new Date(),
     });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [],
+    };
+
+    await service.processTask(task);
+
+    expect(mockDb.finalizePlanTtsStatus).toHaveBeenCalledWith('plan-1');
   });
 });
 
-// ---------------------------------------------------------------------------
-// chunkJobsForGemini — pure function, exercised standalone
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Feature-flag tests: use_plan_voices_gate = true  (single-write / AC-007)
+// ===========================================================================
 
-describe('chunkJobsForGemini', () => {
-  it('returns one sub-batch when input fits both caps', () => {
-    const jobs = Array.from({ length: 4 }, (_, i) => ({ text: `step ${i}` }));
-    const out = chunkJobsForGemini(jobs);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toHaveLength(4);
+describe('TtsBatchPregenService — flag=true (single-write AC-007)', () => {
+  let mockDb: jest.Mocked<DatabaseService>;
+  let mockTtsService: ReturnType<typeof createMockTtsService>;
+  let mockEnumService: ReturnType<typeof createMockEnumService>;
+  let mockWorkerDispatch: ReturnType<typeof createMockWorkerDispatch>;
+  let mockPlanVoicesRepo: jest.Mocked<PlanVoicesRepository>;
+  let service: TtsBatchPregenService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+
+    mockDb = createMockDatabaseService();
+    mockTtsService = createMockTtsService();
+    mockEnumService = createMockEnumService();
+    mockWorkerDispatch = createMockWorkerDispatch();
+    mockPlanVoicesRepo = createMockPlanVoicesRepo();
+
+    service = await buildService({
+      usePlanVoicesGate: true,
+      mockDb,
+      mockTtsService,
+      mockEnumService,
+      mockWorkerDispatch,
+      mockPlanVoicesRepo,
+    });
   });
 
-  it('caps each sub-batch at maxSteps', () => {
-    const jobs = Array.from({ length: 14 }, (_, i) => ({ text: `s${i}` }));
-    const out = chunkJobsForGemini(jobs, 6, 10_000);
-    expect(out.map((b) => b.length)).toEqual([6, 6, 2]);
+  afterEach(() => {
+    jest.restoreAllMocks();
+    mockS3Send.mockReset();
   });
 
-  it('splits earlier when char cap would be exceeded', () => {
-    // 4 jobs of ~1500 chars each — at maxChars=3000, two should fit per batch.
-    const long = 'x'.repeat(1500);
-    const jobs = Array.from({ length: 4 }, () => ({ text: long }));
-    const out = chunkJobsForGemini(jobs, 100, 3_000);
-    expect(out.map((b) => b.length)).toEqual([2, 2]);
+  it('does NOT write tts_status when no pairs exist (flag=true)', async () => {
+    mockEnumService.enumerate.mockReturnValue([]);
+
+    await service.startBatchPregen('plan-1', '{}', 'voice-uuid-1', 'enUS', 'gemini', '1.00');
+
+    // Legacy write must NOT happen when gate is on.
+    expect(mockDb.setTtsStatus).not.toHaveBeenCalled();
+    // plan_voices MUST be written.
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', voiceId: 'voice-uuid-1', locale: 'enUS', status: 'ready' }),
+    );
   });
 
-  it('keeps an oversized single job in its own sub-batch rather than dropping it', () => {
-    const jobs = [
-      { text: 'short' },
-      { text: 'x'.repeat(10_000) },  // exceeds char cap on its own
-      { text: 'short' },
-    ];
-    const out = chunkJobsForGemini(jobs, 6, 3_000);
-    // ['short'], ['x...'], ['short']
-    expect(out.map((b) => b.length)).toEqual([1, 1, 1]);
+  it('does NOT write tts_status when all pairs are S3-cached (flag=true)', async () => {
+    mockEnumService.enumerate.mockReturnValue([makePair({ cacheKey: 'ck1' })]);
+    mockS3Send.mockResolvedValue({}); // all cached
+
+    await service.startBatchPregen('plan-1', '{}', 'voice-uuid-1', 'enUS', 'gemini', '1.00');
+
+    expect(mockDb.setTtsStatus).not.toHaveBeenCalled();
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ready' }),
+    );
   });
 
-  it('preserves order and identity of jobs', () => {
-    const jobs = [
-      { text: 'a', id: 1 },
-      { text: 'b', id: 2 },
-      { text: 'c', id: 3 },
-    ];
-    const out = chunkJobsForGemini(jobs, 2, 1_000);
-    expect(out).toEqual([
-      [{ text: 'a', id: 1 }, { text: 'b', id: 2 }],
-      [{ text: 'c', id: 3 }],
-    ]);
+  it('does NOT write tts_status=processing when jobs created (flag=true)', async () => {
+    mockEnumService.enumerate.mockReturnValue([makePair({ cacheKey: 'ck1' })]);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.createTtsJobs.mockResolvedValue([{ id: 'j1', cacheKey: 'ck1' }] as any);
+
+    await service.startBatchPregen('plan-1', '{}', 'voice-uuid-1', 'enUS', 'gemini', '1.00');
+
+    expect(mockDb.setTtsStatus).not.toHaveBeenCalled();
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'processing' }),
+    );
   });
 
-  it('returns empty array for empty input', () => {
-    expect(chunkJobsForGemini([])).toEqual([]);
+  it('does NOT call incrementTtsCompleted when flag=true', async () => {
+    const job = {
+      id: 'j1', text: 'hello', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 1, failed: 0, ready: false, updatedAt: new Date(),
+    });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
+
+    await service.processTask(task);
+
+    // incrementTtsCompleted is a legacy plans.tts_completed update — skip when flag=true.
+    expect(mockDb.incrementTtsCompleted).not.toHaveBeenCalled();
+  });
+
+  it('does NOT call finalizePlanTtsStatus when flag=true', async () => {
+    mockDb.getTtsJobsByIds.mockResolvedValue([]);
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 2, completed: 1, failed: 1, ready: false, updatedAt: new Date(),
+    });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [],
+    };
+
+    await service.processTask(task);
+
+    expect(mockDb.finalizePlanTtsStatus).not.toHaveBeenCalled();
+  });
+
+  it('still calls updateTtsJobStatus (job-level) even when flag=true', async () => {
+    const job = {
+      id: 'j1', text: 'hello', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 1, failed: 0, ready: false, updatedAt: new Date(),
+    });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
+
+    await service.processTask(task);
+
+    // tts_jobs row must always be updated regardless of flag.
+    expect(mockDb.updateTtsJobStatus).toHaveBeenCalledWith('j1', 'completed', 'tts/ck1.wav');
+  });
+
+  it('writes plan_voices=ready after successful synthesis (flag=true)', async () => {
+    const job = {
+      id: 'j1', text: 'hello', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 1, failed: 0, ready: false, updatedAt: new Date(),
+    });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
+
+    await service.processTask(task);
+
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', voiceId: 'voice-uuid-1', locale: 'enUS', status: 'ready' }),
+    );
+  });
+
+  it('writes plan_voices=ready when all jobs were pre-cached (flag=true)', async () => {
+    const job = {
+      id: 'j1', text: 'hello', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    // S3 cached → filterAndMarkCached returns []
+    mockS3Send.mockResolvedValue({});
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 1, failed: 0, ready: false, updatedAt: new Date(),
+    });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
+
+    await service.processTask(task);
+
+    // Even though all jobs were cached, plan_voices must still be updated.
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', voiceId: 'voice-uuid-1', locale: 'enUS', status: 'ready' }),
+    );
+    // incrementTtsCompleted NOT called (flag=true)
+    expect(mockDb.incrementTtsCompleted).not.toHaveBeenCalled();
+  });
+
+  it('writes plan_voices=failed after synthesis failure (flag=true)', async () => {
+    const job = {
+      id: 'j1', text: 'fail', cacheKey: 'ck1',
+      voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', speechRate: '1.0',
+    };
+    mockDb.getTtsJobsByIds.mockResolvedValue([job] as any);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockTtsService.synthesize.mockRejectedValue(new Error('TTS down'));
+    mockDb.getPlanTtsStatus.mockResolvedValue({
+      status: 'processing', total: 1, completed: 0, failed: 1, ready: false, updatedAt: new Date(),
+    });
+
+    const task: TtsBatchPregenWorkerTask = {
+      task: 'ttsBatchPregen',
+      planId: 'plan-1',
+      groups: [{ voiceId: 'voice-uuid-1', locale: 'enUS', provider: 'gemini', jobIds: ['j1'] }],
+    };
+
+    await service.processTask(task);
+
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'plan-1', status: 'failed' }),
+    );
+    expect(mockDb.finalizePlanTtsStatus).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// regenerateVoice tests
+// ===========================================================================
+
+describe('TtsBatchPregenService — regenerateVoice()', () => {
+  let mockDb: jest.Mocked<DatabaseService>;
+  let mockTtsService: ReturnType<typeof createMockTtsService>;
+  let mockEnumService: ReturnType<typeof createMockEnumService>;
+  let mockWorkerDispatch: ReturnType<typeof createMockWorkerDispatch>;
+  let mockPlanVoicesRepo: jest.Mocked<PlanVoicesRepository>;
+  let service: TtsBatchPregenService;
+
+  const planId = 'plan-regen-1';
+  const voiceId = 'voice-uuid-regen';
+  const locale = 'enUS';
+  const planJson = '{"steps":[{"type":"say","text":"hello"}]}';
+  const provider = 'gemini';
+  const speechRate = '1.00';
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+
+    mockDb = createMockDatabaseService();
+    mockTtsService = createMockTtsService();
+    mockEnumService = createMockEnumService();
+    mockWorkerDispatch = createMockWorkerDispatch();
+    mockPlanVoicesRepo = createMockPlanVoicesRepo();
+
+    service = await buildService({
+      usePlanVoicesGate: true,
+      mockDb,
+      mockTtsService,
+      mockEnumService,
+      mockWorkerDispatch,
+      mockPlanVoicesRepo,
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    mockS3Send.mockReset();
+  });
+
+  it('upserts plan_voices row with status=pending before queuing TTS', async () => {
+    mockEnumService.enumerate.mockReturnValue([]);
+
+    await service.regenerateVoice(planId, voiceId, locale, planJson, provider, speechRate);
+
+    // The FIRST upsertPlanVoice call must be 'pending' (pre-queue reset).
+    expect(mockPlanVoicesRepo.upsertPlanVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ planId, voiceId, locale, status: 'pending' }),
+    );
+    // The pending upsert must happen before startBatchPregen dispatches.
+    const firstCall = mockPlanVoicesRepo.upsertPlanVoice.mock.calls[0][0];
+    expect(firstCall.status).toBe('pending');
+  });
+
+  it('calls startBatchPregen after setting plan_voices=pending', async () => {
+    mockEnumService.enumerate.mockReturnValue([]);
+
+    await service.regenerateVoice(planId, voiceId, locale, planJson, provider, speechRate);
+
+    // enumerate() is called inside startBatchPregen — verifies it was invoked.
+    expect(mockEnumService.enumerate).toHaveBeenCalledWith(planJson, voiceId, locale, provider, speechRate);
+  });
+
+  it('queues TTS worker dispatch for non-empty pairs', async () => {
+    const pair = makePair({ cacheKey: 'regen-ck1', voiceId, locale, provider });
+    mockEnumService.enumerate.mockReturnValue([pair]);
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+    mockDb.createTtsJobs.mockResolvedValue([{ id: 'j-regen-1', cacheKey: 'regen-ck1' }] as any);
+
+    await service.regenerateVoice(planId, voiceId, locale, planJson, provider, speechRate);
+
+    expect(mockWorkerDispatch.dispatchBatchPregen).toHaveBeenCalledTimes(1);
+    const task: TtsBatchPregenWorkerTask = mockWorkerDispatch.dispatchBatchPregen.mock.calls[0][0];
+    expect(task.planId).toBe(planId);
+  });
+
+  it('does nothing when PlanVoicesRepository is not injected', async () => {
+    // Build service without planVoicesRepo (null → not provided).
+    const serviceNoRepo = await buildService({
+      usePlanVoicesGate: true,
+      mockDb,
+      mockTtsService,
+      mockEnumService,
+      mockWorkerDispatch,
+      mockPlanVoicesRepo: null,
+    });
+
+    // Should return silently without throwing.
+    await expect(
+      serviceNoRepo.regenerateVoice(planId, voiceId, locale, planJson, provider, speechRate),
+    ).resolves.toBeUndefined();
+
+    // No DB calls from regenerateVoice.
+    expect(mockPlanVoicesRepo.upsertPlanVoice).not.toHaveBeenCalled();
+    expect(mockWorkerDispatch.dispatchBatchPregen).not.toHaveBeenCalled();
+  });
+
+  it('uses default speechRate of 1.00 when omitted', async () => {
+    mockEnumService.enumerate.mockReturnValue([]);
+
+    // Call without speechRate (uses default '1.00')
+    await service.regenerateVoice(planId, voiceId, locale, planJson, provider);
+
+    expect(mockEnumService.enumerate).toHaveBeenCalledWith(
+      planJson, voiceId, locale, provider, '1.00',
+    );
+  });
+});
+
+// ===========================================================================
+// PlanVoicesRepository not injected — graceful degradation
+// ===========================================================================
+
+describe('TtsBatchPregenService — no PlanVoicesRepository (legacy mode)', () => {
+  let mockDb: jest.Mocked<DatabaseService>;
+  let mockEnumService: ReturnType<typeof createMockEnumService>;
+  let service: TtsBatchPregenService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    mockS3Send.mockRejectedValue(new Error('NotFound'));
+
+    mockDb = createMockDatabaseService();
+    mockEnumService = createMockEnumService();
+
+    service = await buildService({
+      usePlanVoicesGate: false,
+      mockDb,
+      mockTtsService: createMockTtsService(),
+      mockEnumService,
+      mockWorkerDispatch: createMockWorkerDispatch(),
+      mockPlanVoicesRepo: null,  // not injected
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    mockS3Send.mockReset();
+  });
+
+  it('still writes tts_status when plan_voices repo absent', async () => {
+    mockEnumService.enumerate.mockReturnValue([]);
+
+    await service.startBatchPregen('plan-1', '{}', 'aoede', 'enUS', 'gemini', '1.00');
+
+    expect(mockDb.setTtsStatus).toHaveBeenCalledWith('plan-1', 'completed', 0, 0);
   });
 });

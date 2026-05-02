@@ -701,6 +701,40 @@ void main() {
       expect(plan.name, 'Fallback Plan');
     });
 
+    test(
+        'getPlanById merges partial planJson when required fields are missing',
+        () async {
+      // Seeded library plans (see server/scripts/seed-discover.sql) ship a
+      // minimal planJson that omits id/name/createdAt/updatedAt — Plan.fromJson
+      // would throw on those, but steps must still survive the parse.
+      final partialPlanJson = jsonEncode({
+        'steps': [
+          {'id': 's1', 'text': 'Close your eyes.', 'runtimeType': 'say'},
+          {'id': 's2', 'text': 'Breathe slowly.', 'runtimeType': 'say'},
+        ],
+        'description': 'A guided body scan.',
+        'tags': 'sleep,body-scan',
+      });
+      final service = _makeService((_) => {
+            'planId': 'partial-id',
+            'name': '10-Minute Body Scan',
+            'planJson': partialPlanJson,
+            'isActive': false,
+            'ttsStatus': 'none',
+            'ttsTotal': 0,
+            'ttsCompleted': 0,
+            'createdAt': '2024-01-01T00:00:00.000Z',
+            'updatedAt': '2024-01-01T00:00:00.000Z',
+          });
+      final plan = await service.getPlanById('partial-id');
+      expect(plan.id, 'partial-id');
+      expect(plan.name, '10-Minute Body Scan');
+      expect(plan.steps, hasLength(2));
+      expect(plan.steps[0].id, 's1');
+      expect(plan.description, 'A guided body scan.');
+      expect(plan.tags, ['sleep', 'body-scan']);
+    });
+
     test('fetchLibraryPlans parses LibraryPlanSummary list', () async {
       final service = _makeService((_) => {
             'plans': [

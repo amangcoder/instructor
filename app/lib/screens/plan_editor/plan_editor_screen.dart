@@ -10,10 +10,12 @@ import 'package:uuid/uuid.dart';
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/providers/auth_providers.dart' show currentUserProvider;
 import 'package:instructor/providers/execution_providers.dart';
 import 'package:instructor/assets/static_voice_catalog.dart';
 import 'package:instructor/providers/plan_providers.dart';
 import 'package:instructor/providers/tts_providers.dart';
+import 'package:instructor/providers/tts_status_providers.dart';
 import 'package:instructor/router.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/services/plan_execution_engine.dart';
@@ -59,10 +61,29 @@ String _staticActiveDefaultVoice() {
 /// 3. [ReorderableListView.builder] — step cards with inline editing and
 ///    [StepInsertButton]s between every pair of adjacent cards
 class PlanEditorScreen extends ConsumerStatefulWidget {
-  const PlanEditorScreen({super.key, this.planId});
+  const PlanEditorScreen({
+    super.key,
+    this.planId,
+    this.initialPlan,
+    this.seriesSessionIndex,
+  }) : assert(
+          initialPlan == null || planId != null,
+          'initialPlan requires a non-null planId',
+        );
 
   /// When non-null the editor loads this Plan for editing.
   final String? planId;
+
+  /// Optional pre-fetched Plan used to seed the editor without hitting the
+  /// local cache. Required when opening a plan that lives only on the server
+  /// (e.g. an admin-curated series session that hasn't been cached locally).
+  final Plan? initialPlan;
+
+  /// Zero-based index of this plan within its parent series' sessions list.
+  /// Set when the editor is opened from the series detail screen so that, on
+  /// completion, NowPlayingScreen can call `recordProgress` and advance the
+  /// user's series subscription.
+  final int? seriesSessionIndex;
 
   @override
   ConsumerState<PlanEditorScreen> createState() => _PlanEditorScreenState();
@@ -73,6 +94,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isDownloading = false;
+  bool _activeSessionBannerDismissed = false;
   String? _loadError;
 
   // ── Download progress state ───────────────────────────────────────────────
@@ -84,7 +106,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   // ── Plan metadata ─────────────────────────────────────────────────────────
   String _name = '';
   String _description = '';
-  PlanCategory _category = PlanCategory.custom;
+  String _category = 'custom';
   List<String> _tags = [];
   // Initial value from static catalog; overwritten once the async catalog loads
   // or a plan is loaded. See _resolveDefaultVoice().
@@ -94,6 +116,18 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   // Original timestamps (preserved when editing an existing plan)
   DateTime? _originalCreatedAt;
   DateTime? _originalLastUsedAt;
+
+  // ── Ownership / series tracking ───────────────────────────────────────────
+  String? _ownerId;
+  String? _seriesId;
+
+  /// Snapshot of the loaded plan, used by [_startFromStep] to forward
+  /// server-supplied fields (`ttsStatus`, `ttsTotal`, `ttsCompleted`,
+  /// `isActive`, `seriesId`, `ownerId`, …) into the engine. Without this,
+  /// reconstructing the Plan from the editor's loose state fields would reset
+  /// these to defaults — breaking AI Voice playback for series sessions whose
+  /// admin has already synthesized voices.
+  Plan? _loadedPlan;
 
   // ── Unsaved-changes tracking ───────────────────────────────────────────────
   /// Fingerprint of the state as loaded (or initial empty state for new plans).
@@ -126,7 +160,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   String _currentFingerprint() => [
         _name,
         _description,
-        _category.name,
+        _category,
         _defaultVoice,
         ..._tags,
         ':',
@@ -158,7 +192,10 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.planId != null) {
+    if (widget.initialPlan != null) {
+      _hydrateFromPlan(widget.initialPlan!);
+      _initialFingerprint = _currentFingerprint();
+    } else if (widget.planId != null) {
       _loadPlan();
     } else {
       // For new plans, load the active provider's default voice asynchronously
@@ -166,6 +203,23 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       _initDefaultVoiceForNewPlan();
       _initialFingerprint = _currentFingerprint();
     }
+  }
+
+  void _hydrateFromPlan(Plan plan) {
+    _loadedPlan = plan;
+    _name = plan.name;
+    _description = plan.description ?? '';
+    _category = plan.category;
+    _tags = List<String>.from(plan.tags);
+    _defaultVoice = plan.defaultVoice.isNotEmpty
+        ? plan.defaultVoice
+        : _staticActiveDefaultVoice();
+    _ttsStatus = plan.ttsStatus;
+    _steps = List<PlanStep>.from(plan.steps);
+    _originalCreatedAt = plan.createdAt;
+    _originalLastUsedAt = plan.lastUsedAt;
+    _ownerId = plan.ownerId;
+    _seriesId = plan.seriesId;
   }
 
   Future<void> _initDefaultVoiceForNewPlan() async {
@@ -196,19 +250,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
       final repo = ref.read(planRepositoryProvider);
       final plan = await repo.getPlanById(widget.planId!);
       if (plan != null && mounted) {
-        setState(() {
-          _name = plan.name;
-          _description = plan.description ?? '';
-          _category = plan.category;
-          _tags = List<String>.from(plan.tags);
-          _defaultVoice = plan.defaultVoice.isNotEmpty
-              ? plan.defaultVoice
-              : _staticActiveDefaultVoice();
-          _ttsStatus = plan.ttsStatus;
-          _steps = List<PlanStep>.from(plan.steps);
-          _originalCreatedAt = plan.createdAt;
-          _originalLastUsedAt = plan.lastUsedAt;
-        });
+        setState(() => _hydrateFromPlan(plan));
         // Capture snapshot after all fields are set.
         _initialFingerprint = _currentFingerprint();
       } else if (mounted) {
@@ -403,10 +445,18 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         final engine = ref.read(planExecutionEngineProvider);
         await engine.startPreview(plan);
         if (mounted) {
-          context.go(AppRoutes.nowPlaying);
+          // The editor may have been opened via Navigator.push (from the plan
+          // library or series detail), putting it on the imperative navigator
+          // stack above GoRouter. context.go alone won't dismiss that imperative
+          // route, so we pop it first before letting GoRouter navigate.
+          final router = GoRouter.of(context);
+          final nav = Navigator.of(context, rootNavigator: true);
+          if (nav.canPop()) nav.pop();
+          router.go(AppRoutes.nowPlaying);
         }
       },
     );
+    _restoreSeriesSessionContext(plan);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -421,33 +471,88 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     if (_steps.isEmpty || stepIndex >= _steps.length) return;
 
     final now = DateTime.now();
-    final plan = Plan(
-      id: widget.planId ?? '',
-      name: _name.trim().isEmpty ? 'Plan' : _name.trim(),
-      description: _description.trim().isEmpty ? null : _description.trim(),
-      category: _category,
-      tags: List<String>.unmodifiable(_tags),
-      defaultVoice: _defaultVoice,
-      steps: List<PlanStep>.unmodifiable(_steps),
-      createdAt: _originalCreatedAt ?? now,
-      updatedAt: now,
-      lastUsedAt: _originalLastUsedAt,
-    );
+    final editedName = _name.trim().isEmpty ? 'Plan' : _name.trim();
+    final editedDescription =
+        _description.trim().isEmpty ? null : _description.trim();
+    final editedTags = List<String>.unmodifiable(_tags);
+    final editedSteps = List<PlanStep>.unmodifiable(_steps);
+
+    // Prefer copyWith on the loaded plan so server-supplied fields
+    // (`ttsStatus`, `ttsTotal`, `ttsCompleted`, `isActive`, `seriesId`,
+    // `ownerId`, `voices`, …) survive the round-trip into the engine. Falling
+    // back to a fresh Plan when no plan was loaded (e.g. unsaved new plan).
+    final plan = _loadedPlan?.copyWith(
+          name: editedName,
+          description: editedDescription,
+          category: _category,
+          tags: editedTags,
+          defaultVoice: _defaultVoice,
+          steps: editedSteps,
+          updatedAt: now,
+        ) ??
+        Plan(
+          id: widget.planId ?? '',
+          name: editedName,
+          description: editedDescription,
+          category: _category,
+          tags: editedTags,
+          defaultVoice: _defaultVoice,
+          steps: editedSteps,
+          createdAt: _originalCreatedAt ?? now,
+          updatedAt: now,
+          lastUsedAt: _originalLastUsedAt,
+        );
 
     await startPlanWithGuard(
       context,
       ref,
       newPlan: plan,
       onStart: () async {
+        // When the admin has synthesized voices for this plan (typically a
+        // series session), pre-select GenAI playback so step 0's say renders
+        // via AI Voice instead of the platform fallback. The
+        // NowPlayingScreen's auto-default fires on a post-frame callback,
+        // which is too late if step 0 is a SayStep.
+        //
+        // Matches the TtsToggle's `_kReadyStatuses` set so this aligns with
+        // the segment's "AI Voice available" state.
+        final aiReady =
+            plan.ttsStatus == 'completed' || plan.ttsStatus == 'partial';
+        debugPrint(
+          'PlanEditor._startFromStep: planId=${plan.id} '
+          'ttsStatus=${plan.ttsStatus} seriesId=${plan.seriesId} '
+          'aiReady=$aiReady',
+        );
+        if (aiReady) {
+          ref.read(ttsPlaybackModeProvider.notifier).state =
+              TtsPlaybackMode.genai;
+        }
         final engine = ref.read(planExecutionEngineProvider);
         // Convert top-level step index to flattened index.
         final flatIndex = flatStepIndexForOriginalIndex(plan.steps, stepIndex);
         await engine.startPlanFromStep(plan, flatIndex);
-        if (mounted) {
-          context.go(AppRoutes.nowPlaying);
+        if (context.mounted) {
+          final router = GoRouter.of(context);
+          final nav = Navigator.of(context, rootNavigator: true);
+          if (nav.canPop()) nav.pop();
+          router.go(AppRoutes.nowPlaying);
         }
       },
     );
+    _restoreSeriesSessionContext(plan);
+  }
+
+  /// `startPlanWithGuard` clears [activeSeriesSessionProvider] on every start
+  /// so unrelated plays don't carry stale series state. Re-set it here when
+  /// this editor was opened from a series detail screen (i.e.
+  /// [PlanEditorScreen.seriesSessionIndex] is non-null and the plan still
+  /// belongs to a series).
+  void _restoreSeriesSessionContext(Plan plan) {
+    final idx = widget.seriesSessionIndex;
+    final seriesId = plan.seriesId;
+    if (idx == null || seriesId == null) return;
+    ref.read(activeSeriesSessionProvider.notifier).state =
+        ActiveSeriesSession(seriesId: seriesId, sessionIndex: idx);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -728,6 +833,11 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    final currentUser = ref.watch(currentUserProvider);
+    final isReadOnly = widget.planId != null &&
+        (_seriesId != null ||
+            (_ownerId != null && _ownerId != currentUser?.id));
+
     // ── Running-session warning (REQ-014) ───────────────────────────────────
     final executionAsync = ref.watch(executionStateProvider);
     final isRunningThisPlan = executionAsync.maybeWhen(
@@ -740,7 +850,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     );
 
     return PopScope(
-      canPop: !_hasUnsavedChanges,
+      canPop: isReadOnly || !_hasUnsavedChanges,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         final confirmed = await showDialog<bool>(
@@ -771,79 +881,81 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
         title: AppBranding.gradientTitle(fontSize: 18),
         centerTitle: false,
         actions: [
-          // Preview at 4x speed — primary secondary action, always visible.
+          // Play — always visible when there are steps.
           if (_steps.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.play_circle_outline),
-              tooltip: 'Preview at 4x speed',
-              onPressed: _startPreview,
+              tooltip: isReadOnly ? 'Play' : 'Preview at 4x speed',
+              onPressed: isReadOnly
+                  ? () => _startFromStep(context, 0)
+                  : _startPreview,
             ),
-          // Inline download progress/completion indicator.
-          // Stays visible while active so the user sees feedback even though
-          // the "Download voices" entry point lives in the overflow menu.
-          if (_isDownloading)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  value: _downloadTotal > 0
-                      ? _downloadedCount / _downloadTotal
-                      : null,
+          if (!isReadOnly) ...[
+            // Inline download progress/completion indicator.
+            if (_isDownloading)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    value: _downloadTotal > 0
+                        ? _downloadedCount / _downloadTotal
+                        : null,
+                  ),
                 ),
+              )
+            else if (_downloadComplete)
+              IconButton(
+                icon: Icon(Icons.check_circle, color: colorScheme.primary),
+                tooltip: 'Voices downloaded',
+                onPressed: null,
               ),
-            )
-          else if (_downloadComplete)
-            IconButton(
-              icon: Icon(Icons.check_circle, color: colorScheme.primary),
-              tooltip: 'Voices downloaded',
-              onPressed: null,
-            ),
-          // Overflow: secondary actions (M3 guideline — keep primary row to ≤3).
-          _buildOverflowMenu(),
-          // Save — gradient CTA, always visible.
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: _isSaving
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : GradientButton(
-                    onPressed: _save,
-                    height: 36,
-                    borderRadius: 12,
-                    width: 80,
-                    child: Text(
-                      'Save',
-                      style: GoogleFonts.manrope(
-                        color: colorScheme.onPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
+            // Overflow: secondary actions (M3 guideline — keep primary row to ≤3).
+            _buildOverflowMenu(),
+            // Save — gradient CTA.
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _isSaving
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : GradientButton(
+                      onPressed: _save,
+                      height: 36,
+                      borderRadius: 12,
+                      width: 80,
+                      child: Text(
+                        'Save',
+                        style: GoogleFonts.manrope(
+                          color: colorScheme.onPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
-                  ),
-          ),
+            ),
+          ],
         ],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Running-session banner (REQ-014) ─────────────────────────────
-          if (isRunningThisPlan)
+          if (isRunningThisPlan && !_activeSessionBannerDismissed)
             MaterialBanner(
               content: const Text(
                 'This plan is currently running. Changes will not affect the active session.',
               ),
               actions: [
                 TextButton(
-                  onPressed: () {},
+                  onPressed: () => setState(() => _activeSessionBannerDismissed = true),
                   child: const Text('OK'),
                 ),
               ],
@@ -853,7 +965,7 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
             name: _name,
             duration: _totalDuration,
             stepCount: _steps.length,
-            onEditMetadata: _openMetadataSheet,
+            onEditMetadata: isReadOnly ? null : _openMetadataSheet,
             colorScheme: colorScheme,
             theme: theme,
           ),
@@ -862,8 +974,10 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           // ── Step list ────────────────────────────────────────────────────
           Expanded(
             child: _steps.isEmpty
-                ? _buildEmptyState(theme, colorScheme)
-                : _buildStepList(),
+                ? _buildEmptyState(theme, colorScheme, isReadOnly: isReadOnly)
+                : isReadOnly
+                    ? _buildReadOnlyStepList()
+                    : _buildStepList(),
           ),
         ],
       ),
@@ -871,17 +985,18 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
     );
   }
 
-  Widget _buildEmptyState(ThemeData theme, ColorScheme colorScheme) {
+  Widget _buildEmptyState(ThemeData theme, ColorScheme colorScheme, {bool isReadOnly = false}) {
     return Column(
       children: [
-        // Top insert button always visible even when empty
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: StepInsertButton(
-            onInsert: (type) => _addStep(type, afterIndex: -1),
-            afterStepIndex: -1,
+        // Top insert button — only shown in edit mode.
+        if (!isReadOnly)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: StepInsertButton(
+              onInsert: (type) => _addStep(type, afterIndex: -1),
+              afterStepIndex: -1,
+            ),
           ),
-        ),
         Expanded(
           child: Center(
             child: Column(
@@ -906,6 +1021,28 @@ class _PlanEditorScreenState extends ConsumerState<PlanEditorScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildReadOnlyStepList() {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+      itemCount: _steps.length,
+      itemBuilder: (context, index) {
+        final step = _steps[index];
+        final isExpanded = _expandedStepId == step.id;
+        return _EditorListItem(
+          key: ValueKey('item_${step.id}'),
+          step: step,
+          index: index,
+          isExpanded: isExpanded,
+          onToggle: () => _toggleExpand(step.id),
+          onUpdate: (_) {},
+          onLongPress: (_) {},
+          onInsertAfter: (_) {},
+          readOnly: true,
+        );
+      },
     );
   }
 
@@ -961,6 +1098,7 @@ class _EditorListItem extends StatelessWidget {
     required this.onUpdate,
     required this.onLongPress,
     required this.onInsertAfter,
+    this.readOnly = false,
   });
 
   final PlanStep step;
@@ -970,6 +1108,7 @@ class _EditorListItem extends StatelessWidget {
   final void Function(PlanStep) onUpdate;
   final void Function(Offset tapPosition) onLongPress;
   final void Function(StepType) onInsertAfter;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -978,10 +1117,11 @@ class _EditorListItem extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GestureDetector(
-          onLongPressStart: (details) => onLongPress(details.globalPosition),
+          onLongPressStart: readOnly ? null : (details) => onLongPress(details.globalPosition),
           child: _buildCard(),
         ),
-        StepInsertButton(onInsert: onInsertAfter, afterStepIndex: index),
+        if (!readOnly)
+          StepInsertButton(onInsert: onInsertAfter, afterStepIndex: index),
       ],
     );
   }
@@ -1029,7 +1169,7 @@ class _PlanHeader extends StatelessWidget {
   final String name;
   final Duration duration;
   final int stepCount;
-  final VoidCallback onEditMetadata;
+  final VoidCallback? onEditMetadata;
   final ColorScheme colorScheme;
   final ThemeData theme;
 

@@ -1,7 +1,8 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/models/plan_voice.dart';
+import 'package:instructor/models/tags_json.dart';
 
 part 'plan.freezed.dart';
 part 'plan.g.dart';
@@ -18,8 +19,10 @@ class Plan with _$Plan {
     required String id,
     required String name,
     String? description,
-    @Default(PlanCategory.custom) PlanCategory category,
-    @Default([]) List<String> tags,
+    @Default('custom') String category,
+    @Default([])
+    @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
+    List<String> tags,
     @Default('aoede') String defaultVoice,
     @Default([]) List<PlanStep> steps,
     required DateTime createdAt,
@@ -44,6 +47,40 @@ class Plan with _$Plan {
     /// Set when the user adds a plan from the Discover tab. Used to prevent
     /// duplicate additions across sessions.
     String? libraryId,
+
+    /// The series this plan belongs to, if any. NULL for standalone plans.
+    /// Used to render "{Series Name} · Day N" in the mini player and to
+    /// drive series subscription progress on completion.
+    String? seriesId,
+
+    /// Parent plan ID for hierarchical sub-plans. NULL for top-level plans.
+    /// Used to build the tree of plans under a single parent.
+    String? parentPlanId,
+
+    /// Position of this plan within its parent's children list.
+    /// Used for ordering sub-plans.
+    @Default(0) int position,
+
+    /// Child plans (sub-plans) under this plan.
+    /// Empty for leaf plans.
+    @Default([]) List<Plan> children,
+
+    /// List of voice synthesis results for this plan.
+    /// Each PlanVoice tracks the status of a specific (voice, locale) rendering.
+    /// User-visibility requires at least one PlanVoice with status='ready'.
+    @Default([]) List<PlanVoice> voices,
+
+    /// Visibility state of this plan.
+    /// Values: 'private' (only owner), 'pending_review' (awaiting admin approval),
+    /// 'public' (published and discoverable).
+    @Default('public') String visibility,
+
+    /// Whether this plan is published and discoverable by other users.
+    @Default(false) bool isPublished,
+
+    /// User ID of the plan's author. Present for user-authored plans.
+    /// NULL for admin-created or imported plans.
+    String? ownerId,
   }) = _Plan;
 
   factory Plan.fromJson(Map<String, dynamic> json) => _$PlanFromJson(json);

@@ -46,6 +46,7 @@ const DEFAULT_PLAN = {
   ttsCompleted: 0,
   voiceQuality: 'standard',
   sourceLibraryPlanId: null,
+  seriesId: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
   updatedAt: new Date('2026-01-15T00:00:00Z'),
 };
@@ -150,6 +151,7 @@ describe('SharingService', () => {
         ttsCompleted: 0,
         voiceQuality: 'standard',
         sourceLibraryPlanId: null,
+  seriesId: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -192,6 +194,7 @@ describe('SharingService', () => {
         ttsCompleted: 0,
         voiceQuality: 'standard',
         sourceLibraryPlanId: null,
+  seriesId: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });

@@ -23,7 +23,8 @@ mixin _$Plan {
   String get id => throw _privateConstructorUsedError;
   String get name => throw _privateConstructorUsedError;
   String? get description => throw _privateConstructorUsedError;
-  PlanCategory get category => throw _privateConstructorUsedError;
+  String get category => throw _privateConstructorUsedError;
+  @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
   List<String> get tags => throw _privateConstructorUsedError;
   String get defaultVoice => throw _privateConstructorUsedError;
   List<PlanStep> get steps => throw _privateConstructorUsedError;
@@ -51,6 +52,40 @@ mixin _$Plan {
   /// duplicate additions across sessions.
   String? get libraryId => throw _privateConstructorUsedError;
 
+  /// The series this plan belongs to, if any. NULL for standalone plans.
+  /// Used to render "{Series Name} · Day N" in the mini player and to
+  /// drive series subscription progress on completion.
+  String? get seriesId => throw _privateConstructorUsedError;
+
+  /// Parent plan ID for hierarchical sub-plans. NULL for top-level plans.
+  /// Used to build the tree of plans under a single parent.
+  String? get parentPlanId => throw _privateConstructorUsedError;
+
+  /// Position of this plan within its parent's children list.
+  /// Used for ordering sub-plans.
+  int get position => throw _privateConstructorUsedError;
+
+  /// Child plans (sub-plans) under this plan.
+  /// Empty for leaf plans.
+  List<Plan> get children => throw _privateConstructorUsedError;
+
+  /// List of voice synthesis results for this plan.
+  /// Each PlanVoice tracks the status of a specific (voice, locale) rendering.
+  /// User-visibility requires at least one PlanVoice with status='ready'.
+  List<PlanVoice> get voices => throw _privateConstructorUsedError;
+
+  /// Visibility state of this plan.
+  /// Values: 'private' (only owner), 'pending_review' (awaiting admin approval),
+  /// 'public' (published and discoverable).
+  String get visibility => throw _privateConstructorUsedError;
+
+  /// Whether this plan is published and discoverable by other users.
+  bool get isPublished => throw _privateConstructorUsedError;
+
+  /// User ID of the plan's author. Present for user-authored plans.
+  /// NULL for admin-created or imported plans.
+  String? get ownerId => throw _privateConstructorUsedError;
+
   /// Serializes this Plan to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
 
@@ -69,8 +104,8 @@ abstract class $PlanCopyWith<$Res> {
       {String id,
       String name,
       String? description,
-      PlanCategory category,
-      List<String> tags,
+      String category,
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson) List<String> tags,
       String defaultVoice,
       List<PlanStep> steps,
       DateTime createdAt,
@@ -80,7 +115,15 @@ abstract class $PlanCopyWith<$Res> {
       String ttsStatus,
       int ttsTotal,
       int ttsCompleted,
-      String? libraryId});
+      String? libraryId,
+      String? seriesId,
+      String? parentPlanId,
+      int position,
+      List<Plan> children,
+      List<PlanVoice> voices,
+      String visibility,
+      bool isPublished,
+      String? ownerId});
 }
 
 /// @nodoc
@@ -113,6 +156,14 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
     Object? ttsTotal = null,
     Object? ttsCompleted = null,
     Object? libraryId = freezed,
+    Object? seriesId = freezed,
+    Object? parentPlanId = freezed,
+    Object? position = null,
+    Object? children = null,
+    Object? voices = null,
+    Object? visibility = null,
+    Object? isPublished = null,
+    Object? ownerId = freezed,
   }) {
     return _then(_value.copyWith(
       id: null == id
@@ -130,7 +181,7 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
       category: null == category
           ? _value.category
           : category // ignore: cast_nullable_to_non_nullable
-              as PlanCategory,
+              as String,
       tags: null == tags
           ? _value.tags
           : tags // ignore: cast_nullable_to_non_nullable
@@ -175,6 +226,38 @@ class _$PlanCopyWithImpl<$Res, $Val extends Plan>
           ? _value.libraryId
           : libraryId // ignore: cast_nullable_to_non_nullable
               as String?,
+      seriesId: freezed == seriesId
+          ? _value.seriesId
+          : seriesId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      parentPlanId: freezed == parentPlanId
+          ? _value.parentPlanId
+          : parentPlanId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      position: null == position
+          ? _value.position
+          : position // ignore: cast_nullable_to_non_nullable
+              as int,
+      children: null == children
+          ? _value.children
+          : children // ignore: cast_nullable_to_non_nullable
+              as List<Plan>,
+      voices: null == voices
+          ? _value.voices
+          : voices // ignore: cast_nullable_to_non_nullable
+              as List<PlanVoice>,
+      visibility: null == visibility
+          ? _value.visibility
+          : visibility // ignore: cast_nullable_to_non_nullable
+              as String,
+      isPublished: null == isPublished
+          ? _value.isPublished
+          : isPublished // ignore: cast_nullable_to_non_nullable
+              as bool,
+      ownerId: freezed == ownerId
+          ? _value.ownerId
+          : ownerId // ignore: cast_nullable_to_non_nullable
+              as String?,
     ) as $Val);
   }
 }
@@ -190,8 +273,8 @@ abstract class _$$PlanImplCopyWith<$Res> implements $PlanCopyWith<$Res> {
       {String id,
       String name,
       String? description,
-      PlanCategory category,
-      List<String> tags,
+      String category,
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson) List<String> tags,
       String defaultVoice,
       List<PlanStep> steps,
       DateTime createdAt,
@@ -201,7 +284,15 @@ abstract class _$$PlanImplCopyWith<$Res> implements $PlanCopyWith<$Res> {
       String ttsStatus,
       int ttsTotal,
       int ttsCompleted,
-      String? libraryId});
+      String? libraryId,
+      String? seriesId,
+      String? parentPlanId,
+      int position,
+      List<Plan> children,
+      List<PlanVoice> voices,
+      String visibility,
+      bool isPublished,
+      String? ownerId});
 }
 
 /// @nodoc
@@ -231,6 +322,14 @@ class __$$PlanImplCopyWithImpl<$Res>
     Object? ttsTotal = null,
     Object? ttsCompleted = null,
     Object? libraryId = freezed,
+    Object? seriesId = freezed,
+    Object? parentPlanId = freezed,
+    Object? position = null,
+    Object? children = null,
+    Object? voices = null,
+    Object? visibility = null,
+    Object? isPublished = null,
+    Object? ownerId = freezed,
   }) {
     return _then(_$PlanImpl(
       id: null == id
@@ -248,7 +347,7 @@ class __$$PlanImplCopyWithImpl<$Res>
       category: null == category
           ? _value.category
           : category // ignore: cast_nullable_to_non_nullable
-              as PlanCategory,
+              as String,
       tags: null == tags
           ? _value._tags
           : tags // ignore: cast_nullable_to_non_nullable
@@ -293,6 +392,38 @@ class __$$PlanImplCopyWithImpl<$Res>
           ? _value.libraryId
           : libraryId // ignore: cast_nullable_to_non_nullable
               as String?,
+      seriesId: freezed == seriesId
+          ? _value.seriesId
+          : seriesId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      parentPlanId: freezed == parentPlanId
+          ? _value.parentPlanId
+          : parentPlanId // ignore: cast_nullable_to_non_nullable
+              as String?,
+      position: null == position
+          ? _value.position
+          : position // ignore: cast_nullable_to_non_nullable
+              as int,
+      children: null == children
+          ? _value._children
+          : children // ignore: cast_nullable_to_non_nullable
+              as List<Plan>,
+      voices: null == voices
+          ? _value._voices
+          : voices // ignore: cast_nullable_to_non_nullable
+              as List<PlanVoice>,
+      visibility: null == visibility
+          ? _value.visibility
+          : visibility // ignore: cast_nullable_to_non_nullable
+              as String,
+      isPublished: null == isPublished
+          ? _value.isPublished
+          : isPublished // ignore: cast_nullable_to_non_nullable
+              as bool,
+      ownerId: freezed == ownerId
+          ? _value.ownerId
+          : ownerId // ignore: cast_nullable_to_non_nullable
+              as String?,
     ));
   }
 }
@@ -304,7 +435,8 @@ class _$PlanImpl extends _Plan {
       {required this.id,
       required this.name,
       this.description,
-      this.category = PlanCategory.custom,
+      this.category = 'custom',
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
       final List<String> tags = const [],
       this.defaultVoice = 'aoede',
       final List<PlanStep> steps = const [],
@@ -315,10 +447,20 @@ class _$PlanImpl extends _Plan {
       this.ttsStatus = 'none',
       this.ttsTotal = 0,
       this.ttsCompleted = 0,
-      this.libraryId})
+      this.libraryId,
+      this.seriesId,
+      this.parentPlanId,
+      this.position = 0,
+      final List<Plan> children = const [],
+      final List<PlanVoice> voices = const [],
+      this.visibility = 'public',
+      this.isPublished = false,
+      this.ownerId})
       : assert(defaultVoice != '', 'defaultVoice must not be empty'),
         _tags = tags,
         _steps = steps,
+        _children = children,
+        _voices = voices,
         super._();
 
   factory _$PlanImpl.fromJson(Map<String, dynamic> json) =>
@@ -332,10 +474,10 @@ class _$PlanImpl extends _Plan {
   final String? description;
   @override
   @JsonKey()
-  final PlanCategory category;
+  final String category;
   final List<String> _tags;
   @override
-  @JsonKey()
+  @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
   List<String> get tags {
     if (_tags is EqualUnmodifiableListView) return _tags;
     // ignore: implicit_dynamic_type
@@ -390,9 +532,73 @@ class _$PlanImpl extends _Plan {
   @override
   final String? libraryId;
 
+  /// The series this plan belongs to, if any. NULL for standalone plans.
+  /// Used to render "{Series Name} · Day N" in the mini player and to
+  /// drive series subscription progress on completion.
+  @override
+  final String? seriesId;
+
+  /// Parent plan ID for hierarchical sub-plans. NULL for top-level plans.
+  /// Used to build the tree of plans under a single parent.
+  @override
+  final String? parentPlanId;
+
+  /// Position of this plan within its parent's children list.
+  /// Used for ordering sub-plans.
+  @override
+  @JsonKey()
+  final int position;
+
+  /// Child plans (sub-plans) under this plan.
+  /// Empty for leaf plans.
+  final List<Plan> _children;
+
+  /// Child plans (sub-plans) under this plan.
+  /// Empty for leaf plans.
+  @override
+  @JsonKey()
+  List<Plan> get children {
+    if (_children is EqualUnmodifiableListView) return _children;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_children);
+  }
+
+  /// List of voice synthesis results for this plan.
+  /// Each PlanVoice tracks the status of a specific (voice, locale) rendering.
+  /// User-visibility requires at least one PlanVoice with status='ready'.
+  final List<PlanVoice> _voices;
+
+  /// List of voice synthesis results for this plan.
+  /// Each PlanVoice tracks the status of a specific (voice, locale) rendering.
+  /// User-visibility requires at least one PlanVoice with status='ready'.
+  @override
+  @JsonKey()
+  List<PlanVoice> get voices {
+    if (_voices is EqualUnmodifiableListView) return _voices;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_voices);
+  }
+
+  /// Visibility state of this plan.
+  /// Values: 'private' (only owner), 'pending_review' (awaiting admin approval),
+  /// 'public' (published and discoverable).
+  @override
+  @JsonKey()
+  final String visibility;
+
+  /// Whether this plan is published and discoverable by other users.
+  @override
+  @JsonKey()
+  final bool isPublished;
+
+  /// User ID of the plan's author. Present for user-authored plans.
+  /// NULL for admin-created or imported plans.
+  @override
+  final String? ownerId;
+
   @override
   String toString() {
-    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isActive: $isActive, ttsStatus: $ttsStatus, ttsTotal: $ttsTotal, ttsCompleted: $ttsCompleted, libraryId: $libraryId)';
+    return 'Plan(id: $id, name: $name, description: $description, category: $category, tags: $tags, defaultVoice: $defaultVoice, steps: $steps, createdAt: $createdAt, updatedAt: $updatedAt, lastUsedAt: $lastUsedAt, isActive: $isActive, ttsStatus: $ttsStatus, ttsTotal: $ttsTotal, ttsCompleted: $ttsCompleted, libraryId: $libraryId, seriesId: $seriesId, parentPlanId: $parentPlanId, position: $position, children: $children, voices: $voices, visibility: $visibility, isPublished: $isPublished, ownerId: $ownerId)';
   }
 
   @override
@@ -425,28 +631,50 @@ class _$PlanImpl extends _Plan {
             (identical(other.ttsCompleted, ttsCompleted) ||
                 other.ttsCompleted == ttsCompleted) &&
             (identical(other.libraryId, libraryId) ||
-                other.libraryId == libraryId));
+                other.libraryId == libraryId) &&
+            (identical(other.seriesId, seriesId) ||
+                other.seriesId == seriesId) &&
+            (identical(other.parentPlanId, parentPlanId) ||
+                other.parentPlanId == parentPlanId) &&
+            (identical(other.position, position) ||
+                other.position == position) &&
+            const DeepCollectionEquality().equals(other._children, _children) &&
+            const DeepCollectionEquality().equals(other._voices, _voices) &&
+            (identical(other.visibility, visibility) ||
+                other.visibility == visibility) &&
+            (identical(other.isPublished, isPublished) ||
+                other.isPublished == isPublished) &&
+            (identical(other.ownerId, ownerId) || other.ownerId == ownerId));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode => Object.hash(
-      runtimeType,
-      id,
-      name,
-      description,
-      category,
-      const DeepCollectionEquality().hash(_tags),
-      defaultVoice,
-      const DeepCollectionEquality().hash(_steps),
-      createdAt,
-      updatedAt,
-      lastUsedAt,
-      isActive,
-      ttsStatus,
-      ttsTotal,
-      ttsCompleted,
-      libraryId);
+  int get hashCode => Object.hashAll([
+        runtimeType,
+        id,
+        name,
+        description,
+        category,
+        const DeepCollectionEquality().hash(_tags),
+        defaultVoice,
+        const DeepCollectionEquality().hash(_steps),
+        createdAt,
+        updatedAt,
+        lastUsedAt,
+        isActive,
+        ttsStatus,
+        ttsTotal,
+        ttsCompleted,
+        libraryId,
+        seriesId,
+        parentPlanId,
+        position,
+        const DeepCollectionEquality().hash(_children),
+        const DeepCollectionEquality().hash(_voices),
+        visibility,
+        isPublished,
+        ownerId
+      ]);
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.
@@ -469,7 +697,8 @@ abstract class _Plan extends Plan {
       {required final String id,
       required final String name,
       final String? description,
-      final PlanCategory category,
+      final String category,
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
       final List<String> tags,
       final String defaultVoice,
       final List<PlanStep> steps,
@@ -480,7 +709,15 @@ abstract class _Plan extends Plan {
       final String ttsStatus,
       final int ttsTotal,
       final int ttsCompleted,
-      final String? libraryId}) = _$PlanImpl;
+      final String? libraryId,
+      final String? seriesId,
+      final String? parentPlanId,
+      final int position,
+      final List<Plan> children,
+      final List<PlanVoice> voices,
+      final String visibility,
+      final bool isPublished,
+      final String? ownerId}) = _$PlanImpl;
   const _Plan._() : super._();
 
   factory _Plan.fromJson(Map<String, dynamic> json) = _$PlanImpl.fromJson;
@@ -492,8 +729,9 @@ abstract class _Plan extends Plan {
   @override
   String? get description;
   @override
-  PlanCategory get category;
+  String get category;
   @override
+  @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
   List<String> get tags;
   @override
   String get defaultVoice;
@@ -530,6 +768,48 @@ abstract class _Plan extends Plan {
   /// duplicate additions across sessions.
   @override
   String? get libraryId;
+
+  /// The series this plan belongs to, if any. NULL for standalone plans.
+  /// Used to render "{Series Name} · Day N" in the mini player and to
+  /// drive series subscription progress on completion.
+  @override
+  String? get seriesId;
+
+  /// Parent plan ID for hierarchical sub-plans. NULL for top-level plans.
+  /// Used to build the tree of plans under a single parent.
+  @override
+  String? get parentPlanId;
+
+  /// Position of this plan within its parent's children list.
+  /// Used for ordering sub-plans.
+  @override
+  int get position;
+
+  /// Child plans (sub-plans) under this plan.
+  /// Empty for leaf plans.
+  @override
+  List<Plan> get children;
+
+  /// List of voice synthesis results for this plan.
+  /// Each PlanVoice tracks the status of a specific (voice, locale) rendering.
+  /// User-visibility requires at least one PlanVoice with status='ready'.
+  @override
+  List<PlanVoice> get voices;
+
+  /// Visibility state of this plan.
+  /// Values: 'private' (only owner), 'pending_review' (awaiting admin approval),
+  /// 'public' (published and discoverable).
+  @override
+  String get visibility;
+
+  /// Whether this plan is published and discoverable by other users.
+  @override
+  bool get isPublished;
+
+  /// User ID of the plan's author. Present for user-authored plans.
+  /// NULL for admin-created or imported plans.
+  @override
+  String? get ownerId;
 
   /// Create a copy of Plan
   /// with the given fields replaced by the non-null parameter values.

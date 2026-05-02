@@ -6,6 +6,24 @@ import 'package:instructor/services/plan_execution_engine.dart';
 
 part 'execution_providers.g.dart';
 
+/// Identifies the series session currently being played, when the user
+/// launched the plan from a series detail screen. NowPlayingScreen reads
+/// this on completion to call `recordProgress` and advance the user's
+/// subscription. Cleared by `startPlanWithGuard` on every start, then
+/// re-set by series-originating flows.
+class ActiveSeriesSession {
+  const ActiveSeriesSession({
+    required this.seriesId,
+    required this.sessionIndex,
+  });
+
+  final String seriesId;
+  final int sessionIndex;
+}
+
+final activeSeriesSessionProvider =
+    StateProvider<ActiveSeriesSession?>((_) => null);
+
 /// Reactive stream of [ExecutionState] from [PlanExecutionEngine.stateStream].
 ///
 /// Consumed by [NowPlayingScreen] to display the current step, countdown timer,

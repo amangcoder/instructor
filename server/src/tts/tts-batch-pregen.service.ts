@@ -1,90 +1,53 @@
 /**
  * TtsBatchPregenService
  *
- * Batch TTS pre-generation for all providers:
- *
- * - Gemini: groups all SayStep texts sharing the same voice + locale into a
- *   single API call, splits the returned audio per-text via forced alignment
- *   (kokoro-server /align), and caches each slice. Falls back to silence-based
- *   splitting if alignment is unavailable. 10 steps → 1 API call per group.
- *
- * - Kokoro / ElevenLabs: synthesises each step individually (no concatenation
- *   API), but still uses the same job queue, status tracking, and S3 caching
- *   as the Gemini path.
+ * Per-step TTS pre-generation for all providers. Each say-step is synthesised
+ * individually via the standard `TtsService.synthesize` path, sharing the same
+ * job queue, status tracking, and S3 caching as the on-demand flow.
  *
  * Cache keys, S3 paths, and downstream playback are identical to the standard flow.
+ *
+ * ## Dual-write behaviour (feature flag: use_plan_voices_gate)
+ *
+ * When `use_plan_voices_gate = false` (AC-006 — transition / dual-write mode):
+ *   • Both `plans.tts_status` (via TtsRepository) AND `plan_voices.status` are updated.
+ *   • Existing callers and mobile clients that still read `plans.tts_status` remain
+ *     functional during the rollout window.
+ *
+ * When `use_plan_voices_gate = true` (AC-007 — new-gate mode):
+ *   • ONLY `plan_voices.status` is updated.
+ *   • `plans.tts_status`, `tts_completed`, and `finalizePlanTtsStatus` calls are skipped.
+ *   • TTS job rows (`tts_jobs`) are still written for S3 caching and recovery.
+ *
+ * PlanVoicesRepository is injected as `@Optional()`. If the provider is not
+ * registered (e.g. in legacy test modules), plan_voices writes are silently skipped
+ * and the service degrades to legacy-only behaviour.
  */
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { DatabaseService } from '../database/database.service';
 import { TtsRepository } from '../database/repositories/tts.repository';
+import { PlanVoicesRepository } from '../database/repositories/plan-voices.repository';
+import type { PlanVoiceStatus } from '../database/repositories/plan-voices.repository';
+import { VoiceRepository } from '../database/repositories/voice.repository';
 import { TtsService } from './tts.service';
 import { TtsEnumerationService } from './tts-enumeration.service';
 import { WorkerDispatchService } from '../worker-dispatch/worker-dispatch.service';
 import { GEMINI_VOICE_MAP } from './providers/provider-registry.service';
-import { buildWav } from './wav-utils';
-import { splitPcmAtBoundaries, splitPcmOnSilence } from './pcm-splitter';
-import { TtsAlignmentService } from './tts-alignment.service';
 import type { TtsBatchPregenWorkerTask } from '../worker-dispatch/worker-task.interface';
 import type { AppConfig } from '../config/app-config.interface';
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1_000;
 const STALE_TIMEOUT_MS = 15 * 60 * 1_000;
-// Sample rate of Gemini TTS PCM output. Matches kokoro-server's WAV output.
-const GEMINI_PCM_SAMPLE_RATE = 24_000;
 
-// Caps for a single Gemini :generateContent call. Chosen to stay well under
-// (a) ~30 s per-call audio output cap and (b) ~5000 char input cap. A group
-// larger than this is split into sub-batches, each retried independently so
-// one bad sub-batch does not poison the rest of the plan.
-const MAX_STEPS_PER_BATCH = 6;
-const MAX_CHARS_PER_BATCH = 3_500;
-
-/** Chunk jobs into sub-batches respecting both step-count and char caps. */
-export function chunkJobsForGemini<T extends { text: string }>(
-  jobs: T[],
-  maxSteps = MAX_STEPS_PER_BATCH,
-  maxChars = MAX_CHARS_PER_BATCH,
-): T[][] {
-  const batches: T[][] = [];
-  let current: T[] = [];
-  let currentChars = 0;
-
-  for (const job of jobs) {
-    const len = job.text.length;
-    const wouldOverflow =
-      current.length >= maxSteps || (current.length > 0 && currentChars + len > maxChars);
-    if (wouldOverflow) {
-      batches.push(current);
-      current = [];
-      currentChars = 0;
-    }
-    current.push(job);
-    currentChars += len;
-  }
-  if (current.length > 0) batches.push(current);
-  return batches;
-}
-
-// ISO-639-1 → ISO-639-3 for the languages this app currently supports.
-// The aligner uses ISO-639-3; everything else falls back to 'eng'.
-const ISO_639_1_TO_3: Record<string, string> = {
-  en: 'eng', es: 'spa', fr: 'fra', de: 'deu', ja: 'jpn',
-  pt: 'por', it: 'ita', ar: 'ara', zh: 'cmn', ko: 'kor',
-  ru: 'rus', hi: 'hin',
-};
-
-function localeToIso639_3(locale: string): string {
-  const lang = locale.toLowerCase().slice(0, 2);
-  return ISO_639_1_TO_3[lang] ?? 'eng';
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface Group {
   voiceId: string;
   locale: string;
   provider: string;
-  jobIds: string[];  // ordered — matches concatenation order
+  jobIds: string[];  // ordered — matches enumeration order
 }
 
 @Injectable()
@@ -93,17 +56,25 @@ export class TtsBatchPregenService {
   private readonly s3: S3Client | null;
   private readonly bucket: string | null;
   private readonly ttsRepo: TtsRepository | DatabaseService;
+  private readonly planVoicesRepo: PlanVoicesRepository | null;
+  private readonly voiceRepo: VoiceRepository | null;
+  private readonly usePlanVoicesGate: boolean;
 
   constructor(
     private readonly db: DatabaseService,
     private readonly ttsService: TtsService,
     private readonly enumService: TtsEnumerationService,
     private readonly workerDispatch: WorkerDispatchService,
-    private readonly alignmentService: TtsAlignmentService,
     @Optional() @Inject('APP_CONFIG') config?: AppConfig,
     @Optional() @Inject(TtsRepository) ttsRepository?: TtsRepository,
+    @Optional() @Inject(PlanVoicesRepository) planVoicesRepo?: PlanVoicesRepository,
+    @Optional() @Inject(VoiceRepository) voiceRepo?: VoiceRepository,
   ) {
     this.ttsRepo = ttsRepository ?? db;
+    this.planVoicesRepo = planVoicesRepo ?? null;
+    this.voiceRepo = voiceRepo ?? null;
+    this.usePlanVoicesGate = config?.usePlanVoicesGate
+      ?? (process.env.USE_PLAN_VOICES_GATE === 'true');
     this.bucket = (config?.awsS3Bucket || process.env.AWS_S3_BUCKET) ?? null;
     this.s3 = this.bucket
       ? new S3Client({ region: config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1' })
@@ -115,6 +86,15 @@ export class TtsBatchPregenService {
   /**
    * Start batch TTS pre-generation for a plan.
    *
+   * @param planId     UUID of the plan.
+   * @param planJson   Serialised plan JSON used by TtsEnumerationService to extract steps.
+   * @param voiceId    Voice identifier. When the plan_voices gate is active this must be
+   *                   the UUID of the voice row in the `voices` table so that plan_voices
+   *                   upserts resolve the correct FK. Legacy callers may pass a slug —
+   *                   in that case plan_voices writes are still attempted but the FK
+   *                   constraint will fail unless the slug happens to match a UUID.
+   * @param locale     BCP-47 locale string (e.g. 'enUS').
+   * @param provider   TTS provider identifier (e.g. 'gemini', 'kokoro').
    * @param speechRate Speech rate as a pre-formatted string (e.g. '1.00').
    *                   Conversion from NUMERIC happens at the repository boundary.
    */
@@ -134,7 +114,12 @@ export class TtsBatchPregenService {
 
     if (pairs.length === 0) {
       this.logger.warn(`startBatchPregen — no TTS pairs for planId=${planId}, marking complete`);
-      await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
+      // Dual-write: update plans.tts_status only when gate flag is OFF.
+      if (!this.usePlanVoicesGate) {
+        await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
+      }
+      // Always write plan_voices when repository is available.
+      await this.writePlanVoiceStatus(planId, voiceId, locale, 'ready');
       return;
     }
 
@@ -148,7 +133,12 @@ export class TtsBatchPregenService {
 
     if (uncachedPairs.length === 0) {
       this.logger.log(`startBatchPregen — all ${pairs.length} files cached for planId=${planId}`);
-      await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
+      // Dual-write: update plans.tts_status only when gate flag is OFF.
+      if (!this.usePlanVoicesGate) {
+        await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
+      }
+      // Always write plan_voices when repository is available.
+      await this.writePlanVoiceStatus(planId, voiceId, locale, 'ready');
       return;
     }
 
@@ -171,7 +161,12 @@ export class TtsBatchPregenService {
       })),
     );
 
-    await this.ttsRepo.setTtsStatus(planId, 'processing', jobRecords.length, 0);
+    // Dual-write: update plans.tts_status only when gate flag is OFF.
+    if (!this.usePlanVoicesGate) {
+      await this.ttsRepo.setTtsStatus(planId, 'processing', jobRecords.length, 0);
+    }
+    // Always write plan_voices when repository is available.
+    await this.writePlanVoiceStatus(planId, voiceId, locale, 'processing');
 
     // Resolve pair cache keys → job IDs using the DB-returned map.
     const cacheKeyToId = new Map(jobRecords.map((r) => [r.cacheKey, r.id]));
@@ -193,16 +188,71 @@ export class TtsBatchPregenService {
       await this.processGroup(task.planId, group);
     }
 
-    const status = await this.ttsRepo.getPlanTtsStatus(task.planId);
-    if (status.completed + status.failed >= status.total) {
-      await this.ttsRepo.finalizePlanTtsStatus(task.planId);
-      this.logger.log(`processTask — planId=${task.planId} finalized (${status.completed}/${status.total})`);
+    // Finalize plans.tts_status only in legacy / dual-write mode.
+    if (!this.usePlanVoicesGate) {
+      const status = await this.ttsRepo.getPlanTtsStatus(task.planId);
+      if (status.completed + status.failed >= status.total) {
+        await this.ttsRepo.finalizePlanTtsStatus(task.planId);
+        this.logger.log(`processTask — planId=${task.planId} finalized (${status.completed}/${status.total})`);
+      }
     }
   }
 
   async getStatus(planId: string) {
     await this.recoverIfStale(planId);
     return this.ttsRepo.getPlanTtsStatus(planId);
+  }
+
+  /**
+   * Create (or reset) a plan_voices row to `pending` and queue a new TTS batch job.
+   *
+   * Designed for the admin "Regenerate" action on a failed plan_voice. The
+   * caller is responsible for passing the UUID voice identifier so that the
+   * plan_voices FK resolves correctly.
+   *
+   * @param planId     UUID of the plan to regenerate audio for.
+   * @param voiceId    UUID of the voice (from the `voices` table).
+   * @param locale     BCP-47 locale (must match the existing plan_voices row locale).
+   * @param planJson   Serialised plan JSON for TTS step enumeration.
+   * @param provider   TTS provider identifier (e.g. 'gemini', 'kokoro').
+   * @param speechRate Speech rate string (e.g. '1.00').
+   */
+  async regenerateVoice(
+    planId: string,
+    voiceId: string,
+    locale: string,
+    planJson: string,
+    provider: string,
+    speechRate: string = '1.00',
+  ): Promise<void> {
+    if (!this.planVoicesRepo) {
+      this.logger.warn(`regenerateVoice — PlanVoicesRepository not available, skipping planId=${planId}`);
+      return;
+    }
+
+    this.logger.log(`regenerateVoice — planId=${planId}, voiceId=${voiceId}`);
+
+    const resolvedVoiceId = await this.resolveVoiceUuid(voiceId);
+    if (!resolvedVoiceId) {
+      this.logger.warn(
+        `regenerateVoice — could not resolve voiceId='${voiceId}' to a UUID; skipping planId=${planId}`,
+      );
+      return;
+    }
+
+    // Reset / create the plan_voices row to 'pending' so the UI reflects the
+    // enqueued state immediately while the TTS worker picks up the batch.
+    await this.planVoicesRepo.upsertPlanVoice({
+      planId,
+      voiceId: resolvedVoiceId,
+      locale,
+      status: 'pending',
+    });
+
+    // Queue the full TTS batch for this plan+voice combination.
+    // startBatchPregen will re-enumerate steps, skip already-cached S3 keys,
+    // create tts_jobs rows, and dispatch the worker task.
+    await this.startBatchPregen(planId, planJson, voiceId, locale, provider, speechRate);
   }
 
   // ── Group processing ───────────────────────────────────────────────────────
@@ -220,163 +270,7 @@ export class TtsBatchPregenService {
       `processGroup — voice=${group.voiceId}, locale=${group.locale}, provider=${group.provider}, steps=${jobs.length}`,
     );
 
-    if (group.provider === 'gemini') {
-      await this.processGroupGemini(planId, group, jobs);
-    } else {
-      await this.processGroupIndividual(planId, jobs);
-    }
-  }
-
-  private async processGroupGemini(
-    planId: string,
-    group: Group,
-    jobs: Array<{ id: string; text: string; cacheKey: string }>,
-  ): Promise<void> {
-    const subBatches = chunkJobsForGemini(jobs);
-    if (subBatches.length > 1) {
-      this.logger.log(
-        `processGroupGemini — voice=${group.voiceId} split into ${subBatches.length} sub-batches ` +
-          `(sizes=${subBatches.map((b) => b.length).join(',')})`,
-      );
-    }
-
-    for (let i = 0; i < subBatches.length; i++) {
-      await this.processSubBatchGemini(planId, group, subBatches[i], i + 1, subBatches.length);
-    }
-  }
-
-  /**
-   * Synthesise a single sub-batch with up to MAX_ATTEMPTS retries.
-   *
-   * Failure of one sub-batch does not abort the rest of the group: only the
-   * jobs in this sub-batch are marked failed, and processing of the next
-   * sub-batch continues. This keeps blast radius small when a long plan hits
-   * a transient quota window.
-   */
-  private async processSubBatchGemini(
-    planId: string,
-    group: Group,
-    jobs: Array<{ id: string; text: string; cacheKey: string }>,
-    subBatchIdx: number,
-    subBatchTotal: number,
-  ): Promise<void> {
-    let lastErr: Error | undefined;
-    const tag = subBatchTotal > 1 ? ` [sub-batch ${subBatchIdx}/${subBatchTotal}]` : '';
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        await this.synthesizeBatchGemini(
-          jobs.map((j) => ({ text: j.text, cacheKey: j.cacheKey })),
-          group.voiceId,
-          group.locale,
-        );
-        for (const job of jobs) {
-          await this.ttsRepo.updateTtsJobStatus(job.id, 'completed', `tts/${job.cacheKey}.wav`);
-          await this.ttsRepo.incrementTtsCompleted(planId);
-          this.logger.log(`processGroupGemini${tag} — job ${job.id} done (${job.cacheKey.slice(0, 12)}…)`);
-        }
-        return;
-      } catch (err) {
-        lastErr = err instanceof Error ? err : new Error(String(err));
-        if (attempt < MAX_ATTEMPTS) {
-          this.logger.warn(`processGroup${tag} attempt ${attempt}/${MAX_ATTEMPTS} failed: ${lastErr.message}, retrying…`);
-          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
-        }
-      }
-    }
-
-    this.logger.error(
-      `processGroup${tag} — voice=${group.voiceId} failed after ${MAX_ATTEMPTS} attempts: ${lastErr?.message}`,
-    );
-    for (const job of jobs) {
-      await this.ttsRepo.updateTtsJobStatus(job.id, 'failed', undefined, lastErr?.message);
-    }
-  }
-
-  /**
-   * Core Gemini batch synthesis pipeline.
-   *
-   * Takes an array of say-step pairs, skips already-cached entries, concatenates
-   * the remaining texts into a single Gemini TTS call, then splits the returned
-   * audio per-text using forced alignment (kokoro-server /align). Falls back to
-   * silence-based splitting if alignment is unavailable or returns malformed
-   * output, so the pipeline degrades gracefully when Modal is cold or unhealthy.
-   */
-  async synthesizeBatchGemini(
-    pairs: Array<{ text: string; cacheKey: string }>,
-    voiceId: string,
-    locale: string,
-  ): Promise<void> {
-    const checks = await Promise.all(
-      pairs.map(async (p) => ({ pair: p, cached: await this.checkS3Exists(`tts/${p.cacheKey}.wav`) })),
-    );
-    const uncached = checks.filter((c) => !c.cached).map((c) => c.pair);
-
-    if (uncached.length === 0) {
-      this.logger.log(`synthesizeBatchGemini — all ${pairs.length} pairs already cached`);
-      return;
-    }
-
-    this.logger.log(`synthesizeBatchGemini — synthesizing ${uncached.length}/${pairs.length} uncached pairs`);
-
-    const combined = uncached.map((p) => p.text).join('<break time="2500ms"/>');
-    const combinedText = `<speak>${combined}</speak>`;
-
-    const promptJson = this.ttsService.geminiTtsRequestBody(combinedText, voiceId, locale);
-    await this.ttsService.writeRawToS3(
-      `tts/${uncached[0].cacheKey}_batch${uncached.length}_prompt.json`,
-      Buffer.from(JSON.stringify(promptJson, null, 2)),
-      'application/json',
-    );
-
-    // Pass the real locale so buildPrompt wraps the SSML body in
-    // <lang xml:lang="…">…</lang>. That keeps the locale hint inside the SSML
-    // grammar, so the model honours both the accent and the <break> tags
-    // between sub-batch chunks.
-    const pcm = await this.ttsService.synthesizeGeminiRaw(combinedText, voiceId, locale);
-
-    const combinedKey = `${uncached[0].cacheKey}_batch${uncached.length}`;
-    await this.ttsService.writeToCacheByKey(combinedKey, buildWav(pcm));
-    this.logger.log(`synthesizeBatchGemini — saved combined audio (${combinedKey.slice(0, 16)}…)`);
-
-    const segments = await this.splitBatchAudio(pcm, uncached.map((p) => p.text), locale);
-
-    for (let i = 0; i < uncached.length; i++) {
-      await this.ttsService.writeToCacheByKey(uncached[i].cacheKey, buildWav(segments[i]));
-      this.logger.log(`synthesizeBatchGemini — cached ${uncached[i].cacheKey.slice(0, 12)}…`);
-    }
-  }
-
-  /**
-   * Split the concatenated Gemini PCM into one buffer per source text.
-   *
-   * Tries forced alignment first (text-aware, robust to mid-sentence pauses);
-   * falls back to silence-based splitting on any alignment failure.
-   */
-  private async splitBatchAudio(
-    pcm: Buffer,
-    texts: string[],
-    locale: string,
-  ): Promise<Buffer[]> {
-    if (texts.length <= 1) return [pcm];
-
-    const language = localeToIso639_3(locale);
-    const aligned = await this.alignmentService.align({
-      pcm,
-      sampleRate: GEMINI_PCM_SAMPLE_RATE,
-      texts,
-      language,
-    });
-
-    if (aligned) {
-      this.logger.log(
-        `splitBatchAudio — aligned ${texts.length} segments (duration=${aligned.durationMs}ms)`,
-      );
-      return splitPcmAtBoundaries(pcm, aligned.boundaries, GEMINI_PCM_SAMPLE_RATE);
-    }
-
-    this.logger.warn('splitBatchAudio — alignment unavailable, falling back to silence splitter');
-    return splitPcmOnSilence(pcm, texts.length, 1_500);
+    await this.processGroupIndividual(planId, jobs);
   }
 
   private async processGroupIndividual(
@@ -384,7 +278,16 @@ export class TtsBatchPregenService {
     allJobs: Array<{ id: string; text: string; voiceId: string; locale: string; provider: string; speechRate: string; cacheKey: string }>,
   ): Promise<void> {
     const jobs = await this.filterAndMarkCached(planId, allJobs);
-    if (jobs.length === 0) return;
+
+    // All jobs for this voice+locale were already in S3 — mark voice ready.
+    if (jobs.length === 0) {
+      if (allJobs.length > 0) {
+        await this.writePlanVoiceStatus(planId, allJobs[0].voiceId, allJobs[0].locale, 'ready');
+      }
+      return;
+    }
+
+    let anyFailed = false;
 
     for (const job of jobs) {
       let lastErr: Error | undefined;
@@ -395,7 +298,10 @@ export class TtsBatchPregenService {
             job.text, job.voiceId, job.locale, job.provider, job.speechRate,
           );
           await this.ttsRepo.updateTtsJobStatus(job.id, 'completed', `tts/${job.cacheKey}.wav`);
-          await this.ttsRepo.incrementTtsCompleted(planId);
+          // Increment plans.tts_completed counter only in legacy / dual-write mode.
+          if (!this.usePlanVoicesGate) {
+            await this.ttsRepo.incrementTtsCompleted(planId);
+          }
           this.logger.log(`processGroup — job ${job.id} cached (${job.cacheKey.slice(0, 12)}…)`);
           lastErr = undefined;
           break;
@@ -413,8 +319,13 @@ export class TtsBatchPregenService {
       if (lastErr) {
         this.logger.error(`processGroup — job ${job.id} failed after ${MAX_ATTEMPTS} attempts: ${lastErr.message}`);
         await this.ttsRepo.updateTtsJobStatus(job.id, 'failed', undefined, lastErr.message);
+        anyFailed = true;
       }
     }
+
+    // Update plan_voices with final synthesis result for this voice+locale group.
+    const finalStatus: PlanVoiceStatus = anyFailed ? 'failed' : 'ready';
+    await this.writePlanVoiceStatus(planId, allJobs[0].voiceId, allJobs[0].locale, finalStatus);
   }
 
   // ── Grouping ───────────────────────────────────────────────────────────────
@@ -475,12 +386,61 @@ export class TtsBatchPregenService {
         .filter((c) => c.cached)
         .map(async ({ job }) => {
           await this.ttsRepo.updateTtsJobStatus(job.id, 'completed', `tts/${job.cacheKey}.wav`);
-          await this.ttsRepo.incrementTtsCompleted(planId);
+          // Increment plans.tts_completed counter only in legacy / dual-write mode.
+          if (!this.usePlanVoicesGate) {
+            await this.ttsRepo.incrementTtsCompleted(planId);
+          }
           this.logger.log(`filterAndMarkCached — job ${job.id} already cached, skipping`);
         }),
     );
 
     return checks.filter((c) => !c.cached).map((c) => c.job);
+  }
+
+  // ── Plan-voices write helper ────────────────────────────────────────────────
+
+  /**
+   * Upserts a plan_voices row for (planId, voiceId, locale) with the given status.
+   *
+   * No-op when PlanVoicesRepository is not injected (legacy test/module context).
+   *
+   * Accepts either a voice UUID or a voice slug for `voiceId`. Slugs are
+   * resolved via VoiceRepository.findBySlug so that callers from legacy code
+   * paths (e.g. plans.activatePlan, which receives client-supplied slugs)
+   * don't trigger the plan_voices.voice_id UUID FK violation.
+   */
+  private async writePlanVoiceStatus(
+    planId: string,
+    voiceId: string,
+    locale: string,
+    status: PlanVoiceStatus,
+  ): Promise<void> {
+    if (!this.planVoicesRepo) return;
+    const resolvedVoiceId = await this.resolveVoiceUuid(voiceId);
+    if (!resolvedVoiceId) {
+      this.logger.warn(
+        `writePlanVoiceStatus — could not resolve voiceId='${voiceId}' to a UUID; skipping plan_voices upsert for planId=${planId}`,
+      );
+      return;
+    }
+    await this.planVoicesRepo.upsertPlanVoice({
+      planId,
+      voiceId: resolvedVoiceId,
+      locale,
+      status,
+    });
+  }
+
+  /**
+   * Resolve a voice identifier to its UUID. Returns the input unchanged if it
+   * already looks like a UUID; otherwise looks up the slug via VoiceRepository.
+   * Returns null when the slug is not registered.
+   */
+  private async resolveVoiceUuid(voiceId: string): Promise<string | null> {
+    if (UUID_RE.test(voiceId)) return voiceId;
+    if (!this.voiceRepo) return null;
+    const voice = await this.voiceRepo.findBySlug(voiceId);
+    return voice?.id ?? null;
   }
 
   // ── S3 helpers ─────────────────────────────────────────────────────────────

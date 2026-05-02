@@ -12,10 +12,6 @@
 
 // ── Valid enum values ────────────────────────────────────────────────────────
 
-const VALID_CATEGORIES = [
-  'yoga', 'meditation', 'workout', 'cooking', 'routine', 'focus', 'custom',
-] as const;
-
 const VALID_VOICES = [
   'af_heart', 'af_bella', 'af_nicole', 'am_adam', 'am_michael', 'am_eric', 'platform',
 ] as const;
@@ -153,18 +149,9 @@ function parseHeader(
   if (!name) errors.push('Missing Name in header');
   if (!description) errors.push('Missing Description in header');
 
-  // Auto-fix category
-  let category = rawCategory;
-  if (!VALID_CATEGORIES.includes(category as any)) {
-    const closest = findClosest(category, VALID_CATEGORIES as unknown as string[]);
-    if (closest) {
-      repaired.push(`Category "${rawCategory}" -> "${closest}"`);
-      category = closest;
-    } else {
-      category = 'custom';
-      repaired.push(`Category "${rawCategory}" -> "custom" (fallback)`);
-    }
-  }
+  // Category is a free-form slug — accept whatever the LLM produces, falling
+  // back to 'custom' only if the field is empty.
+  const category = rawCategory || 'custom';
 
   // Auto-fix voice
   let voice = rawVoice;

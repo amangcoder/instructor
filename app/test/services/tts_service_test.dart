@@ -60,15 +60,19 @@ class _FakeTTSService implements TTSService {
   final List<String> clearCacheForPlanCalls = [];
   final List<({String textHash, String voiceId})> isCachedCalls = [];
   final List<String> renderWithPlatformTTSCalls = [];
+  final List<({String text, String planId, String voiceId, TtsPlaybackMode mode})>
+      renderTTSForPlanCalls = [];
 
   // Controllable state
   bool _isCachedResult = false;
   Exception? _renderError;
   final Map<String, String> _cacheMap = {};
+  bool _hasReadyVoice = true;
 
   // Fake setup helpers
   void setIsCachedResult({required bool value}) => _isCachedResult = value;
   void setRenderError(Exception error) => _renderError = error;
+  void setHasReadyVoice({required bool value}) => _hasReadyVoice = value;
   void setCacheEntry({
     required String text,
     required String voiceId,
@@ -89,6 +93,27 @@ class _FakeTTSService implements TTSService {
     // Platform mode: return null on cache miss (no API call).
     if (mode == TtsPlaybackMode.platform) return null;
     // GenAI mode: return a synthetic file path.
+    return '/fake/tts/$hash.wav';
+  }
+
+  @override
+  Future<String?> renderTTSForPlan(
+    String text,
+    String planId,
+    String voiceId,
+    TtsPlaybackMode mode,
+  ) async {
+    renderTTSForPlanCalls.add((
+      text: text,
+      planId: planId,
+      voiceId: voiceId,
+      mode: mode,
+    ));
+    if (_renderError != null) throw _renderError!;
+    // Simulate gate: no ready voice → return null (platform TTS invoked).
+    if (!_hasReadyVoice) return null;
+    // Ready voice → simulate genai render.
+    final hash = ttsCacheKey(provider: 'backend', voiceId: voiceId, text: text);
     return '/fake/tts/$hash.wav';
   }
 
@@ -117,6 +142,26 @@ class _FakeTTSService implements TTSService {
   Future<void> stopSpeaking() async {}
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Fake PlanVoiceChecker
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Fake [PlanVoiceChecker] whose result is controlled per-test.
+class _FakePlanVoiceChecker implements PlanVoiceChecker {
+  _FakePlanVoiceChecker({required bool hasReady}) : _hasReady = hasReady;
+
+  bool _hasReady;
+  final List<String> checkedPlanIds = [];
+
+  void setHasReady({required bool value}) => _hasReady = value;
+
+  @override
+  Future<bool> hasReadyVoice(String planId) async {
+    checkedPlanIds.add(planId);
+    return _hasReady;
+  }
+}
+
 /// A fake [PlatformTtsEngine] that writes a small binary placeholder file
 /// to simulate flutter_tts file synthesis.
 class _FakePlatformTtsEngine implements PlatformTtsEngine {
@@ -129,6 +174,7 @@ class _FakePlatformTtsEngine implements PlatformTtsEngine {
   final bool shouldSucceed;
 
   final List<String> synthesizeCalls = [];
+  final List<({String text, double speed})> speakCalls = [];
   int stopCount = 0;
 
   @override
@@ -144,7 +190,9 @@ class _FakePlatformTtsEngine implements PlatformTtsEngine {
   }
 
   @override
-  Future<void> speak(String text, {double speed = 1.0}) async {}
+  Future<void> speak(String text, {double speed = 1.0}) async {
+    speakCalls.add((text: text, speed: speed));
+  }
 
   @override
   Future<void> stop() async {

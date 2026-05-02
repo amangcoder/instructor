@@ -207,9 +207,9 @@ export class TtsController {
 
   /**
    * POST /api/tts/batch-pregen
-   * Starts batch TTS pre-generation for a plan: groups all SayStep texts that
-   * share the same Gemini voice + locale into a single API call, then slices the
-   * audio into per-step cache files.  Reduces Gemini API calls from N → 1 per group.
+   * Starts TTS pre-generation for a plan. Each SayStep is synthesised
+   * individually via the configured provider; jobs are grouped by voice +
+   * locale + provider for scheduling and dispatched to the worker.
    *
    * Requires JWT authentication.
    */

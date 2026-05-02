@@ -9,19 +9,8 @@ enum StepType {
   stopAudio,
 }
 
-/// Enumeration of Plan categories used for filtering in the library.
-enum PlanCategory {
-  yoga,
-  meditation,
-  workout,
-  cooking,
-  routine,
-  focus,
-  custom,
-}
-
 /// Available TTS voice identifiers (Kokoro voices + platform fallback).
-enum PlanVoice {
+enum TtsVoiceId {
   af_heart,   // warm, clear — female US (default)
   af_bella,   // soft, calming — female US
   af_nicole,  // light — female US

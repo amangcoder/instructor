@@ -12,16 +12,13 @@ _$LibraryPlanSummaryImpl _$$LibraryPlanSummaryImplFromJson(
       id: json['id'] as String,
       name: json['name'] as String,
       description: json['description'] as String?,
-      category: $enumDecodeNullable(_$PlanCategoryEnumMap, json['category']) ??
-          PlanCategory.custom,
+      category: json['category'] as String? ?? 'custom',
       defaultVoice: json['defaultVoice'] as String? ?? 'aoede',
       locale: json['locale'] as String?,
       totalDurationSeconds:
           (json['totalDurationSeconds'] as num?)?.toInt() ?? 0,
       stepCount: (json['stepCount'] as num?)?.toInt() ?? 0,
-      tags:
-          (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
-              const [],
+      tags: json['tags'] == null ? const [] : tagsFromJson(json['tags']),
     );
 
 Map<String, dynamic> _$$LibraryPlanSummaryImplToJson(
@@ -30,20 +27,10 @@ Map<String, dynamic> _$$LibraryPlanSummaryImplToJson(
       'id': instance.id,
       'name': instance.name,
       'description': instance.description,
-      'category': _$PlanCategoryEnumMap[instance.category]!,
+      'category': instance.category,
       'defaultVoice': instance.defaultVoice,
       'locale': instance.locale,
       'totalDurationSeconds': instance.totalDurationSeconds,
       'stepCount': instance.stepCount,
-      'tags': instance.tags,
+      'tags': tagsToJson(instance.tags),
     };
-
-const _$PlanCategoryEnumMap = {
-  PlanCategory.yoga: 'yoga',
-  PlanCategory.meditation: 'meditation',
-  PlanCategory.workout: 'workout',
-  PlanCategory.cooking: 'cooking',
-  PlanCategory.routine: 'routine',
-  PlanCategory.focus: 'focus',
-  PlanCategory.custom: 'custom',
-};

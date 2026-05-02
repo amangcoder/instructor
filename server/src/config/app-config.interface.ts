@@ -34,4 +34,7 @@ export interface AppConfig {
   nodeEnv: string;
   isLocal: boolean;
   lambdaFunctionName: string;
+
+  // Feature Flags
+  usePlanVoicesGate: boolean;
 }

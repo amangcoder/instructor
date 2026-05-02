@@ -15,4 +15,7 @@ export {
   createMockLibraryRepository,
   createMockSyncRepository,
   createMockAdminRepository,
+  createMockCategoryRepository,
+  createMockVoiceRepository,
+  createMockPlanVoicesRepository,
 } from './database.service.mock';

@@ -8,7 +8,8 @@
  * without needing to import DatabaseModule themselves.
  *
  * Domain repositories (AuthRepository, UserRepository, PlanRepository,
- * TtsRepository, LibraryRepository, SyncRepository, AdminRepository)
+ * TtsRepository, LibraryRepository, SyncRepository, AdminRepository,
+ * CategoryRepository, VoiceRepository, PlanVoicesRepository)
  * wrap DatabaseService to provide focused, single-responsibility
  * interfaces for each domain. They delegate to DatabaseService so all existing
  * callers continue to work during the incremental migration.
@@ -23,8 +24,12 @@ import {
   TtsRepository,
   AdminAnalyticsRepository,
   LibraryRepository,
+  SeriesRepository,
   SyncRepository,
   AdminRepository,
+  CategoryRepository,
+  VoiceRepository,
+  PlanVoicesRepository,
 } from './repositories';
 
 @Global()
@@ -37,8 +42,12 @@ import {
     TtsRepository,
     AdminAnalyticsRepository,
     LibraryRepository,
+    SeriesRepository,
     SyncRepository,
     AdminRepository,
+    CategoryRepository,
+    VoiceRepository,
+    PlanVoicesRepository,
   ],
   exports: [
     DatabaseService,
@@ -48,8 +57,12 @@ import {
     TtsRepository,
     AdminAnalyticsRepository,
     LibraryRepository,
+    SeriesRepository,
     SyncRepository,
     AdminRepository,
+    CategoryRepository,
+    VoiceRepository,
+    PlanVoicesRepository,
   ],
 })
 export class DatabaseModule {}

@@ -23,7 +23,7 @@ mixin _$LibraryPlanSummary {
   String get id => throw _privateConstructorUsedError;
   String get name => throw _privateConstructorUsedError;
   String? get description => throw _privateConstructorUsedError;
-  PlanCategory get category => throw _privateConstructorUsedError;
+  String get category => throw _privateConstructorUsedError;
   String get defaultVoice => throw _privateConstructorUsedError;
   String? get locale => throw _privateConstructorUsedError;
 
@@ -32,6 +32,7 @@ mixin _$LibraryPlanSummary {
 
   /// Number of steps in the plan.
   int get stepCount => throw _privateConstructorUsedError;
+  @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
   List<String> get tags => throw _privateConstructorUsedError;
 
   /// Serializes this LibraryPlanSummary to a JSON map.
@@ -54,12 +55,12 @@ abstract class $LibraryPlanSummaryCopyWith<$Res> {
       {String id,
       String name,
       String? description,
-      PlanCategory category,
+      String category,
       String defaultVoice,
       String? locale,
       int totalDurationSeconds,
       int stepCount,
-      List<String> tags});
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson) List<String> tags});
 }
 
 /// @nodoc
@@ -103,7 +104,7 @@ class _$LibraryPlanSummaryCopyWithImpl<$Res, $Val extends LibraryPlanSummary>
       category: null == category
           ? _value.category
           : category // ignore: cast_nullable_to_non_nullable
-              as PlanCategory,
+              as String,
       defaultVoice: null == defaultVoice
           ? _value.defaultVoice
           : defaultVoice // ignore: cast_nullable_to_non_nullable
@@ -140,12 +141,12 @@ abstract class _$$LibraryPlanSummaryImplCopyWith<$Res>
       {String id,
       String name,
       String? description,
-      PlanCategory category,
+      String category,
       String defaultVoice,
       String? locale,
       int totalDurationSeconds,
       int stepCount,
-      List<String> tags});
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson) List<String> tags});
 }
 
 /// @nodoc
@@ -187,7 +188,7 @@ class __$$LibraryPlanSummaryImplCopyWithImpl<$Res>
       category: null == category
           ? _value.category
           : category // ignore: cast_nullable_to_non_nullable
-              as PlanCategory,
+              as String,
       defaultVoice: null == defaultVoice
           ? _value.defaultVoice
           : defaultVoice // ignore: cast_nullable_to_non_nullable
@@ -219,11 +220,12 @@ class _$LibraryPlanSummaryImpl extends _LibraryPlanSummary {
       {required this.id,
       required this.name,
       this.description,
-      this.category = PlanCategory.custom,
+      this.category = 'custom',
       this.defaultVoice = 'aoede',
       this.locale,
       this.totalDurationSeconds = 0,
       this.stepCount = 0,
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
       final List<String> tags = const []})
       : _tags = tags,
         super._();
@@ -239,7 +241,7 @@ class _$LibraryPlanSummaryImpl extends _LibraryPlanSummary {
   final String? description;
   @override
   @JsonKey()
-  final PlanCategory category;
+  final String category;
   @override
   @JsonKey()
   final String defaultVoice;
@@ -257,7 +259,7 @@ class _$LibraryPlanSummaryImpl extends _LibraryPlanSummary {
   final int stepCount;
   final List<String> _tags;
   @override
-  @JsonKey()
+  @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
   List<String> get tags {
     if (_tags is EqualUnmodifiableListView) return _tags;
     // ignore: implicit_dynamic_type
@@ -326,11 +328,12 @@ abstract class _LibraryPlanSummary extends LibraryPlanSummary {
       {required final String id,
       required final String name,
       final String? description,
-      final PlanCategory category,
+      final String category,
       final String defaultVoice,
       final String? locale,
       final int totalDurationSeconds,
       final int stepCount,
+      @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
       final List<String> tags}) = _$LibraryPlanSummaryImpl;
   const _LibraryPlanSummary._() : super._();
 
@@ -344,7 +347,7 @@ abstract class _LibraryPlanSummary extends LibraryPlanSummary {
   @override
   String? get description;
   @override
-  PlanCategory get category;
+  String get category;
   @override
   String get defaultVoice;
   @override
@@ -358,6 +361,7 @@ abstract class _LibraryPlanSummary extends LibraryPlanSummary {
   @override
   int get stepCount;
   @override
+  @JsonKey(fromJson: tagsFromJson, toJson: tagsToJson)
   List<String> get tags;
 
   /// Create a copy of LibraryPlanSummary

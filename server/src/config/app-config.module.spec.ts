@@ -100,4 +100,48 @@ describe('AppConfigModule', () => {
       expect(config.defaultTtsProvider).toBe(provider);
     }
   });
+
+  it('should parse usePlanVoicesGate with default value false', async () => {
+    delete process.env.USE_PLAN_VOICES_GATE;
+
+    const module = await Test.createTestingModule({
+      imports: [AppConfigModule],
+    }).compile();
+
+    const config = module.get<AppConfig>('APP_CONFIG');
+    expect(config.usePlanVoicesGate).toBe(false);
+  });
+
+  it('should parse usePlanVoicesGate=true from environment', async () => {
+    process.env.USE_PLAN_VOICES_GATE = 'true';
+
+    const module = await Test.createTestingModule({
+      imports: [AppConfigModule],
+    }).compile();
+
+    const config = module.get<AppConfig>('APP_CONFIG');
+    expect(config.usePlanVoicesGate).toBe(true);
+  });
+
+  it('should treat USE_PLAN_VOICES_GATE=1 as true', async () => {
+    process.env.USE_PLAN_VOICES_GATE = '1';
+
+    const module = await Test.createTestingModule({
+      imports: [AppConfigModule],
+    }).compile();
+
+    const config = module.get<AppConfig>('APP_CONFIG');
+    expect(config.usePlanVoicesGate).toBe(true);
+  });
+
+  it('should treat USE_PLAN_VOICES_GATE=false as false', async () => {
+    process.env.USE_PLAN_VOICES_GATE = 'false';
+
+    const module = await Test.createTestingModule({
+      imports: [AppConfigModule],
+    }).compile();
+
+    const config = module.get<AppConfig>('APP_CONFIG');
+    expect(config.usePlanVoicesGate).toBe(false);
+  });
 });

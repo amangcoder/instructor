@@ -14,6 +14,7 @@ const MOCK_PLAN: PlanRecord = {
   ttsCompleted: 0,
   voiceQuality: 'standard',
   sourceLibraryPlanId: null,
+  seriesId: null,
   shareToken: null,
   shareTokenCreatedAt: null,
   createdAt: new Date(),

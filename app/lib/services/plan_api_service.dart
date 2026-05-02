@@ -17,9 +17,10 @@ import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'package:instructor/exceptions/app_exception.dart';
 import 'package:instructor/models/audio_file_url.dart';
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/library_plan_summary.dart';
 import 'package:instructor/models/plan.dart';
+import 'package:instructor/models/plan_step.dart';
+import 'package:instructor/models/tags_json.dart';
 import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/models/tts_status_info.dart';
 import 'package:instructor/services/api_client.dart';
@@ -426,76 +427,11 @@ class PlanApiServiceImpl implements PlanApiService {
 
   // ── Private parsers ───────────────────────────────────────────────────────
 
-  /// Builds a [Plan] from a list-endpoint summary.
-  ///
-  /// The server list endpoint (`GET /api/plans/list`) includes `planJson`
-  /// which contains the full plan structure (steps, description, category,
-  /// etc.). We parse it to populate those fields, then overlay server-managed
-  /// fields (id, isActive, ttsStatus, etc.) on top.
-  Plan _parsePlanSummary(Map<String, dynamic> json) {
-    final planJsonStr = json['planJson'] as String?;
-    Plan base;
+  Plan _parsePlanSummary(Map<String, dynamic> json) =>
+      parsePlanFromServerRecord(json, overrideCreatedAt: true);
 
-    if (planJsonStr != null && planJsonStr.isNotEmpty) {
-      try {
-        final planJson = jsonDecode(planJsonStr) as Map<String, dynamic>;
-        base = Plan.fromJson(planJson);
-      } catch (e) {
-        debugPrint(
-            'PlanApiService._parsePlanSummary: failed to parse planJson — $e');
-        base = _minimalPlan(json);
-      }
-    } else {
-      base = _minimalPlan(json);
-    }
-
-    // Server-managed fields always override what the planJson blob contains.
-    return base.copyWith(
-      id: json['planId'] as String? ?? base.id,
-      isActive: json['isActive'] as bool? ?? base.isActive,
-      ttsStatus: json['ttsStatus'] as String? ?? base.ttsStatus,
-      ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? base.ttsTotal,
-      ttsCompleted:
-          (json['ttsCompleted'] as num?)?.toInt() ?? base.ttsCompleted,
-      createdAt: _parseDateTime(json['createdAt']) ?? base.createdAt,
-      updatedAt: _parseDateTime(json['updatedAt']) ?? base.updatedAt,
-    );
-  }
-
-  /// Builds a full [Plan] from a single-plan response (`GET /api/plans/:id`).
-  ///
-  /// The response includes a `planJson` field containing the serialised
-  /// [Plan] object. Server-managed fields (id, isActive, ttsStatus, etc.) are
-  /// overlaid on top of the parsed plan to ensure they reflect server state.
-  Plan _parsePlanResponse(Map<String, dynamic> json) {
-    final planJsonStr = json['planJson'] as String?;
-    Plan base;
-
-    if (planJsonStr != null && planJsonStr.isNotEmpty) {
-      try {
-        final planJson = jsonDecode(planJsonStr) as Map<String, dynamic>;
-        base = Plan.fromJson(planJson);
-      } catch (e) {
-        debugPrint(
-            'PlanApiService._parsePlanResponse: failed to parse planJson — $e');
-        base = _minimalPlan(json);
-      }
-    } else {
-      base = _minimalPlan(json);
-    }
-
-    // Server-managed fields always override what the planJson blob contains.
-    return base.copyWith(
-      id: json['planId'] as String? ?? base.id,
-      isActive: json['isActive'] as bool? ?? base.isActive,
-      ttsStatus: json['ttsStatus'] as String? ?? base.ttsStatus,
-      ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? base.ttsTotal,
-      ttsCompleted:
-          (json['ttsCompleted'] as num?)?.toInt() ?? base.ttsCompleted,
-      updatedAt:
-          _parseDateTime(json['updatedAt']) ?? base.updatedAt,
-    );
-  }
+  Plan _parsePlanResponse(Map<String, dynamic> json) =>
+      parsePlanFromServerRecord(json);
 
   /// Converts a [LibraryPlanSummaryRecord] JSON map into a [LibraryPlanSummary].
   LibraryPlanSummary _parseLibraryPlanSummary(Map<String, dynamic> json) {
@@ -548,24 +484,7 @@ class PlanApiServiceImpl implements PlanApiService {
 
   // ── Private utilities ─────────────────────────────────────────────────────
 
-  /// Creates a bare-minimum [Plan] from top-level response fields only.
-  Plan _minimalPlan(Map<String, dynamic> json) {
-    return Plan(
-      id: json['planId'] as String? ?? '',
-      name: json['name'] as String? ?? 'Untitled Plan',
-      createdAt: _parseDateTime(json['createdAt']) ?? DateTime.now(),
-      updatedAt: _parseDateTime(json['updatedAt']) ?? DateTime.now(),
-    );
-  }
-
-  /// Converts a [PlanCategory] string from the server to the enum value.
-  PlanCategory _parseCategory(String? raw) {
-    if (raw == null) return PlanCategory.custom;
-    return PlanCategory.values.firstWhere(
-      (c) => c.name == raw,
-      orElse: () => PlanCategory.custom,
-    );
-  }
+  String _parseCategory(String? raw) => raw ?? 'custom';
 
   /// Splits a comma-separated tags string into a trimmed [List<String>].
   List<String> _parseTags(String? raw) {
@@ -575,16 +494,6 @@ class PlanApiServiceImpl implements PlanApiService {
         .map((t) => t.trim())
         .where((t) => t.isNotEmpty)
         .toList();
-  }
-
-  /// Safely parses an ISO-8601 date-time string, returning null on failure.
-  DateTime? _parseDateTime(dynamic value) {
-    if (value == null) return null;
-    try {
-      return DateTime.parse(value as String);
-    } catch (_) {
-      return null;
-    }
   }
 
   /// Returns a user-friendly error message based on the HTTP status code.
@@ -612,3 +521,116 @@ class PlanApiServiceImpl implements PlanApiService {
   }
 }
 
+/// Builds a [Plan] from a server `PlanRecord` response.
+///
+/// Server responses wrap the full [Plan] payload in a `planJson` string blob
+/// alongside top-level server-managed fields (`planId`, `isActive`, `ttsStatus`,
+/// timestamps, …). We decode the blob, then overlay the authoritative
+/// server-managed fields on top.
+///
+/// When [overrideCreatedAt] is true the server's `createdAt` also wins; the
+/// single-plan endpoint omits a server `createdAt` so callers leave it false.
+///
+/// Resilience: some `planJson` payloads (e.g. seeded library plans, partial
+/// drafts) omit fields the [Plan] model marks as required. Rather than
+/// silently dropping the body, we fall back to a per-field best-effort merge
+/// onto a minimal plan built from the top-level record.
+Plan parsePlanFromServerRecord(
+  Map<String, dynamic> json, {
+  bool overrideCreatedAt = false,
+}) {
+  final planJsonStr = json['planJson'] as String?;
+  Map<String, dynamic>? planJsonMap;
+
+  if (planJsonStr != null && planJsonStr.isNotEmpty) {
+    try {
+      planJsonMap = jsonDecode(planJsonStr) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('parsePlanFromServerRecord: failed to decode planJson — $e');
+    }
+  }
+
+  Plan base;
+  if (planJsonMap != null) {
+    try {
+      base = Plan.fromJson(planJsonMap);
+    } catch (e) {
+      debugPrint(
+        'parsePlanFromServerRecord: Plan.fromJson failed, '
+        'falling back to partial-merge — $e',
+      );
+      base = _mergePartialPlanJson(
+        _minimalPlanFromServerRecord(json),
+        planJsonMap,
+      );
+    }
+  } else {
+    base = _minimalPlanFromServerRecord(json);
+  }
+
+  return base.copyWith(
+    id: json['planId'] as String? ?? base.id,
+    isActive: json['isActive'] as bool? ?? base.isActive,
+    ttsStatus: json['ttsStatus'] as String? ?? base.ttsStatus,
+    ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? base.ttsTotal,
+    ttsCompleted: (json['ttsCompleted'] as num?)?.toInt() ?? base.ttsCompleted,
+    seriesId: (json['seriesId'] as String?) ?? base.seriesId,
+    createdAt: overrideCreatedAt
+        ? (_safeParseDateTime(json['createdAt']) ?? base.createdAt)
+        : base.createdAt,
+    updatedAt: _safeParseDateTime(json['updatedAt']) ?? base.updatedAt,
+  );
+}
+
+Plan _minimalPlanFromServerRecord(Map<String, dynamic> json) {
+  return Plan(
+    id: json['planId'] as String? ?? '',
+    name: json['name'] as String? ?? 'Untitled Plan',
+    createdAt: _safeParseDateTime(json['createdAt']) ?? DateTime.now(),
+    updatedAt: _safeParseDateTime(json['updatedAt']) ?? DateTime.now(),
+  );
+}
+
+/// Layers individually-typed fields from a partial `planJson` map onto a
+/// [minimal] plan. Each field is parsed in isolation so a malformed entry
+/// (e.g. an unknown step `runtimeType`) doesn't discard the rest of the body.
+Plan _mergePartialPlanJson(Plan minimal, Map<String, dynamic> planJson) {
+  List<PlanStep>? steps;
+  final rawSteps = planJson['steps'];
+  if (rawSteps is List) {
+    final parsed = <PlanStep>[];
+    for (final entry in rawSteps) {
+      if (entry is! Map<String, dynamic>) continue;
+      try {
+        parsed.add(PlanStep.fromJson(entry));
+      } catch (e) {
+        debugPrint(
+          'parsePlanFromServerRecord: skipping unparseable step — $e',
+        );
+      }
+    }
+    steps = parsed;
+  }
+
+  final tags = planJson.containsKey('tags')
+      ? tagsFromJson(planJson['tags'])
+      : null;
+
+  return minimal.copyWith(
+    name: planJson['name'] as String? ?? minimal.name,
+    description: planJson['description'] as String? ?? minimal.description,
+    category: planJson['category'] as String? ?? minimal.category,
+    defaultVoice: planJson['defaultVoice'] as String? ?? minimal.defaultVoice,
+    tags: tags ?? minimal.tags,
+    steps: steps ?? minimal.steps,
+  );
+}
+
+DateTime? _safeParseDateTime(dynamic value) {
+  if (value == null) return null;
+  try {
+    return DateTime.parse(value as String);
+  } catch (_) {
+    return null;
+  }
+}

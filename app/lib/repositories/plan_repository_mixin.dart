@@ -1,7 +1,6 @@
 import 'package:drift/drift.dart';
 
 import 'package:instructor/database/app_database.dart';
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 
@@ -19,10 +18,7 @@ mixin PlanRepositoryMixin {
       id: row.id,
       name: row.name,
       description: row.description,
-      category: PlanCategory.values.firstWhere(
-        (c) => c.name == row.category,
-        orElse: () => PlanCategory.custom,
-      ),
+      category: row.category,
       tags: row.tags,
       defaultVoice: row.defaultVoice,
       steps: row.steps,

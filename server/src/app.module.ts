@@ -10,10 +10,14 @@ import { AuthModule } from './auth/auth.module';
 import { TtsModule } from './tts/tts.module';
 import { PlansModule } from './plans/plans.module';
 import { LibraryModule } from './library/library.module';
+import { SeriesModule } from './series/series.module';
+import { CategoriesModule } from './categories/categories.module';
+import { PlanVoicesModule } from './plan-voices/plan-voices.module';
 import { AdminModule } from './admin/admin.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { SyncModule } from './sync/sync.module';
 import { AppVersionModule } from './app-version/app-version.module';
+import { AppConfigRuntimeModule } from './app-config/app-config-runtime.module';
 import { HealthController } from './health.controller';
 import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
@@ -34,10 +38,14 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
     TtsModule,
     PlansModule,
     LibraryModule,
+    SeriesModule,
+    CategoriesModule,
+    PlanVoicesModule,
     AdminModule,
     AdminAnalyticsModule,
     SyncModule,
     AppVersionModule,
+    AppConfigRuntimeModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -11,7 +11,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:uuid/uuid.dart';
 
-import 'package:instructor/models/enums.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
 import 'package:instructor/services/api_client.dart';
@@ -154,17 +153,11 @@ class PlanGenerationClientImpl implements PlanGenerationClient {
         .map((s) => PlanStep.fromJson(_normalizeStep(s as Map<String, dynamic>)))
         .toList();
 
-    final categoryStr = json['category']?.toString() ?? 'custom';
-    final category = PlanCategory.values.firstWhere(
-      (c) => c.name == categoryStr,
-      orElse: () => PlanCategory.custom,
-    );
-
     return Plan(
       id: '', // temporary — assigned on save
       name: json['name']?.toString() ?? 'Untitled Plan',
       description: json['description']?.toString(),
-      category: category,
+      category: json['category']?.toString() ?? 'custom',
       defaultVoice: json['defaultVoice']?.toString() ?? fallbackVoice,
       steps: steps,
       createdAt: DateTime.now(),

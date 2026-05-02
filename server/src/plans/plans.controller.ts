@@ -9,6 +9,7 @@ import {
   UseGuards,
   Logger,
   HttpCode,
+  HttpStatus,
   NotFoundException,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -16,6 +17,7 @@ import { PlansService } from './plans.service';
 import { GeneratePlanDto } from './dto/generate-plan.dto';
 import { SavePlanDto } from './dto/save-plan.dto';
 import { ActivatePlanDto } from './dto/activate-plan.dto';
+import { CreatePlanDto } from './dto/create-plan.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { JwtPayload } from '../auth/auth.service';
 
@@ -141,6 +143,61 @@ export class PlansController {
         updatedAt: p.updatedAt.toISOString(),
       })),
     };
+  }
+
+  /**
+   * POST /api/plans
+   * Create a user-authored plan with visibility='private'.
+   * owner_user_id is set from the JWT (req.user.sub).
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  async createPlan(
+    @Req() req: Request,
+    @Body() dto: CreatePlanDto,
+  ): Promise<{ planId: string }> {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(
+      `POST /plans — userId=${user.sub}, title="${dto.title}"`,
+    );
+    return this.plansService.createUserPlan(
+      user.sub,
+      dto.title,
+      dto.steps,
+      dto.description,
+      dto.seriesId,
+    );
+  }
+
+  /**
+   * GET /api/plans/:id/tree
+   * Returns the recursive sub-plan tree to depth 3.
+   * Includes IDOR check: private plans can only be accessed by their owner.
+   */
+  @Get(':id/tree')
+  async getTree(
+    @Req() req: Request,
+    @Param('id') planId: string,
+  ) {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`GET /plans/${planId}/tree — userId=${user.sub}`);
+    return this.plansService.getPlanTree(user.sub, planId);
+  }
+
+  /**
+   * POST /api/plans/:id/request-publish
+   * Transitions a private plan to pending_review.
+   * Only the owner can request publication.
+   */
+  @Post(':id/request-publish')
+  @HttpCode(200)
+  async requestPublish(
+    @Req() req: Request,
+    @Param('id') planId: string,
+  ): Promise<{ visibility: string }> {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`POST /plans/${planId}/request-publish — userId=${user.sub}`);
+    return this.plansService.requestPublish(user.sub, planId);
   }
 
   /**

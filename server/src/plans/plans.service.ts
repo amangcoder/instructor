@@ -4,6 +4,8 @@ import {
   UnprocessableEntityException,
   ServiceUnavailableException,
   BadGatewayException,
+  ForbiddenException,
+  NotFoundException,
   Optional,
   Inject,
 } from '@nestjs/common';
@@ -24,8 +26,10 @@ import {
 } from './prompts/triage.prompt';
 import { DatabaseService, type PlanRecord, type PlanSummaryRecord, type SavePlanResult } from '../database/database.service';
 import { PlanRepository } from '../database/repositories/plan.repository';
-import { TtsPregenService } from '../tts/tts-pregen.service';
+import { TtsBatchPregenService } from '../tts/tts-batch-pregen.service';
 import { SavePlanDto } from './dto/save-plan.dto';
+import { plans } from '../database/schema';
+import { eq, sql, and, isNull } from 'drizzle-orm';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -34,6 +38,44 @@ const GEMINI_GENERATE_URL =
 
 const MAX_DURATION_MINUTES = 240; // 4-hour hard cap
 
+/**
+ * Apply admin step edits in-place. Walks the step tree (descending into
+ * `repeat.children`) so deeply-nested say-steps are also addressable by id.
+ * Fields are only written when the edit specifies them and the target step's
+ * runtime type accepts that field.
+ */
+function applyStepEdits(
+  steps: Array<Record<string, unknown>>,
+  editsById: Map<
+    string,
+    {
+      id: string;
+      text?: string;
+      voiceId?: string | null;
+      estimatedDuration?: number | null;
+      duration?: number;
+    }
+  >,
+): void {
+  for (const step of steps) {
+    const stepId = typeof step.id === 'string' ? step.id : null;
+    const edit = stepId ? editsById.get(stepId) : undefined;
+    if (edit) {
+      const runtimeType = step.runtimeType;
+      if (runtimeType === 'say') {
+        if (edit.text !== undefined) step.text = edit.text;
+        if (edit.voiceId !== undefined) step.voiceId = edit.voiceId;
+        if (edit.estimatedDuration !== undefined) step.estimatedDuration = edit.estimatedDuration;
+      } else if (runtimeType === 'wait') {
+        if (edit.duration !== undefined) step.duration = edit.duration;
+      }
+    }
+    if (step.runtimeType === 'repeat' && Array.isArray(step.children)) {
+      applyStepEdits(step.children as Array<Record<string, unknown>>, editsById);
+    }
+  }
+}
+
 @Injectable()
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
@@ -41,7 +83,7 @@ export class PlansService {
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly ttsPregen: TtsPregenService,
+    private readonly ttsBatchPregen: TtsBatchPregenService,
     @Optional() @Inject('APP_CONFIG') private readonly config?: AppConfig,
     @Optional() @Inject(PlanRepository) planRepo?: PlanRepository,
   ) {
@@ -189,7 +231,7 @@ export class PlansService {
    * For studio voice quality, triggers TTS pre-generation after activation.
    *
    * @param speechRate Speech rate from API (string, e.g. '1.0').
-   *                   Forwarded to TtsPregenService which accepts string | number.
+   *                   Forwarded to TtsBatchPregenService which accepts string | number.
    */
   async activatePlan(
     userId: string,
@@ -222,7 +264,7 @@ export class PlansService {
         const effectiveLocale = locale ?? 'enIN';
         const effectiveSpeechRate = speechRate ?? '1.0';
 
-        await this.ttsPregen.startPregen(
+        await this.ttsBatchPregen.startBatchPregen(
           planId,
           plan.planJson,
           effectiveVoice,
@@ -237,6 +279,484 @@ export class PlansService {
         // Reset status so the UI doesn't show a spinner forever.
         await this.plans.setTtsStatus(planId, 'failed', 0, 0);
       }
+    }
+  }
+
+  // ── Sub-plan tree retrieval (recursive CTE, depth 3) ─────────────────────
+
+  /**
+   * Fetch a plan with its recursive sub-plan tree to depth 3.
+   * Includes IDOR check: private plans can only be accessed by their owner.
+   *
+   * @throws NotFoundException if plan not found
+   * @throws ForbiddenException if private plan accessed by non-owner
+   */
+  async getPlanTree(userId: string, planId: string): Promise<PlanTreeNode> {
+    const db = this.db.getDb();
+
+    // 1. Fetch the root plan first to check ownership / visibility
+    const rootRows = await this.db.withRetry(() =>
+      db
+        .select()
+        .from(plans)
+        .where(eq(plans.id, planId))
+        .limit(1),
+    );
+
+    if (rootRows.length === 0) {
+      throw new NotFoundException(`Plan ${planId} not found`);
+    }
+
+    const root = rootRows[0];
+
+    // IDOR check: private plans are only accessible to their owner
+    if (root.visibility === 'private' && root.ownerUserId !== userId) {
+      throw new ForbiddenException('You do not have access to this plan');
+    }
+
+    // 2. Recursive CTE bounded at depth 3
+    const treeRows = await this.db.withRetry(() =>
+      db.execute(sql`
+        WITH RECURSIVE plan_tree AS (
+          SELECT id, name, parent_plan_id, position, visibility, is_published, owner_user_id, 1 AS depth
+          FROM plans
+          WHERE id = ${planId}
+          UNION ALL
+          SELECT p.id, p.name, p.parent_plan_id, p.position, p.visibility, p.is_published, p.owner_user_id, pt.depth + 1
+          FROM plans p
+          INNER JOIN plan_tree pt ON p.parent_plan_id = pt.id
+          WHERE pt.depth < 3
+        )
+        SELECT id, name, parent_plan_id, position, visibility, is_published, owner_user_id, depth
+        FROM plan_tree
+        ORDER BY depth ASC, position ASC
+      `),
+    );
+
+    // 3. Build nested tree structure
+    const rows = treeRows.rows as Array<{
+      id: string;
+      name: string;
+      parent_plan_id: string | null;
+      position: number;
+      visibility: string;
+      is_published: boolean;
+      owner_user_id: string | null;
+      depth: number;
+    }>;
+
+    return this.buildTree(rows, planId);
+  }
+
+  /** Build a nested tree structure from flat CTE rows. */
+  private buildTree(
+    rows: Array<{
+      id: string;
+      name: string;
+      parent_plan_id: string | null;
+      position: number;
+      visibility: string;
+      is_published: boolean;
+      owner_user_id: string | null;
+      depth: number;
+    }>,
+    rootId: string,
+  ): PlanTreeNode {
+    const nodeMap = new Map<string, PlanTreeNode>();
+
+    for (const row of rows) {
+      nodeMap.set(row.id, {
+        id: row.id,
+        name: row.name,
+        parentPlanId: row.parent_plan_id,
+        position: row.position,
+        visibility: row.visibility,
+        isPublished: row.is_published,
+        depth: row.depth,
+        children: [],
+      });
+    }
+
+    for (const row of rows) {
+      if (row.parent_plan_id && nodeMap.has(row.parent_plan_id)) {
+        nodeMap.get(row.parent_plan_id)!.children.push(nodeMap.get(row.id)!);
+      }
+    }
+
+    return nodeMap.get(rootId)!;
+  }
+
+  // ── User-authored plan creation ───────────────────────────────────────────
+
+  /**
+   * Create a new user-authored plan with visibility='private'.
+   * owner_user_id is always derived from the JWT (req.user.sub).
+   */
+  async createUserPlan(
+    userId: string,
+    title: string,
+    steps: string,
+    description?: string,
+    seriesId?: string,
+  ): Promise<{ planId: string }> {
+    const db = this.db.getDb();
+    const now = new Date();
+
+    const rows = await this.db.withRetry(() =>
+      db
+        .insert(plans)
+        .values({
+          userId,
+          name: title,
+          planJson: steps,
+          visibility: 'private',
+          ownerUserId: userId,
+          seriesId: seriesId ?? null,
+          isActive: false,
+          ttsStatus: 'none',
+          ttsTotal: 0,
+          ttsCompleted: 0,
+          voiceQuality: 'standard',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: plans.id }),
+    );
+
+    const planId = rows[0].id;
+    this.logger.log(`User plan created: planId=${planId}, userId=${userId}, visibility=private`);
+    return { planId };
+  }
+
+  // ── Request-publish transition ────────────────────────────────────────────
+
+  /**
+   * Transition a plan from private → pending_review.
+   * Only the owner of a private plan can request publication.
+   *
+   * @throws NotFoundException if plan not found
+   * @throws ForbiddenException if requester is not the owner
+   * @throws UnprocessableEntityException if plan is not private
+   */
+  async requestPublish(userId: string, planId: string): Promise<{ visibility: string }> {
+    const db = this.db.getDb();
+
+    const rows = await this.db.withRetry(() =>
+      db
+        .select({
+          id: plans.id,
+          visibility: plans.visibility,
+          ownerUserId: plans.ownerUserId,
+        })
+        .from(plans)
+        .where(eq(plans.id, planId))
+        .limit(1),
+    );
+
+    if (rows.length === 0) {
+      throw new NotFoundException(`Plan ${planId} not found`);
+    }
+
+    const plan = rows[0];
+
+    if (plan.ownerUserId !== userId) {
+      throw new ForbiddenException('Only the plan owner can request publication');
+    }
+
+    if (plan.visibility !== 'private') {
+      throw new UnprocessableEntityException(
+        `Plan visibility is '${plan.visibility}', only 'private' plans can request publish`,
+      );
+    }
+
+    const now = new Date();
+    await this.db.withRetry(() =>
+      db
+        .update(plans)
+        .set({ visibility: 'pending_review', updatedAt: now })
+        .where(eq(plans.id, planId)),
+    );
+
+    this.logger.log(`Plan publish requested: planId=${planId}, userId=${userId}`);
+    return { visibility: 'pending_review' };
+  }
+
+  // ── Admin plan detail ─────────────────────────────────────────────────────
+
+  /**
+   * Admin-only: fetch a plan's hierarchy/publish fields by id.
+   * Used by the admin plan detail page to seed PublishToggle / VisibilitySelector.
+   *
+   * @throws NotFoundException if plan not found
+   */
+  async getAdminPlanDetail(planId: string): Promise<{
+    id: string;
+    name: string;
+    description: string | null;
+    parentPlanId: string | null;
+    position: number;
+    visibility: string;
+    isPublished: boolean;
+    ownerUserId: string | null;
+    ttsStatus: string | null;
+    ttsTotal: number;
+    ttsCompleted: number;
+    planJson: string;
+    createdAt: string;
+    updatedAt: string;
+  }> {
+    const db = this.db.getDb();
+
+    const rows = await this.db.withRetry(() =>
+      db
+        .select({
+          id: plans.id,
+          name: plans.name,
+          parentPlanId: plans.parentPlanId,
+          position: plans.position,
+          visibility: plans.visibility,
+          isPublished: plans.isPublished,
+          ownerUserId: plans.ownerUserId,
+          ttsStatus: plans.ttsStatus,
+          ttsTotal: plans.ttsTotal,
+          ttsCompleted: plans.ttsCompleted,
+          planJson: plans.planJson,
+          createdAt: plans.createdAt,
+          updatedAt: plans.updatedAt,
+        })
+        .from(plans)
+        .where(eq(plans.id, planId))
+        .limit(1),
+    );
+
+    const row = rows[0];
+    if (!row) {
+      throw new NotFoundException(`Plan ${planId} not found`);
+    }
+
+    // Description is stored inside planJson — surface it on the response so
+    // the admin detail page can display it without a second parse.
+    let description: string | null = null;
+    try {
+      const parsed = JSON.parse(row.planJson) as { description?: string | null };
+      if (typeof parsed.description === 'string') description = parsed.description;
+    } catch {
+      // malformed planJson — leave description as null
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      description,
+      parentPlanId: row.parentPlanId ?? null,
+      position: row.position,
+      visibility: row.visibility,
+      isPublished: row.isPublished,
+      ownerUserId: row.ownerUserId ?? null,
+      ttsStatus: row.ttsStatus ?? null,
+      ttsTotal: row.ttsTotal,
+      ttsCompleted: row.ttsCompleted,
+      planJson: row.planJson,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  // ── Admin plan update ─────────────────────────────────────────────────────
+
+  /**
+   * Admin-only: update plan hierarchy fields.
+   * Enforces max depth of 3 when setting parent_plan_id.
+   *
+   * @throws NotFoundException if plan not found
+   * @throws UnprocessableEntityException if depth exceeds 3
+   */
+  async adminUpdatePlan(
+    planId: string,
+    data: {
+      parentPlanId?: string | null;
+      position?: number;
+      visibility?: string;
+      isPublished?: boolean;
+      name?: string;
+      description?: string | null;
+      category?: string;
+      tags?: string[];
+      defaultVoice?: string;
+      stepEdits?: Array<{
+        id: string;
+        text?: string;
+        voiceId?: string | null;
+        estimatedDuration?: number | null;
+        duration?: number;
+      }>;
+      planJson?: string;
+    },
+  ): Promise<void> {
+    const db = this.db.getDb();
+
+    // When a full planJson replace is requested, surgical fields would conflict.
+    if (data.planJson !== undefined) {
+      const conflicting: string[] = [];
+      if (data.description !== undefined) conflicting.push('description');
+      if (data.category !== undefined) conflicting.push('category');
+      if (data.tags !== undefined) conflicting.push('tags');
+      if (data.defaultVoice !== undefined) conflicting.push('defaultVoice');
+      if (data.stepEdits !== undefined) conflicting.push('stepEdits');
+      if (conflicting.length > 0) {
+        throw new UnprocessableEntityException(
+          `planJson cannot be combined with: ${conflicting.join(', ')}`,
+        );
+      }
+    }
+
+    // Verify plan exists and fetch current planJson if any planJson-touching
+    // field is in the patch — keeps reads to a minimum for hierarchy-only edits.
+    const touchesJson =
+      data.description !== undefined ||
+      data.category !== undefined ||
+      data.tags !== undefined ||
+      data.defaultVoice !== undefined ||
+      (data.stepEdits !== undefined && data.stepEdits.length > 0) ||
+      data.name !== undefined; // mirror name into planJson too
+    const existing = await this.db.withRetry(() =>
+      db
+        .select({ id: plans.id, planJson: plans.planJson })
+        .from(plans)
+        .where(eq(plans.id, planId))
+        .limit(1),
+    );
+    if (existing.length === 0) {
+      throw new NotFoundException(`Plan ${planId} not found`);
+    }
+
+    // Depth validation when setting parent_plan_id
+    if (data.parentPlanId !== undefined && data.parentPlanId !== null) {
+      await this.validateDepth(planId, data.parentPlanId);
+    }
+
+    const updates: Partial<typeof plans.$inferInsert> = { updatedAt: new Date() };
+    if (data.parentPlanId !== undefined) updates.parentPlanId = data.parentPlanId;
+    if (data.position !== undefined) updates.position = data.position;
+    if (data.visibility !== undefined) updates.visibility = data.visibility;
+    if (data.isPublished !== undefined) updates.isPublished = data.isPublished;
+    if (data.name !== undefined) updates.name = data.name;
+
+    if (data.planJson !== undefined) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(data.planJson) as Record<string, unknown>;
+      } catch {
+        throw new UnprocessableEntityException('planJson is not valid JSON');
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new UnprocessableEntityException('planJson must be a JSON object');
+      }
+      if (!Array.isArray(parsed.steps)) {
+        throw new UnprocessableEntityException('planJson.steps must be an array');
+      }
+      if (typeof parsed.name === 'string' && parsed.name.length > 0) {
+        updates.name = parsed.name;
+      }
+      updates.planJson = JSON.stringify(parsed);
+    } else if (touchesJson) {
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = JSON.parse(existing[0].planJson) as Record<string, unknown>;
+      } catch {
+        throw new UnprocessableEntityException(
+          `Plan ${planId} has malformed plan_json and cannot be edited`,
+        );
+      }
+
+      if (data.name !== undefined) parsed.name = data.name;
+      if (data.description !== undefined) parsed.description = data.description;
+      if (data.category !== undefined) parsed.category = data.category;
+      if (data.tags !== undefined) parsed.tags = data.tags;
+      if (data.defaultVoice !== undefined) parsed.defaultVoice = data.defaultVoice;
+
+      if (data.stepEdits && data.stepEdits.length > 0) {
+        const steps = Array.isArray(parsed.steps) ? (parsed.steps as Array<Record<string, unknown>>) : [];
+        const editById = new Map(data.stepEdits.map((e) => [e.id, e]));
+        applyStepEdits(steps, editById);
+        parsed.steps = steps;
+      }
+
+      updates.planJson = JSON.stringify(parsed);
+    }
+
+    await this.db.withRetry(() =>
+      db.update(plans).set(updates).where(eq(plans.id, planId)),
+    );
+
+    this.logger.log(`Admin updated plan: planId=${planId}, fields=${Object.keys(data).join(',')}`);
+  }
+
+  /**
+   * Validate that assigning parentPlanId to planId won't exceed depth 3.
+   *
+   * Depth calculation:
+   *   - Walk UP from the proposed parent to find the ancestor depth (how deep the parent is).
+   *   - Walk DOWN from the plan to find descendant depth (how deep the plan's subtree goes).
+   *   - Total depth = ancestor depth + 1 (this plan) + descendant depth must not exceed 3.
+   *
+   * @throws UnprocessableEntityException if depth exceeds 3
+   */
+  async validateDepth(planId: string, parentPlanId: string): Promise<void> {
+    const db = this.db.getDb();
+
+    // Calculate ancestor depth (how deep the parent is from the root)
+    const ancestorResult = await this.db.withRetry(() =>
+      db.execute(sql`
+        WITH RECURSIVE ancestors AS (
+          SELECT id, parent_plan_id, 1 AS depth
+          FROM plans
+          WHERE id = ${parentPlanId}
+          UNION ALL
+          SELECT p.id, p.parent_plan_id, a.depth + 1
+          FROM plans p
+          INNER JOIN ancestors a ON p.id = a.parent_plan_id
+        )
+        SELECT MAX(depth) AS max_depth FROM ancestors
+      `),
+    );
+
+    const ancestorDepth = Number((ancestorResult.rows[0] as any)?.max_depth ?? 0);
+
+    // If the parent doesn't exist, that's an error
+    if (ancestorDepth === 0) {
+      throw new NotFoundException(`Parent plan ${parentPlanId} not found`);
+    }
+
+    // Calculate descendant depth (how deep the plan's subtree goes below it)
+    const descendantResult = await this.db.withRetry(() =>
+      db.execute(sql`
+        WITH RECURSIVE descendants AS (
+          SELECT id, 0 AS depth
+          FROM plans
+          WHERE id = ${planId}
+          UNION ALL
+          SELECT p.id, d.depth + 1
+          FROM plans p
+          INNER JOIN descendants d ON p.parent_plan_id = d.id
+          WHERE d.depth < 3
+        )
+        SELECT MAX(depth) AS max_depth FROM descendants
+      `),
+    );
+
+    const descendantDepth = Number((descendantResult.rows[0] as any)?.max_depth ?? 0);
+
+    // Total depth in the tree: ancestor chain + this plan level + descendant chain
+    // ancestor depth is how many levels the parent is from root (1 = root level)
+    // So the plan would be at level ancestorDepth + 1
+    // Its deepest descendant would be at level ancestorDepth + 1 + descendantDepth
+    const totalDepth = ancestorDepth + 1 + descendantDepth;
+
+    if (totalDepth > 3) {
+      throw new UnprocessableEntityException(
+        `Assigning parent would result in depth ${totalDepth}, which exceeds the maximum depth of 3`,
+      );
     }
   }
 
@@ -489,6 +1009,19 @@ export class PlansService {
     return text;
   }
 
+}
+
+// ── Exported types ───────────────────────────────────────────────────────────
+
+export interface PlanTreeNode {
+  id: string;
+  name: string;
+  parentPlanId: string | null;
+  position: number;
+  visibility: string;
+  isPublished: boolean;
+  depth: number;
+  children: PlanTreeNode[];
 }
 
 // ── Pure helpers (no logger needed) ──────────────────────────────────────────

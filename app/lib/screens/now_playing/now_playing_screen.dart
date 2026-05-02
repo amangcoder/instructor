@@ -9,6 +9,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 
 import 'package:instructor/models/enums.dart';
 import 'package:instructor/providers/execution_providers.dart';
+import 'package:instructor/providers/series_providers.dart';
 import 'package:instructor/providers/settings_providers.dart';
 import 'package:instructor/providers/streak_providers.dart';
 import 'package:instructor/providers/tts_status_providers.dart';
@@ -347,6 +348,8 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         durationMs: state.plan.totalDuration.inMilliseconds,
       );
 
+      await _recordSeriesProgressIfNeeded(state);
+
       await _showCompletionSummary(state);
       // Guard: the widget may have been disposed while the completion dialog was
       // visible (e.g. the user navigated to the library via another route). Skip
@@ -367,6 +370,28 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
       // captured in the closure, which could be a stale reference after rebuild.
       this.context.go(AppRoutes.library);
     });
+  }
+
+  /// Advance the user's series subscription when the just-completed plan
+  /// belongs to a series the user opened from the program detail screen.
+  /// Failures are logged but never block the completion UI — progress will
+  /// reconcile on the next subscription refresh.
+  Future<void> _recordSeriesProgressIfNeeded(ExecutionState state) async {
+    final ctx = ref.read(activeSeriesSessionProvider);
+    if (ctx == null) return;
+    if (state.plan.seriesId != ctx.seriesId) return;
+
+    try {
+      await ref
+          .read(seriesApiServiceProvider)
+          .recordProgress(ctx.seriesId, ctx.sessionIndex);
+      ref.invalidate(mySubscriptionsProvider);
+      ref.invalidate(mySubscriptionForProvider(ctx.seriesId));
+    } catch (e, stack) {
+      debugPrint('recordProgress failed: $e\n$stack');
+    } finally {
+      ref.read(activeSeriesSessionProvider.notifier).state = null;
+    }
   }
 
   Future<void> _showCompletionSummary(ExecutionState state) async {

@@ -9,6 +9,8 @@ import { TtsHealthService } from './tts-health.service';
 import { LibraryCategoryService } from './library-category.service';
 import { DeletionRequestsAdminController } from './deletion-requests-admin.controller';
 import { DeletionRequestsAdminService } from './deletion-requests-admin.service';
+import { PlanRequestsAdminController } from './plan-requests-admin.controller';
+import { PlanRequestsAdminService } from './plan-requests-admin.service';
 import { ActivityFeedService } from './activity-feed.service';
 import { CsvExportService } from './csv-export.service';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
@@ -42,6 +44,7 @@ import { AdminRoleGuard } from '../auth/admin-role.guard';
     AdminAnalyticsController,
     AdminUsersController,
     DeletionRequestsAdminController,
+    PlanRequestsAdminController,
   ],
   providers: [
     AdminAnalyticsService,
@@ -50,6 +53,7 @@ import { AdminRoleGuard } from '../auth/admin-role.guard';
     TtsHealthService,
     LibraryCategoryService,
     DeletionRequestsAdminService,
+    PlanRequestsAdminService,
     ActivityFeedService,
     CsvExportService,
     AdminRoleGuard,

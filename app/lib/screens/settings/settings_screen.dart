@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/providers/settings_providers.dart';
-import 'package:instructor/providers/tts_providers.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/theme/app_branding.dart';
 
@@ -25,7 +24,7 @@ import 'widgets/shared_settings_widgets.dart';
 /// - **My Activity** — live plan count, session and streak placeholders.
 /// - **For You** — activity level and goal personalisation chips.
 /// - **Account** — sign-in / sign-out (AuthSection).
-/// - **Preferences** — theme mode and default TTS voice selectors.
+/// - **Preferences** — theme mode selector.
 /// - **Audio & Speech** — speech rate, ambient volume, voice volume sliders.
 /// - **Notifications** — notification sound and vibration toggles.
 /// - **Battery** (Android only) — OEM battery optimisation prompt.
@@ -78,7 +77,7 @@ class SettingsScreen extends ConsumerWidget {
           // ── Preferences ───────────────────────────────────────────────
           const SectionHeader(title: 'Preferences'),
           SettingsCard(
-            children: [const _ThemeModeSelector(), const _VoiceSelector()],
+            children: const [_ThemeModeSelector()],
           ),
 
           // ── Audio & Speech ────────────────────────────────────────────
@@ -173,72 +172,6 @@ class _ThemeModeSelector extends ConsumerWidget {
             ref.read(appSettingsProvider).write(AppSettingsKeys.themeMode, raw),
           );
         },
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Voice section (dynamic — fetched from API based on selected provider)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _VoiceSelector extends ConsumerWidget {
-  const _VoiceSelector();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final voicesAsync = ref.watch(availableVoicesProvider);
-    final currentVoiceStr =
-        ref.watch(rawVoiceSettingProvider).valueOrNull ?? 'aoede';
-
-    return SettingsControlRow(
-      title: 'Default TTS Voice',
-      subtitle: 'Voice used for all Say steps',
-      control: voicesAsync.when(
-        data: (voices) {
-          if (voices.isEmpty) return const Text('—');
-          // Ensure current value is in list — if the stored voice
-          // doesn't exist for this provider, persist the fallback so
-          // synthesis never sends an invalid voice ID.
-          final validId = voices.any((v) => v.id == currentVoiceStr)
-              ? currentVoiceStr
-              : voices.first.id;
-          if (validId != currentVoiceStr) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              ref
-                  .read(appSettingsProvider)
-                  .write(AppSettingsKeys.defaultVoice, validId);
-            });
-          }
-          return DropdownButton<String>(
-            value: validId,
-            isDense: true,
-            underline: const SizedBox.shrink(),
-            items: voices
-                .map(
-                  (v) => DropdownMenuItem(
-                    value: v.id,
-                    child: Text(
-                      v.label,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (newVoice) {
-              if (newVoice == null) return;
-              ref
-                  .read(appSettingsProvider)
-                  .write(AppSettingsKeys.defaultVoice, newVoice);
-            },
-          );
-        },
-        loading: () => const SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        error: (_, __) => const Text('—'),
       ),
     );
   }

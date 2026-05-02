@@ -7,7 +7,7 @@ import {
 import { PlansService } from './plans.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 import { DatabaseService } from '../database/database.service';
-import { TtsPregenService } from '../tts/tts-pregen.service';
+import { TtsBatchPregenService } from '../tts/tts-batch-pregen.service';
 import { createMockDatabaseService } from '../database/testing';
 import type { Phase1Requirements } from './prompts/phase1.prompt';
 
@@ -129,14 +129,14 @@ describe('PlansService', () => {
     (mockDatabaseService.savePlan as jest.Mock).mockResolvedValue({ planId: 'test-plan-id', updatedAt: new Date() });
     (mockDatabaseService.listPlans as jest.Mock).mockResolvedValue([]);
 
-    const mockTtsPregen = { startPregen: jest.fn().mockResolvedValue(undefined) };
+    const mockTtsBatchPregen = { startBatchPregen: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PlansService,
         { provide: UpstashRateLimitService, useValue: mockRateLimiter },
         { provide: DatabaseService, useValue: mockDatabaseService },
-        { provide: TtsPregenService, useValue: mockTtsPregen },
+        { provide: TtsBatchPregenService, useValue: mockTtsBatchPregen },
       ],
     }).compile();
 

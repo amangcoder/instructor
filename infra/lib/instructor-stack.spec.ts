@@ -47,13 +47,28 @@ describe('InstructorStack', () => {
       template.resourceCountIs('AWS::S3::Bucket', 1);
     });
 
-    it('blocks all public access on the bucket', () => {
+    it('blocks public ACLs but allows public bucket policies (for avatars/*)', () => {
       template.hasResourceProperties('AWS::S3::Bucket', {
         PublicAccessBlockConfiguration: {
           BlockPublicAcls: true,
-          BlockPublicPolicy: true,
+          BlockPublicPolicy: false,
           IgnorePublicAcls: true,
-          RestrictPublicBuckets: true,
+          RestrictPublicBuckets: false,
+        },
+      });
+    });
+
+    it('grants public s3:GetObject on the avatars/ prefix', () => {
+      template.hasResourceProperties('AWS::S3::BucketPolicy', {
+        PolicyDocument: {
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Sid: 'PublicReadAvatars',
+              Effect: 'Allow',
+              Action: 's3:GetObject',
+              Principal: { AWS: '*' },
+            }),
+          ]),
         },
       });
     });

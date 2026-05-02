@@ -12,7 +12,7 @@ part 'settings_providers.g.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Default TTS voice used when no preference has been saved.
-const PlanVoice kDefaultVoice = PlanVoice.af_heart;
+const TtsVoiceId kDefaultVoice = TtsVoiceId.af_heart;
 
 /// Default ambient audio master volume (70%).
 const double kDefaultAmbientVolume = 0.7;
@@ -46,11 +46,11 @@ const List<String> kDefaultGoals = [];
 ///
 /// Emits [kDefaultVoice] when the key is absent or unrecognised.
 @riverpod
-Stream<PlanVoice> defaultVoiceSetting(Ref ref) {
+Stream<TtsVoiceId> defaultVoiceSetting(Ref ref) {
   final settings = ref.watch(appSettingsProvider);
   return settings.watch(AppSettingsKeys.defaultVoice).map((raw) {
     if (raw == null) return kDefaultVoice;
-    return PlanVoice.values.firstWhere(
+    return TtsVoiceId.values.firstWhere(
       (v) => v.name == raw,
       orElse: () => kDefaultVoice,
     );

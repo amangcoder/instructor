@@ -13,13 +13,18 @@
 
 --> statement-breakpoint
 
+-- Drop text default before type change; PostgreSQL cannot auto-cast a text default to numeric
+ALTER TABLE "tts_jobs"
+  ALTER COLUMN "speech_rate" DROP DEFAULT;
+
+--> statement-breakpoint
+
 ALTER TABLE "tts_jobs"
   ALTER COLUMN "speech_rate" TYPE NUMERIC(4, 2)
   USING "speech_rate"::NUMERIC(4, 2);
 
 --> statement-breakpoint
 
--- Ensure the default is numeric, not text
 ALTER TABLE "tts_jobs"
   ALTER COLUMN "speech_rate" SET DEFAULT 1.0;
 
