@@ -78,4 +78,23 @@ export class LibraryService {
     this.logger.log(`deletePlan — id=${id}`);
     return this.repo.deleteLibraryPlan(id);
   }
+
+  // ── User library links ────────────────────────────────────────────────────
+
+  /** Link a library plan to the user's collection (idempotent). Returns link id. */
+  async addLink(userId: string, libraryPlanId: string): Promise<{ linkId: string }> {
+    this.logger.log(`addLink — userId=${userId}, libraryPlanId=${libraryPlanId}`);
+    return this.db.addUserLibraryLink(userId, libraryPlanId);
+  }
+
+  /** Remove a library link. Throws NotFoundException if not found/wrong user. */
+  async removeLink(userId: string, linkId: string): Promise<void> {
+    this.logger.log(`removeLink — userId=${userId}, linkId=${linkId}`);
+    return this.db.removeUserLibraryLink(linkId, userId);
+  }
+
+  /** Update last_used_at on a library link. */
+  async touchLink(userId: string, linkId: string): Promise<void> {
+    return this.db.updateLibraryLinkLastUsed(linkId, userId);
+  }
 }

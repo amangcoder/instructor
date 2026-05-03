@@ -206,6 +206,45 @@ export class TtsService {
   // ── Cache key (provider-inclusive) ───────────────────────────────────────
 
   /**
+   * Canonicalise a locale string before hashing so equivalent values from
+   * different sources (DB voices.locale = 'en-US', Dart TtsLocale.name = 'enUS',
+   * variants like 'en_US' / 'EN-us') all collapse to a single cache key.
+   *
+   * MUST stay byte-for-byte identical to Dart's _normalizeLocale in
+   * app/lib/utils/hash_utils.dart.
+   */
+  private static normalizeLocale(locale: string | undefined): string {
+    if (!locale) return '';
+    return locale.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  /**
+   * Canonicalise speechRate to exactly 1 decimal place so '1', '1.0', '1.00'
+   * all hash identically. Falls back to '1.0' on unparseable input.
+   *
+   * MUST stay byte-for-byte identical to Dart's _normalizeSpeechRate in
+   * app/lib/utils/hash_utils.dart.
+   */
+  private static normalizeSpeechRate(rate: string | undefined): string {
+    const n = parseFloat(rate ?? '1.0');
+    return Number.isFinite(n) ? n.toFixed(1) : '1.0';
+  }
+
+  /**
+   * Locale used for cache key hashing. Devanagari text always hashes as 'hi'
+   * regardless of the caller's locale so admin pre-gen (which passes the voice's
+   * native DB locale, e.g. 'en-US' for am_michael) and the Dart client (which
+   * forces locale=hi for Devanagari text via TtsService._effectiveLocale) agree.
+   *
+   * MUST stay byte-for-byte identical to Dart's _resolveCacheLocale in
+   * app/lib/utils/hash_utils.dart.
+   */
+  private static resolveCacheLocale(text: string, locale: string | undefined): string {
+    if (/[ऀ-ॿ]/.test(text)) return 'hi';
+    return TtsService.normalizeLocale(locale);
+  }
+
+  /**
    * Compute the full-parameter TTS cache key including provider and speechRate.
    *
    * ## Format
@@ -236,7 +275,7 @@ export class TtsService {
   /**
    * Generate a cache key for a TTS synthesis job.
    *
-   * speechRate is always a string, pre-formatted (e.g. '1.00').
+   * speechRate is always a string, pre-formatted (e.g. '1.0').
    * Conversion from number happens at the repository boundary
    * (see DatabaseService.mapTtsJobRecord).
    *
@@ -249,16 +288,34 @@ export class TtsService {
     voice: string,
     locale?: string,
     provider = this.config?.defaultTtsProvider ?? process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro',
-    speechRate: string = '1.00',
+    speechRate: string = '1.0',
   ): string {
-    const payload = JSON.stringify({
-      locale: locale ?? '',
+    return createHash('sha256').update(this.cacheKeyPayload(text, voice, locale, provider, speechRate)).digest('hex');
+  }
+
+  /**
+   * Returns the exact JSON string that gets SHA-256 hashed by `cacheKey()`.
+   * Used in cache-miss logs so diverging cache keys can be diffed byte-by-byte.
+   */
+  cacheKeyPayload(
+    text: string,
+    voice: string,
+    locale?: string,
+    provider = this.config?.defaultTtsProvider ?? process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro',
+    speechRate: string = '1.0',
+  ): string {
+    return JSON.stringify({
+      locale: TtsService.resolveCacheLocale(text, locale),
       provider,
-      speechRate,
+      speechRate: TtsService.normalizeSpeechRate(speechRate),
       text,
       voice,
     });
-    return createHash('sha256').update(payload).digest('hex');
+  }
+
+  /** Public exposure of the speechRate canonicalisation rule. */
+  static canonicalSpeechRate(rate: string | undefined): string {
+    return TtsService.normalizeSpeechRate(rate);
   }
 
   // ── S3 key ────────────────────────────────────────────────────────────────
@@ -362,9 +419,16 @@ export class TtsService {
     provider = this.config?.defaultTtsProvider ?? process.env.DEFAULT_TTS_PROVIDER ?? 'kokoro',
     speechRate = '1.0',
   ): Promise<Buffer | null> {
+    const canonicalRate = TtsService.normalizeSpeechRate(speechRate);
     const effectiveVoice = this.resolveEffectiveVoice(voice, provider);
-    const hash = this.cacheKey(text, effectiveVoice, locale, provider, speechRate);
-    return this.readCache(hash);
+    const hash = this.cacheKey(text, effectiveVoice, locale, provider, canonicalRate);
+    const cached = await this.readCache(hash);
+    if (!cached) {
+      this.logger.log(
+        `Cache MISS (checkCacheOnly) — hash=${hash.slice(0, 12)}… payload=${this.cacheKeyPayload(text, effectiveVoice, locale, provider, canonicalRate)}`,
+      );
+    }
+    return cached;
   }
 
   /**
@@ -412,6 +476,10 @@ export class TtsService {
       throw new BadRequestException(`Unknown provider: ${provider}`);
     }
 
+    // Canonicalise speechRate to exactly 1 decimal so '1', '1.0', '1.00' all
+    // produce the same downstream behaviour (cache key, logs, provider calls).
+    const canonicalRate = TtsService.normalizeSpeechRate(speechRate);
+
     // Resolve raw → effective voice (provider remap) BEFORE hashing so that
     // foreign-voice requests collapse onto a single canonical cache entry.
     const rawVoice =
@@ -424,7 +492,7 @@ export class TtsService {
     }
 
     // Compute cache key (provider + speechRate inclusive) using the effective voice.
-    const hash = this.cacheKey(text, effectiveVoice, locale, provider, speechRate);
+    const hash = this.cacheKey(text, effectiveVoice, locale, provider, canonicalRate);
 
     // Cache lookup (L1 → L2).
     const cached = await this.readCache(hash);
@@ -432,7 +500,9 @@ export class TtsService {
       this.logger.log(`Cache HIT — hash=${hash.slice(0, 12)}…, ${cached.length} bytes`);
       return cached;
     }
-    this.logger.log(`Cache MISS — hash=${hash.slice(0, 12)}… (provider=${provider})`);
+    this.logger.log(
+      `Cache MISS — hash=${hash.slice(0, 12)}… payload=${this.cacheKeyPayload(text, effectiveVoice, locale, provider, canonicalRate)}`,
+    );
 
     // Non-English locales bypass Kokoro (English-only) and go directly to Gemini.
     const skipValidation = provider === 'kokoro' && !!locale && NON_ENGLISH_LOCALES.has(locale);

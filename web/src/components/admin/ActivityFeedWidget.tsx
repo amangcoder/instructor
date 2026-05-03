@@ -67,7 +67,7 @@ function ActivityEventRow({ event }: { event: ActivityEvent }) {
   const formattedTime = formatOccurredAt(event.occurredAt);
 
   return (
-    <li className="flex items-start gap-3 py-2.5 border-b border-outline-variant/30 last:border-b-0">
+    <li className="flex items-start gap-3 py-2.5 border-b border-white/8 last:border-b-0">
       {/* Event type icon */}
       <span
         aria-hidden="true"
@@ -78,10 +78,10 @@ function ActivityEventRow({ event }: { event: ActivityEvent }) {
 
       {/* Event details */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-on-surface leading-snug">{event.description}</p>
+        <p className="text-sm text-white leading-snug">{event.description}</p>
         <time
           dateTime={event.occurredAt}
-          className="text-xs text-on-surface-variant mt-0.5 block"
+          className="text-xs text-slate-400 mt-0.5 block"
           aria-label={`Occurred at ${formattedTime}`}
         >
           {formattedTime}
@@ -155,17 +155,17 @@ export default function ActivityFeedWidget({ initialData }: ActivityFeedWidgetPr
   return (
     <section
       aria-label="Recent Activity"
-      className="rounded-xl bg-surface-container shadow-sm p-6"
+      className="rounded-xl bg-slate-800/50 border border-white/8 p-6"
     >
       {/* Widget header */}
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-semibold text-on-surface">Recent Activity</h2>
+        <h2 className="text-base font-semibold text-white">Recent Activity</h2>
 
         {/* Refresh status indicator — aria-live so screen readers are notified */}
         <span
           aria-live="polite"
           aria-atomic="true"
-          className={`text-xs text-on-surface-variant transition-opacity ${
+          className={`text-xs text-slate-400 transition-opacity ${
             isRefreshing ? 'opacity-100 animate-pulse' : 'opacity-0'
           }`}
         >
@@ -176,7 +176,7 @@ export default function ActivityFeedWidget({ initialData }: ActivityFeedWidgetPr
       {/* Refresh error banner (initial data still visible below) */}
       {refreshError && (
         <div
-          className="rounded-lg bg-error-container px-3 py-2 mb-4 text-xs text-on-error-container"
+          className="rounded-lg bg-red-950/80 border border-red-500/20 px-3 py-2 mb-4 text-xs text-red-400"
           role="alert"
           aria-label="Activity feed refresh error"
         >
@@ -202,7 +202,7 @@ export default function ActivityFeedWidget({ initialData }: ActivityFeedWidgetPr
       )}
 
       {/* Auto-refresh note (visually subtle, informational) */}
-      <p className="mt-4 text-xs text-on-surface-variant/60 text-right" aria-hidden="true">
+      <p className="mt-4 text-xs text-slate-500 text-right" aria-hidden="true">
         Auto-refreshes every 2 minutes
       </p>
     </section>

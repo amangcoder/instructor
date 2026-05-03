@@ -192,6 +192,15 @@ export default function VoiceGrid({
       audioRef.current = audio;
       setPlayingVoiceId(voiceId);
 
+      let failed = false;
+      const handleFailure = () => {
+        if (failed) return;
+        failed = true;
+        if (audioRef.current === audio) audioRef.current = null;
+        setPlayingVoiceId((prev) => (prev === voiceId ? null : prev));
+        addToast(`${voiceName}: Unable to play audio.`, 'error');
+      };
+
       audio.addEventListener('ended', () => {
         if (audioRef.current === audio) audioRef.current = null;
         setPlayingVoiceId((prev) => (prev === voiceId ? null : prev));
@@ -199,17 +208,9 @@ export default function VoiceGrid({
       audio.addEventListener('pause', () => {
         setPlayingVoiceId((prev) => (prev === voiceId ? null : prev));
       });
-      audio.addEventListener('error', () => {
-        if (audioRef.current === audio) audioRef.current = null;
-        setPlayingVoiceId((prev) => (prev === voiceId ? null : prev));
-        addToast(`${voiceName}: Unable to play audio.`, 'error');
-      });
+      audio.addEventListener('error', handleFailure);
 
-      void audio.play().catch(() => {
-        if (audioRef.current === audio) audioRef.current = null;
-        setPlayingVoiceId((prev) => (prev === voiceId ? null : prev));
-        addToast(`${voiceName}: Unable to play audio.`, 'error');
-      });
+      void audio.play().catch(handleFailure);
     },
     [addToast],
   );

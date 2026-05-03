@@ -7,8 +7,10 @@ import ChartErrorBoundary from '@/components/admin/ChartErrorBoundary';
 import DataTableToggle from '@/components/admin/DataTableToggle';
 import EmptyState from '@/components/admin/EmptyState';
 import ActivityFeedWidget from '@/components/admin/ActivityFeedWidget';
+import EngagementAccordion from '@/components/admin/EngagementAccordion';
 import type { ExtendedOverviewResponse } from '@/types/analytics';
 import type { ActivityFeedResponse } from '@/types/activity-feed';
+import type { EngagementData } from '@/components/admin/EngagementAccordion';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -60,14 +62,17 @@ export default async function AdminOverviewPage({
   const params = await searchParams;
   const range = params.range ?? '7d';
 
-  // Fetch overview and activity feed in parallel
+  // Fetch overview, activity feed, and engagement data in parallel
   let data: ExtendedOverviewResponse | null = null;
   let errorMessage: string | null = null;
   let activityData: ActivityFeedResponse | null = null;
+  let engagementData: EngagementData | null = null;
 
-  const [overviewResult, activityResult] = await Promise.allSettled([
+  const [overviewResult, activityResult, streaksResult, retentionResult] = await Promise.allSettled([
     adminFetch<ExtendedOverviewResponse>('/admin/analytics/overview', { range }),
     adminFetch<ActivityFeedResponse>('/admin/analytics/overview/activity'),
+    adminFetch<EngagementData['streaks']>('/admin/analytics/engagement/streaks'),
+    adminFetch<EngagementData['retention']>('/admin/analytics/engagement/retention'),
   ]);
 
   if (overviewResult.status === 'fulfilled') {
@@ -86,6 +91,14 @@ export default async function AdminOverviewPage({
   }
   // Activity fetch errors are silently absorbed — the widget renders EmptyState
 
+  if (streaksResult.status === 'fulfilled' && retentionResult.status === 'fulfilled') {
+    engagementData = {
+      streaks: streaksResult.value,
+      retention: retentionResult.value,
+    };
+  }
+  // Engagement fetch errors are silently absorbed — the accordion renders skeletons
+
   const totals = data?.totals;
   const weeklyPlansPlayed = totals?.weeklyPlansPlayed;
 
@@ -93,7 +106,7 @@ export default async function AdminOverviewPage({
     <div>
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <h1 className="text-2xl font-bold text-on-surface">Overview</h1>
+        <h1 className="text-2xl font-bold text-white">Overview</h1>
         <Suspense fallback={null}>
           <RangePicker />
         </Suspense>
@@ -102,7 +115,7 @@ export default async function AdminOverviewPage({
       {/* ── Error state ──────────────────────────────────────────────────── */}
       {errorMessage && (
         <div
-          className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-6"
+          className="rounded-lg bg-red-950/80 border border-red-500/20 p-4 text-sm text-red-400 mb-6"
           role="alert"
         >
           <p className="font-medium">Failed to load analytics</p>
@@ -135,7 +148,7 @@ export default async function AdminOverviewPage({
                           color="#4ade80"
                         />
                       </ChartErrorBoundary>
-                      <span className="text-xs text-on-surface-variant pb-1">
+                      <span className="text-xs text-slate-400 pb-1">
                         {weeklyPlansPlayed.sparkline.length}-day trend
                       </span>
                     </div>
@@ -291,6 +304,11 @@ export default async function AdminOverviewPage({
       {/* ── Activity Feed ─────────────────────────────────────────────────── */}
       <div className="mt-6">
         <ActivityFeedWidget initialData={activityData} />
+      </div>
+
+      {/* ── Engagement Accordion ──────────────────────────────────────────── */}
+      <div className="mt-4">
+        <EngagementAccordion initialData={engagementData} />
       </div>
     </div>
   );

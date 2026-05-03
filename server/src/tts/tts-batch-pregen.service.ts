@@ -24,7 +24,8 @@
  * and the service degrades to legacy-only behaviour.
  */
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, HeadObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getWavDurationMs } from './wav-utils';
 import { DatabaseService } from '../database/database.service';
 import { TtsRepository } from '../database/repositories/tts.repository';
 import { PlanVoicesRepository } from '../database/repositories/plan-voices.repository';
@@ -95,7 +96,7 @@ export class TtsBatchPregenService {
    *                   constraint will fail unless the slug happens to match a UUID.
    * @param locale     BCP-47 locale string (e.g. 'enUS').
    * @param provider   TTS provider identifier (e.g. 'gemini', 'kokoro').
-   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.00').
+   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.0').
    *                   Conversion from NUMERIC happens at the repository boundary.
    */
   async startBatchPregen(
@@ -110,7 +111,8 @@ export class TtsBatchPregenService {
 
     await this.recoverIfStale(planId);
 
-    const pairs = this.enumService.enumerate(planJson, voiceId, locale, provider, speechRate);
+    const canonicalRate = TtsService.canonicalSpeechRate(speechRate);
+    const pairs = this.enumService.enumerate(planJson, voiceId, locale, provider, canonicalRate);
 
     if (pairs.length === 0) {
       this.logger.warn(`startBatchPregen — no TTS pairs for planId=${planId}, marking complete`);
@@ -119,7 +121,8 @@ export class TtsBatchPregenService {
         await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
       }
       // Always write plan_voices when repository is available.
-      await this.writePlanVoiceStatus(planId, voiceId, locale, 'ready');
+      // No say-steps to synthesise → durationMs of 0 keeps the column populated.
+      await this.writePlanVoiceStatus(planId, voiceId, locale, 'ready', 0);
       return;
     }
 
@@ -138,7 +141,8 @@ export class TtsBatchPregenService {
         await this.ttsRepo.setTtsStatus(planId, 'completed', 0, 0);
       }
       // Always write plan_voices when repository is available.
-      await this.writePlanVoiceStatus(planId, voiceId, locale, 'ready');
+      const durationMs = await this.computeTotalDurationMs(pairs.map((p) => p.cacheKey));
+      await this.writePlanVoiceStatus(planId, voiceId, locale, 'ready', durationMs);
       return;
     }
 
@@ -215,7 +219,7 @@ export class TtsBatchPregenService {
    * @param locale     BCP-47 locale (must match the existing plan_voices row locale).
    * @param planJson   Serialised plan JSON for TTS step enumeration.
    * @param provider   TTS provider identifier (e.g. 'gemini', 'kokoro').
-   * @param speechRate Speech rate string (e.g. '1.00').
+   * @param speechRate Speech rate string (e.g. '1.0').
    */
   async regenerateVoice(
     planId: string,
@@ -223,7 +227,7 @@ export class TtsBatchPregenService {
     locale: string,
     planJson: string,
     provider: string,
-    speechRate: string = '1.00',
+    speechRate: string = '1.0',
   ): Promise<void> {
     if (!this.planVoicesRepo) {
       this.logger.warn(`regenerateVoice — PlanVoicesRepository not available, skipping planId=${planId}`);
@@ -282,21 +286,26 @@ export class TtsBatchPregenService {
     // All jobs for this voice+locale were already in S3 — mark voice ready.
     if (jobs.length === 0) {
       if (allJobs.length > 0) {
-        await this.writePlanVoiceStatus(planId, allJobs[0].voiceId, allJobs[0].locale, 'ready');
+        const durationMs = await this.computeTotalDurationMs(allJobs.map((j) => j.cacheKey));
+        await this.writePlanVoiceStatus(planId, allJobs[0].voiceId, allJobs[0].locale, 'ready', durationMs);
       }
       return;
     }
 
     let anyFailed = false;
+    // Reuse synthesised buffers when summing duration so we avoid an extra
+    // S3 GET for files we already have in memory.
+    const synthesisedBuffers = new Map<string, Buffer>();
 
     for (const job of jobs) {
       let lastErr: Error | undefined;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
-          await this.ttsService.synthesize(
+          const audio = await this.ttsService.synthesize(
             job.text, job.voiceId, job.locale, job.provider, job.speechRate,
           );
+          synthesisedBuffers.set(job.cacheKey, audio);
           await this.ttsRepo.updateTtsJobStatus(job.id, 'completed', `tts/${job.cacheKey}.wav`);
           // Increment plans.tts_completed counter only in legacy / dual-write mode.
           if (!this.usePlanVoicesGate) {
@@ -325,7 +334,10 @@ export class TtsBatchPregenService {
 
     // Update plan_voices with final synthesis result for this voice+locale group.
     const finalStatus: PlanVoiceStatus = anyFailed ? 'failed' : 'ready';
-    await this.writePlanVoiceStatus(planId, allJobs[0].voiceId, allJobs[0].locale, finalStatus);
+    const durationMs = finalStatus === 'ready'
+      ? await this.computeTotalDurationMs(allJobs.map((j) => j.cacheKey), synthesisedBuffers)
+      : undefined;
+    await this.writePlanVoiceStatus(planId, allJobs[0].voiceId, allJobs[0].locale, finalStatus, durationMs);
   }
 
   // ── Grouping ───────────────────────────────────────────────────────────────
@@ -414,6 +426,7 @@ export class TtsBatchPregenService {
     voiceId: string,
     locale: string,
     status: PlanVoiceStatus,
+    durationMs?: number,
   ): Promise<void> {
     if (!this.planVoicesRepo) return;
     const resolvedVoiceId = await this.resolveVoiceUuid(voiceId);
@@ -428,6 +441,7 @@ export class TtsBatchPregenService {
       voiceId: resolvedVoiceId,
       locale,
       status,
+      ...(durationMs !== undefined && { durationMs }),
     });
   }
 
@@ -452,6 +466,53 @@ export class TtsBatchPregenService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // ── Duration helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Sum the WAV duration (ms) across the given cache keys. When a buffer is
+   * already in `buffers` (keyed by cacheKey) the header is parsed in-memory;
+   * otherwise the leading bytes are fetched from S3 via a Range request so we
+   * read just enough to walk the RIFF chunks (~1 KiB).
+   *
+   * Returns 0 when S3 is unconfigured or every header parse fails — durationMs
+   * is informational for the admin UI; failure here must not block the
+   * status-ready transition.
+   */
+  private async computeTotalDurationMs(
+    cacheKeys: string[],
+    buffers?: Map<string, Buffer>,
+  ): Promise<number> {
+    let total = 0;
+    for (const cacheKey of cacheKeys) {
+      const buf = buffers?.get(cacheKey);
+      const ms = buf
+        ? getWavDurationMs(buf)
+        : await this.fetchWavDurationFromS3(cacheKey);
+      if (ms != null) total += ms;
+    }
+    return total;
+  }
+
+  private async fetchWavDurationFromS3(cacheKey: string): Promise<number | null> {
+    if (!this.s3 || !this.bucket) return null;
+    try {
+      const resp = await this.s3.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: `tts/${cacheKey}.wav`,
+          Range: 'bytes=0-1023',
+        }),
+      );
+      const bytes = await resp.Body?.transformToByteArray();
+      if (!bytes) return null;
+      return getWavDurationMs(Buffer.from(bytes));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`fetchWavDurationFromS3 — ${cacheKey.slice(0, 12)}… failed: ${msg}`);
+      return null;
     }
   }
 

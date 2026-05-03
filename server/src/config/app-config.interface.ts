@@ -16,6 +16,8 @@ export interface AppConfig {
   defaultTtsProvider: string;
   kokoroServerUrl: string;
   kokoroApiKey: string;
+  vibevoiceServerUrl: string;
+  vibevoiceApiKey: string;
   geminiApiKey: string;
 
   // Auth

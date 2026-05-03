@@ -1,0 +1,146 @@
+- generic [active] [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - banner [ref=e3]:
+    - navigation "Main navigation" [ref=e4]:
+      - link "Instructor home" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: Instructor
+      - generic [ref=e8]:
+        - link "Home" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Privacy Policy" [ref=e10] [cursor=pointer]:
+          - /url: /privacy-policy
+        - link "Data Deletion" [ref=e11] [cursor=pointer]:
+          - /url: /data-deletion
+  - main [ref=e12]:
+    - generic [ref=e14]:
+      - region "Instructor" [ref=e15]:
+        - generic [ref=e17]:
+          - heading "Instructor" [level=1] [ref=e18]
+          - paragraph [ref=e19]: Voice-guided workout, meditation, study, and cooking plans
+          - link "Get it on Google Play" [ref=e22] [cursor=pointer]:
+            - /url: "#TODO-play-store"
+            - img "Get it on Google Play" [ref=e23]
+      - region "Why Instructor?" [ref=e24]:
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - heading "Why Instructor?" [level=2] [ref=e27]
+            - paragraph [ref=e28]: Instructor packs powerful features into a simple, distraction-free experience designed to keep you moving through every step of your routine.
+          - list "App features" [ref=e29]:
+            - listitem [ref=e30]:
+              - article [ref=e31]:
+                - generic [ref=e32]: 🎵
+                - heading "Plan-Based Timer with Voice Guidance" [level=3] [ref=e33]
+                - paragraph [ref=e34]: Execute timed routines with real-time voice guidance for each step. Perfect for workouts, meditation, study sessions, and cooking recipes.
+            - listitem [ref=e35]:
+              - article [ref=e36]:
+                - generic [ref=e37]: ⚡
+                - heading "AI-Powered Plan Generation" [level=3] [ref=e38]
+                - paragraph [ref=e39]: Let our AI generate custom workout plans, meditation routines, and study schedules tailored to your goals.
+            - listitem [ref=e40]:
+              - article [ref=e41]:
+                - generic [ref=e42]: 📚
+                - heading "Plan Library with Starter Templates" [level=3] [ref=e43]
+                - paragraph [ref=e44]: "Browse curated starter plans and templates. Filter by category: fitness, wellness, learning, and cooking."
+            - listitem [ref=e45]:
+              - article [ref=e46]:
+                - generic [ref=e47]: 🔔
+                - heading "Background Execution & Notifications" [level=3] [ref=e48]
+                - paragraph [ref=e49]: Keep your screen off while running routines. Get notifications for upcoming steps and session completion.
+            - listitem [ref=e50]:
+              - article [ref=e51]:
+                - generic [ref=e52]: 📱
+                - heading "Phone Call Auto-Pause" [level=3] [ref=e53]
+                - paragraph [ref=e54]: Incoming calls automatically pause your routine. Resume where you left off when the call ends.
+            - listitem [ref=e55]:
+              - article [ref=e56]:
+                - generic [ref=e57]: 💾
+                - heading "Offline-Capable Local Database" [level=3] [ref=e58]
+                - paragraph [ref=e59]: All your plans and routines are stored locally. Use the app without internet — sync when connected.
+            - listitem [ref=e60]:
+              - article [ref=e61]:
+                - generic [ref=e62]: ☀️
+                - heading "Dark & Light Theme Support" [level=3] [ref=e63]
+                - paragraph [ref=e64]: Switch between beautiful dark and light themes. Respects your device settings for seamless experience.
+      - region "Built for every routine" [ref=e65]:
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - heading "Built for every routine" [level=2] [ref=e68]
+            - paragraph [ref=e69]: Whether you're breaking a sweat, finding inner calm, cramming for an exam, or following a recipe — Instructor adapts to your rhythm.
+          - list "App use cases" [ref=e70]:
+            - listitem [ref=e71]:
+              - article [ref=e72]:
+                - generic [ref=e73]: 🏋️
+                - heading "Workouts" [level=3] [ref=e74]
+                - paragraph [ref=e75]: Structure your fitness routines with timed exercises, rest periods, and voice guidance. Stay motivated with real-time spoken cues for every step.
+            - listitem [ref=e76]:
+              - article [ref=e77]:
+                - generic [ref=e78]: 🧘
+                - heading "Meditation" [level=3] [ref=e79]
+                - paragraph [ref=e80]: Create guided meditation sessions with customized breathing exercises, mindfulness cues, and soothing voice narration to deepen your practice.
+            - listitem [ref=e81]:
+              - article [ref=e82]:
+                - generic [ref=e83]: 📖
+                - heading "Study Sessions" [level=3] [ref=e84]
+                - paragraph [ref=e85]: Build focused study routines with Pomodoro-style timers, breaks, and voice reminders. Master subjects one step at a time with structured learning.
+            - listitem [ref=e86]:
+              - article [ref=e87]:
+                - generic [ref=e88]: 🍳
+                - heading "Cooking Recipes" [level=3] [ref=e89]
+                - paragraph [ref=e90]: Follow cooking instructions step-by-step with voice guidance for prep time, cooking duration, and plating tips. Never miss a crucial timing detail.
+            - listitem [ref=e91]:
+              - article [ref=e92]:
+                - generic [ref=e93]: ⏱️
+                - heading "Other Timed Routines" [level=3] [ref=e94]
+                - paragraph [ref=e95]: "Build any timed routine: morning stretches, evening wind-down routines, project planning sessions, or team standup meetings with synchronized voice guidance."
+      - region "4 Steps to Better Habits" [ref=e96]:
+        - generic [ref=e97]:
+          - generic [ref=e98]:
+            - heading "4 Steps to Better Habits" [level=2] [ref=e99]
+            - paragraph [ref=e100]: Get up and running in under a minute. No complex setup required.
+          - list "Steps to get started with Instructor" [ref=e102]:
+            - listitem [ref=e103]:
+              - generic [ref=e104]: "1"
+              - generic [ref=e105]: "Step 1:"
+              - generic [ref=e106]:
+                - heading "Pick or create a plan" [level=3] [ref=e107]
+                - paragraph [ref=e108]: Browse starter plans in the library, or generate a custom one in seconds using AI. Workouts, meditations, study sessions, recipes — all in one place.
+            - listitem [ref=e109]:
+              - generic [ref=e110]: "2"
+              - generic [ref=e111]: "Step 2:"
+              - generic [ref=e112]:
+                - heading "Customise your routine" [level=3] [ref=e113]
+                - paragraph [ref=e114]: Adjust step durations, rearrange the order, and choose your voice guidance style. Your plan, your rules.
+            - listitem [ref=e115]:
+              - generic [ref=e116]: "3"
+              - generic [ref=e117]: "Step 3:"
+              - generic [ref=e118]:
+                - heading "Run with voice guidance" [level=3] [ref=e119]
+                - paragraph [ref=e120]: Press play and let Instructor guide you through every step with spoken cues. Keep your screen off — audio keeps you in the zone.
+            - listitem [ref=e121]:
+              - generic [ref=e122]: "4"
+              - generic [ref=e123]: "Step 4:"
+              - generic [ref=e124]:
+                - heading "Review and improve" [level=3] [ref=e125]
+                - paragraph [ref=e126]: Refine plans based on how they felt, adjust step durations, and keep improving your routines over time.
+  - contentinfo [ref=e127]:
+    - generic [ref=e128]:
+      - generic [ref=e129]:
+        - generic [ref=e130]:
+          - heading "Instructor" [level=3] [ref=e131]
+          - paragraph [ref=e132]: Interactive learning content creation platform.
+        - generic [ref=e133]:
+          - heading "Legal" [level=4] [ref=e134]
+          - list [ref=e135]:
+            - listitem [ref=e136]:
+              - link "Privacy Policy" [ref=e137] [cursor=pointer]:
+                - /url: /privacy-policy
+            - listitem [ref=e138]:
+              - link "Data Deletion" [ref=e139] [cursor=pointer]:
+                - /url: /data-deletion
+        - generic [ref=e140]:
+          - heading "Contact" [level=4] [ref=e141]
+          - link "admin@layersiq.com" [ref=e142] [cursor=pointer]:
+            - /url: mailto:admin@layersiq.com
+      - paragraph [ref=e144]: © 2026 LayersIQ Private Limited

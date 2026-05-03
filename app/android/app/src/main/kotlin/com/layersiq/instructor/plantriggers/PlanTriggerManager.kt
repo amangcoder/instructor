@@ -11,11 +11,13 @@ import io.flutter.plugin.common.MethodChannel
  * Channel: com.layersiq.instructor/plan_trigger
  *
  * Methods:
- *   canScheduleExactAlarms() → Bool
- *   openExactAlarmSettings()  → Void
- *   scheduleTrigger(args)     → Bool  (false = exact-alarm permission missing)
- *   cancelTrigger(id)         → Void
- *   listTriggers()            → List<Map> (for diagnostics / UI listing)
+ *   canScheduleExactAlarms()      → Bool
+ *   openExactAlarmSettings()      → Void
+ *   canUseFullScreenIntent()      → Bool   (Android 14+ FSI permission grant)
+ *   openFullScreenIntentSettings()→ Void   (Android 14+ system settings)
+ *   scheduleTrigger(args)         → Bool   (false = exact-alarm permission missing)
+ *   cancelTrigger(id)             → Void
+ *   listTriggers()                → List<Map> (for diagnostics / UI listing)
  *
  * scheduleTrigger args (Map<String, Any>):
  *   id            — String (client UUID, stable across devices)
@@ -46,6 +48,14 @@ class PlanTriggerManager(private val appContext: Context) {
 
             "openExactAlarmSettings" -> {
                 PlanTriggerScheduler.openExactAlarmSettings(appContext)
+                result.success(null)
+            }
+
+            "canUseFullScreenIntent" ->
+                result.success(PlanTriggerScheduler.canUseFullScreenIntent(appContext))
+
+            "openFullScreenIntentSettings" -> {
+                PlanTriggerScheduler.openFullScreenIntentSettings(appContext)
                 result.success(null)
             }
 

@@ -54,20 +54,14 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
   bool _migrationFailureWarningShown = false;
 
   // Branch indices below match the [StatefulShellRoute] branch order in
-  // [router.dart] (Library=0, Create=1, Profile=2, Discover=3). Visual order
+  // [router.dart] (Home=0, Create=1, Profile=2, Discover=3). Visual order
   // can differ from branch order — Profile is always rendered last so it
   // anchors the rightmost slot regardless of whether Discover is shown.
-  static const _libraryDestination = _NavItem(
-    icon: Icons.auto_stories,
-    label: 'Library',
+  static const _homeDestination = _NavItem(
+    icon: Icons.home_rounded,
+    label: 'Home',
     route: '/',
     branchIndex: 0,
-  );
-  static const _createDestination = _NavItem(
-    icon: Icons.edit_note,
-    label: 'Create',
-    route: '/editor/new',
-    branchIndex: 1,
   );
   static const _profileDestination = _NavItem(
     icon: Icons.person,
@@ -187,8 +181,7 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
     final discoverEnabled =
         ref.watch(discoverEnabledProvider).valueOrNull ?? false;
     final destinations = [
-      _libraryDestination,
-      _createDestination,
+      _homeDestination,
       if (discoverEnabled) _discoverDestination,
       _profileDestination,
     ];
@@ -232,14 +225,16 @@ class _BottomNavShellState extends ConsumerState<BottomNavShell> {
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     for (final item in destinations)
-                      _NavButton(
-                        icon: item.icon,
-                        label: item.label,
-                        isActive: item.branchIndex ==
-                            widget.navigationShell.currentIndex,
-                        colorScheme: colorScheme,
-                        onTap: () =>
-                            widget.navigationShell.goBranch(item.branchIndex),
+                      Expanded(
+                        child: _NavButton(
+                          icon: item.icon,
+                          label: item.label,
+                          isActive: item.branchIndex ==
+                              widget.navigationShell.currentIndex,
+                          colorScheme: colorScheme,
+                          onTap: () =>
+                              widget.navigationShell.goBranch(item.branchIndex),
+                        ),
                       ),
                   ],
                 ),
@@ -296,7 +291,8 @@ class _NavButton extends StatelessWidget {
       child: GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
+      child: Center(
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
         padding: EdgeInsets.symmetric(
@@ -341,6 +337,7 @@ class _NavButton extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
       ),
     );

@@ -254,7 +254,7 @@ export class PlanRequestPromoteService {
           voiceId,
           voice.locale,
           voice.provider,
-          '1.00',
+          '1.0',
         );
         this.logger.log(
           `TTS batch enqueued: planId=${planId}, voiceId=${voiceId}`,

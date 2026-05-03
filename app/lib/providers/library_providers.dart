@@ -1,8 +1,7 @@
-/// Riverpod providers for the Plan Library screen.
+/// Riverpod providers for the Discover library list.
 ///
-/// Provides simple [StateProvider]s for UI state (tab index, search query,
-/// category filter) and a [libraryPlansProvider] that fetches from the server
-/// API with the active filters applied.
+/// UI state ([searchQueryProvider], [selectedCategoryProvider]) plus a
+/// [libraryPlansProvider] that fetches the catalog with filters applied.
 library library_providers;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,11 +15,6 @@ part 'library_providers.g.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // UI state providers
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Tracks the currently selected tab index in the Plan Library screen.
-///
-/// 0 = My Plans tab, 1 = Browse Library tab.
-final libraryTabIndexProvider = StateProvider<int>((ref) => 0);
 
 /// Holds the current search query string entered in the library search bar.
 ///

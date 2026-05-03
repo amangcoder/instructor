@@ -7,6 +7,8 @@ import android.app.Notification
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -36,8 +38,13 @@ class PlanAlarmReceiver : BroadcastReceiver() {
         const val EXTRA_TRIGGER_ID = "triggerId"
 
         private const val TAG = "PlanAlarmReceiver"
-        private const val CHANNEL_ID = "plan_triggers"
-        private const val CHANNEL_NAME = "Plan start reminders"
+
+        // Bumped from "plan_triggers" → "_v2" so the uplift to USAGE_ALARM,
+        // VISIBILITY_PUBLIC, and lights/vibration takes effect on devices that
+        // already created the original channel (channels are immutable).
+        const val CHANNEL_ID = "plan_triggers_v2"
+        private const val LEGACY_CHANNEL_ID = "plan_triggers"
+        private const val CHANNEL_NAME = "Plan start alarms"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -86,7 +93,21 @@ class PlanAlarmReceiver : BroadcastReceiver() {
     private fun ensureChannel(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // One-time cleanup of the v1 channel so settings don't show two
+        // entries after the uplift. Safe no-op if it never existed.
+        if (nm.getNotificationChannel(LEGACY_CHANNEL_ID) != null) {
+            nm.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        }
+
         if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+
+        val alarmAttrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val defaultAlarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+
         val channel = NotificationChannel(
             CHANNEL_ID,
             CHANNEL_NAME,
@@ -94,6 +115,11 @@ class PlanAlarmReceiver : BroadcastReceiver() {
         ).apply {
             description = "Alerts when a scheduled plan session is starting"
             setShowBadge(true)
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            enableLights(true)
+            enableVibration(true)
+            setBypassDnd(true)
+            setSound(defaultAlarmUri, alarmAttrs)
         }
         nm.createNotificationChannel(channel)
     }

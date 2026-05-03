@@ -8,6 +8,7 @@
 import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { AdminAnalyticsRepository } from '../database/repositories/analytics.repository';
+import { resolvePhotoUrl } from '../auth/photo-url.util';
 import type {
   AdminUserRow,
   AdminUsersListResponse,
@@ -117,7 +118,7 @@ export class AdminUsersService {
           name: user.name,
           username: user.username,
           role: user.role === 'admin' ? 'admin' : 'user',
-          photoUrl: user.photoUrl,
+          photoUrl: resolvePhotoUrl((user.photoUrl as string | null) ?? null),
           createdAt: toIso(user.createdAt)!,
         },
         stats: {

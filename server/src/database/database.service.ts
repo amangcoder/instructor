@@ -37,7 +37,7 @@ import { Pool } from 'pg';
 import { and, asc, desc, eq, gt, ilike, isNull, or, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import * as schema from './schema';
-import { categories, deletionRequests, libraryPlans, otpRecords, planTriggers, plans, refreshTokens, series, seriesSubscriptions, sessionCompletions, ttsJobs, users } from './schema';
+import { categories, deletionRequests, libraryPlans, otpRecords, planTriggers, plans, refreshTokens, series, seriesSubscriptions, sessionCompletions, ttsJobs, userLibraryLinks, users } from './schema';
 import type { NeonHttpDatabase } from 'drizzle-orm/neon-http';
 import type { AppConfig } from '../config/app-config.interface';
 
@@ -124,6 +124,8 @@ export interface PlanSummaryRecord {
   voiceQuality: string;
   shareToken: string | null;
   shareTokenCreatedAt: Date | null;
+  /** Set for linked library plans; null for user-created plans. */
+  sourceLibraryPlanId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -690,20 +692,34 @@ export class DatabaseService {
   async deletePlan(planId: string, userId: string): Promise<void> {
     if (this.noop) return;
 
-    const rows = await this.withRetry(() =>
+    // Try user-created plans first.
+    const planRows = await this.withRetry(() =>
       this.db!
         .delete(plans)
         .where(and(eq(plans.id, planId), eq(plans.userId, userId)))
         .returning({ id: plans.id }),
     );
 
-    if (rows.length === 0) {
+    if (planRows.length > 0) {
+      this.logger.log(`Plan deleted: planId=${planId}, userId=${userId}`);
+      return;
+    }
+
+    // Fall back: treat planId as a library link id.
+    const linkRows = await this.withRetry(() =>
+      this.db!
+        .delete(userLibraryLinks)
+        .where(and(eq(userLibraryLinks.id, planId), eq(userLibraryLinks.userId, userId)))
+        .returning({ id: userLibraryLinks.id }),
+    );
+
+    if (linkRows.length === 0) {
       throw new NotFoundException(
         `Plan ${planId} not found or does not belong to the authenticated user`,
       );
     }
 
-    this.logger.log(`Plan deleted: planId=${planId}, userId=${userId}`);
+    this.logger.log(`Library link deleted: linkId=${planId}, userId=${userId}`);
   }
 
   /** Copy a library plan into the user's plans. */
@@ -843,6 +859,7 @@ export class DatabaseService {
   async listPlans(userId: string): Promise<PlanSummaryRecord[]> {
     if (this.noop) return [];
 
+    // ── User-created plans ─────────────────────────────────────────────────
     const rows = await this.withRetry(() =>
       this.db!
         .select({
@@ -864,7 +881,7 @@ export class DatabaseService {
         .orderBy(desc(plans.updatedAt)),
     );
 
-    return rows.map((row) => ({
+    const userPlans: PlanSummaryRecord[] = rows.map((row) => ({
       planId: row.id,
       name: row.name,
       planJson: row.planJson,
@@ -878,6 +895,124 @@ export class DatabaseService {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
+
+    // ── Linked library plans ───────────────────────────────────────────────
+    // Join user_library_links with library_plans to synthesize plan-shaped
+    // records. planJson is always read live from the library so admin edits
+    // reach all linked users on next sync.
+    const linkRows = await this.withRetry(() =>
+      this.db!
+        .select({
+          linkId: userLibraryLinks.id,
+          libraryPlanId: userLibraryLinks.libraryPlanId,
+          addedAt: userLibraryLinks.addedAt,
+          lastUsedAt: userLibraryLinks.lastUsedAt,
+          name: libraryPlans.name,
+          planJson: libraryPlans.planJson,
+          category: libraryPlans.category,
+          defaultVoice: libraryPlans.defaultVoice,
+        })
+        .from(userLibraryLinks)
+        .innerJoin(libraryPlans, eq(userLibraryLinks.libraryPlanId, libraryPlans.id))
+        .where(eq(userLibraryLinks.userId, userId))
+        .orderBy(desc(userLibraryLinks.addedAt)),
+    );
+
+    const linkedPlans: PlanSummaryRecord[] = linkRows.map((row) => ({
+      planId: row.linkId,               // link id is the client-facing "plan id"
+      name: row.name,
+      planJson: row.planJson,
+      isActive: false,
+      ttsStatus: 'none',
+      ttsTotal: 0,
+      ttsCompleted: 0,
+      voiceQuality: 'standard',
+      shareToken: null,
+      shareTokenCreatedAt: null,
+      sourceLibraryPlanId: row.libraryPlanId,
+      createdAt: row.addedAt,
+      updatedAt: row.lastUsedAt ?? row.addedAt,
+    }));
+
+    return [...userPlans, ...linkedPlans];
+  }
+
+  // ── User library links ────────────────────────────────────────────────────
+
+  /**
+   * Link a library plan to a user's collection (idempotent — ON CONFLICT DO NOTHING).
+   * Returns the link's id (new or existing).
+   */
+  async addUserLibraryLink(
+    userId: string,
+    libraryPlanId: string,
+  ): Promise<{ linkId: string }> {
+    if (this.noop) return { linkId: uuidv4() };
+
+    // Verify library plan exists.
+    const lp = await this.withRetry(() =>
+      this.db!
+        .select({ id: libraryPlans.id })
+        .from(libraryPlans)
+        .where(eq(libraryPlans.id, libraryPlanId))
+        .limit(1),
+    );
+    if (lp.length === 0) {
+      throw new NotFoundException(`Library plan ${libraryPlanId} not found`);
+    }
+
+    // Upsert: if the link already exists, return the existing id.
+    const rows = await this.withRetry(() =>
+      this.db!
+        .insert(userLibraryLinks)
+        .values({ userId, libraryPlanId })
+        .onConflictDoNothing()
+        .returning({ id: userLibraryLinks.id }),
+    );
+
+    if (rows.length > 0) {
+      this.logger.log(`Library link created: userId=${userId}, libraryPlanId=${libraryPlanId}, linkId=${rows[0].id}`);
+      return { linkId: rows[0].id };
+    }
+
+    // Link already existed — look it up.
+    const existing = await this.withRetry(() =>
+      this.db!
+        .select({ id: userLibraryLinks.id })
+        .from(userLibraryLinks)
+        .where(and(eq(userLibraryLinks.userId, userId), eq(userLibraryLinks.libraryPlanId, libraryPlanId)))
+        .limit(1),
+    );
+    this.logger.log(`Library link already exists: userId=${userId}, libraryPlanId=${libraryPlanId}, linkId=${existing[0].id}`);
+    return { linkId: existing[0].id };
+  }
+
+  /** Remove a user's library link by its id. Throws NotFoundException if not found or wrong user. */
+  async removeUserLibraryLink(linkId: string, userId: string): Promise<void> {
+    if (this.noop) return;
+
+    const rows = await this.withRetry(() =>
+      this.db!
+        .delete(userLibraryLinks)
+        .where(and(eq(userLibraryLinks.id, linkId), eq(userLibraryLinks.userId, userId)))
+        .returning({ id: userLibraryLinks.id }),
+    );
+
+    if (rows.length === 0) {
+      throw new NotFoundException(`Library link ${linkId} not found or does not belong to user`);
+    }
+    this.logger.log(`Library link removed: linkId=${linkId}, userId=${userId}`);
+  }
+
+  /** Stamp last_used_at on a library link. No-op if the link doesn't exist. */
+  async updateLibraryLinkLastUsed(linkId: string, userId: string): Promise<void> {
+    if (this.noop) return;
+    await this.withRetry(() =>
+      this.db!
+        .update(userLibraryLinks)
+        .set({ lastUsedAt: new Date() })
+        .where(and(eq(userLibraryLinks.id, linkId), eq(userLibraryLinks.userId, userId))),
+    );
   }
 
   // ── Library plans ──────────────────────────────────────────────────────────
@@ -2251,22 +2386,64 @@ export class DatabaseService {
 
   private calcTotalDurationSeconds(planJson: string): number {
     try {
-      const parsed = JSON.parse(planJson) as {
-        steps?: { runtimeType?: string; duration?: number; estimatedDuration?: number }[];
-      };
+      const parsed = JSON.parse(planJson) as { steps?: unknown };
       if (!Array.isArray(parsed.steps)) return 0;
-      const totalMicros = parsed.steps.reduce((sum, step) => {
-        if (step.runtimeType === 'wait' && typeof step.duration === 'number') {
-          return sum + step.duration;
-        }
-        if (step.runtimeType === 'say' && typeof step.estimatedDuration === 'number') {
-          return sum + step.estimatedDuration;
-        }
-        return sum;
-      }, 0);
+      const totalMicros = this.sumStepMicros(parsed.steps);
       return Math.round(totalMicros / 1_000_000);
     } catch {
       return 0;
     }
+  }
+
+  // Mirrors PlanStep.estimatedStepDuration in app/lib/models/plan_step.dart.
+  // Durations are Freezed-serialized as microseconds.
+  //
+  // Library plans don't carry `estimatedDuration` on `say` steps (TTS pre-gen
+  // writes durations to plan_voices.duration_ms, never back into planJson),
+  // so fall back to a word-rate estimate at ~150 wpm when the field is absent.
+  private sumStepMicros(steps: unknown[]): number {
+    return steps.reduce<number>((sum, raw) => {
+      if (!raw || typeof raw !== 'object') return sum;
+      const step = raw as {
+        runtimeType?: string;
+        duration?: unknown;
+        estimatedDuration?: unknown;
+        text?: unknown;
+        from?: unknown;
+        to?: unknown;
+        intervalSeconds?: unknown;
+        count?: unknown;
+        children?: unknown;
+      };
+      switch (step.runtimeType) {
+        case 'wait':
+          return sum + (typeof step.duration === 'number' ? step.duration : 0);
+        case 'say': {
+          if (typeof step.estimatedDuration === 'number') return sum + step.estimatedDuration;
+          if (typeof step.text === 'string') return sum + this.estimateSpeechMicros(step.text);
+          return sum;
+        }
+        case 'count': {
+          if (typeof step.from !== 'number' || typeof step.to !== 'number') return sum;
+          const interval = typeof step.intervalSeconds === 'number' ? step.intervalSeconds : 1;
+          const seconds = (Math.abs(step.from - step.to) + 1) * interval;
+          return sum + seconds * 1_000_000;
+        }
+        case 'repeat': {
+          if (!Array.isArray(step.children)) return sum;
+          const count = typeof step.count === 'number' ? step.count : 0;
+          return sum + this.sumStepMicros(step.children) * count;
+        }
+        default:
+          return sum;
+      }
+    }, 0);
+  }
+
+  // Rough speech-duration estimate from text. ~150 wpm = 2.5 words/sec.
+  private estimateSpeechMicros(text: string): number {
+    const words = text.trim().split(/\s+/).filter(Boolean).length;
+    if (words === 0) return 0;
+    return Math.round((words / 2.5) * 1_000_000);
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Redis } from '@upstash/redis';
 import { ElevenLabsProxyService } from './elevenlabs-proxy.service';
+import { VibeVoiceProxyService } from './vibevoice-proxy.service';
 
 // ── Redis catalog cache ───────────────────────────────────────────────────────
 
@@ -110,6 +111,19 @@ const KOKORO_FALLBACK_LOCALES: LocaleOption[] = [
   { id: 'hi', label: 'Hindi' },
 ];
 
+// ── VibeVoice catalog ────────────────────────────────────────────────────────
+// Voices are sourced from the operator's voice-prompt directory at runtime.
+// The fallback list intentionally stays empty — VibeVoice has no canonical
+// preset voices, and pretending we have presets would surface unselectable
+// options to the UI.
+
+const VIBEVOICE_FALLBACK_VOICES: VoiceOption[] = [];
+
+const VIBEVOICE_LOCALES: LocaleOption[] = [
+  { id: 'en', label: 'English' },
+  { id: 'zh', label: 'Mandarin Chinese' },
+];
+
 // ── ElevenLabs static voice/locale catalog ──────────────────────────────────
 // Popular pre-made ElevenLabs voices. The live list is fetched at runtime
 // when the API key is set; this catalog is the fallback.
@@ -215,6 +229,13 @@ export const KOKORO_VOICE_MAP: Record<string, string> = {
   pqHfZKP75CvOlQylNhV4: 'am_onyx',     // Bill → Onyx
 };
 
+/**
+ * VibeVoice voice mapping is intentionally empty — voices are operator-supplied
+ * via the voice-prompt directory and have no canonical names that we can map
+ * statically. Plans switching to VibeVoice fall back to defaultVoice.
+ */
+const VIBEVOICE_VOICE_MAP: Record<string, string> = {};
+
 /** Maps Gemini + Kokoro voice IDs → nearest ElevenLabs equivalent. */
 const ELEVENLABS_VOICE_MAP: Record<string, string> = {
   // Gemini → ElevenLabs
@@ -257,7 +278,10 @@ export class ProviderRegistryService {
   private readonly redis: Redis | null;
   private readonly cacheNoop: boolean;
 
-  constructor(private readonly elevenLabs: ElevenLabsProxyService) {
+  constructor(
+    private readonly elevenLabs: ElevenLabsProxyService,
+    private readonly vibeVoice: VibeVoiceProxyService,
+  ) {
     this.kokoroUrl =
       process.env.KOKORO_SERVER_URL ?? 'http://127.0.0.1:3070';
     const url = process.env.UPSTASH_REDIS_REST_URL ?? '';
@@ -271,7 +295,7 @@ export class ProviderRegistryService {
 
   /** Returns the static list of registered provider IDs. */
   getProviderIds(): string[] {
-    return ['gemini', 'kokoro', 'elevenlabs'];
+    return ['gemini', 'kokoro', 'elevenlabs', 'vibevoice'];
   }
 
   /** Returns true if the given provider ID is registered. */
@@ -313,6 +337,7 @@ export class ProviderRegistryService {
       },
       await this.getKokoroConfig(),
       await this.getElevenLabsConfig(),
+      await this.getVibeVoiceConfig(),
     ];
 
     const allConfigs: ProviderConfig[] = rawConfigs.map((c) => ({
@@ -421,6 +446,31 @@ export class ProviderRegistryService {
       voices: ELEVENLABS_FALLBACK_VOICES,
       locales: ELEVENLABS_LOCALES,
       voiceMap: ELEVENLABS_VOICE_MAP,
+    };
+  }
+
+  private async getVibeVoiceConfig(): Promise<Omit<ProviderConfig, 'isActive' | 'defaultVoice'>> {
+    try {
+      const liveVoices = await this.vibeVoice.fetchVoices();
+      if (liveVoices.length > 0) {
+        return {
+          id: 'vibevoice',
+          label: 'Microsoft VibeVoice (Self-Hosted)',
+          voices: liveVoices,
+          locales: VIBEVOICE_LOCALES,
+          voiceMap: VIBEVOICE_VOICE_MAP,
+        };
+      }
+    } catch {
+      this.logger.warn('VibeVoice server unreachable — returning empty voice list');
+    }
+
+    return {
+      id: 'vibevoice',
+      label: 'Microsoft VibeVoice (Self-Hosted)',
+      voices: VIBEVOICE_FALLBACK_VOICES,
+      locales: VIBEVOICE_LOCALES,
+      voiceMap: VIBEVOICE_VOICE_MAP,
     };
   }
 }

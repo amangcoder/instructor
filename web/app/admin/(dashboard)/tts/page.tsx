@@ -131,7 +131,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
     <div>
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <h1 className="text-2xl font-bold text-on-surface">TTS Analytics</h1>
+        <h1 className="text-2xl font-bold text-white">TTS Analytics</h1>
         <Suspense fallback={null}>
           <RangePicker />
         </Suspense>
@@ -146,7 +146,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
       <section aria-labelledby="tts-volume-heading" className="mb-10">
         <h2
           id="tts-volume-heading"
-          className="text-lg font-semibold text-on-surface mb-4"
+          className="text-lg font-semibold text-white mb-4"
         >
           TTS Volume
         </h2>
@@ -154,7 +154,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
         {/* Error state */}
         {volumeError && (
           <div
-            className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-4"
+            className="rounded-lg bg-red-950/80 p-4 text-sm text-red-400 mb-4"
             role="alert"
           >
             <p className="font-medium">Failed to load TTS volume data</p>
@@ -165,8 +165,8 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
         {volumeData && (
           <>
             {/* Daily request count chart */}
-            <div className="rounded-xl bg-surface-container shadow-sm p-6 mb-4">
-              <p className="text-sm font-medium text-on-surface-variant mb-3">
+            <div className="rounded-xl bg-slate-800/50 shadow-sm p-6 mb-4">
+              <p className="text-sm font-medium text-slate-400 mb-3">
                 Daily Requests
               </p>
               <ChartErrorBoundary key={range}>
@@ -180,12 +180,12 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
             </div>
 
             {/* Provider / voice breakdown table */}
-            <div className="rounded-xl bg-surface-container shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-outline-variant">
-                <p className="text-sm font-semibold text-on-surface">
+            <div className="rounded-xl bg-slate-800/50 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/8">
+                <p className="text-sm font-semibold text-white">
                   Breakdown by Provider &amp; Voice
                 </p>
-                <p className="text-xs text-on-surface-variant mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   Total completed:{' '}
                   <span className="font-medium tabular-nums">
                     {volumeData.totals.totalCompleted.toLocaleString()}
@@ -198,22 +198,22 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                   aria-label="TTS request breakdown by provider and voice"
                 >
                   <thead>
-                    <tr className="border-b border-outline-variant bg-surface-container-high">
+                    <tr className="border-b border-white/8 bg-slate-800/50">
                       <th
                         scope="col"
-                        className="px-6 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider"
+                        className="px-6 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                       >
                         Provider
                       </th>
                       <th
                         scope="col"
-                        className="px-6 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider"
+                        className="px-6 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                       >
                         Voice ID
                       </th>
                       <th
                         scope="col"
-                        className="px-6 py-3 text-right text-xs font-semibold text-on-surface-variant uppercase tracking-wider"
+                        className="px-6 py-3 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider"
                       >
                         Request Count
                       </th>
@@ -225,15 +225,15 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                       ([provider, count]) => (
                         <tr
                           key={`provider-${provider}`}
-                          className="border-b border-outline-variant/50 hover:bg-primary/5 transition-colors"
+                          className="border-b border-white/8/50 hover:bg-white/5 transition-colors"
                         >
-                          <td className="px-6 py-3 font-medium text-on-surface">
+                          <td className="px-6 py-3 font-medium text-white">
                             {provider}
                           </td>
-                          <td className="px-6 py-3 text-on-surface-variant italic">
+                          <td className="px-6 py-3 text-slate-400 italic">
                             (all voices)
                           </td>
-                          <td className="px-6 py-3 text-right tabular-nums font-medium text-on-surface">
+                          <td className="px-6 py-3 text-right tabular-nums font-medium text-white">
                             {count.toLocaleString()}
                           </td>
                         </tr>
@@ -243,15 +243,15 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                     {volumeData.totals.topVoices.map(({ voiceId, count }) => (
                       <tr
                         key={`voice-${voiceId}`}
-                        className="border-b border-outline-variant/50 hover:bg-primary/5 transition-colors last:border-b-0"
+                        className="border-b border-white/8/50 hover:bg-white/5 transition-colors last:border-b-0"
                       >
-                        <td className="px-6 py-3 text-on-surface-variant">
+                        <td className="px-6 py-3 text-slate-400">
                           —
                         </td>
-                        <td className="px-6 py-3 font-mono text-xs text-on-surface">
+                        <td className="px-6 py-3 font-mono text-xs text-white">
                           {voiceId}
                         </td>
-                        <td className="px-6 py-3 text-right tabular-nums font-medium text-on-surface">
+                        <td className="px-6 py-3 text-right tabular-nums font-medium text-white">
                           {count.toLocaleString()}
                         </td>
                       </tr>
@@ -262,7 +262,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                         <tr>
                           <td
                             colSpan={3}
-                            className="px-6 py-8 text-center text-on-surface-variant text-sm"
+                            className="px-6 py-8 text-center text-slate-400 text-sm"
                           >
                             No TTS volume data for this period.
                           </td>
@@ -290,7 +290,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
       <section aria-labelledby="failed-voice-jobs-heading" className="mb-10">
         <h2
           id="failed-voice-jobs-heading"
-          className="text-lg font-semibold text-on-surface mb-4"
+          className="text-lg font-semibold text-white mb-4"
         >
           Failed Voice Jobs
         </h2>
@@ -298,7 +298,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
         {/* Error state */}
         {planVoicesError && (
           <div
-            className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-4"
+            className="rounded-lg bg-red-950/80 p-4 text-sm text-red-400 mb-4"
             role="alert"
           >
             <p className="font-medium">Failed to load voice job data</p>
@@ -322,7 +322,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
       <section aria-labelledby="tts-errors-heading">
         <h2
           id="tts-errors-heading"
-          className="text-lg font-semibold text-on-surface mb-4"
+          className="text-lg font-semibold text-white mb-4"
         >
           TTS Errors
         </h2>
@@ -330,7 +330,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
         {/* Error state */}
         {errorsError && (
           <div
-            className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-4"
+            className="rounded-lg bg-red-950/80 p-4 text-sm text-red-400 mb-4"
             role="alert"
           >
             <p className="font-medium">Failed to load TTS error data</p>
@@ -348,12 +348,12 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                   value={errorRatePct}
                   delta={undefined}
                 />
-                <p className="text-xs text-on-surface-variant mt-1 px-1">
+                <p className="text-xs text-slate-400 mt-1 px-1">
                   % of TTS jobs failed
                 </p>
               </div>
-              <div className="lg:col-span-3 rounded-xl bg-surface-container shadow-sm p-6">
-                <p className="text-sm font-medium text-on-surface-variant mb-3">
+              <div className="lg:col-span-3 rounded-xl bg-slate-800/50 shadow-sm p-6">
+                <p className="text-sm font-medium text-slate-400 mb-3">
                   Daily Error Count
                 </p>
                 <ChartErrorBoundary key={range}>
@@ -368,12 +368,12 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
             </div>
 
             {/* Top error messages table */}
-            <div className="rounded-xl bg-surface-container shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-outline-variant">
-                <p className="text-sm font-semibold text-on-surface">
+            <div className="rounded-xl bg-slate-800/50 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/8">
+                <p className="text-sm font-semibold text-white">
                   Top Error Messages
                 </p>
-                <p className="text-xs text-on-surface-variant mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5">
                   Total errors:{' '}
                   <span className="font-medium tabular-nums">
                     {errorsData.totals.totalErrors.toLocaleString()}
@@ -386,16 +386,16 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                   aria-label="Top TTS error messages"
                 >
                   <thead>
-                    <tr className="border-b border-outline-variant bg-surface-container-high">
+                    <tr className="border-b border-white/8 bg-slate-800/50">
                       <th
                         scope="col"
-                        className="px-6 py-3 text-left text-xs font-semibold text-on-surface-variant uppercase tracking-wider"
+                        className="px-6 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider"
                       >
                         Error Message
                       </th>
                       <th
                         scope="col"
-                        className="px-6 py-3 text-right text-xs font-semibold text-on-surface-variant uppercase tracking-wider"
+                        className="px-6 py-3 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider"
                       >
                         Count
                       </th>
@@ -405,12 +405,12 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                     {errorsData.totals.topErrors.map((err, idx) => (
                       <tr
                         key={idx}
-                        className="border-b border-outline-variant/50 hover:bg-primary/5 transition-colors last:border-b-0"
+                        className="border-b border-white/8/50 hover:bg-white/5 transition-colors last:border-b-0"
                       >
-                        <td className="px-6 py-3 text-on-surface font-mono text-xs max-w-xl truncate">
+                        <td className="px-6 py-3 text-white font-mono text-xs max-w-xl truncate">
                           {err.message}
                         </td>
-                        <td className="px-6 py-3 text-right tabular-nums font-medium text-error">
+                        <td className="px-6 py-3 text-right tabular-nums font-medium text-red-400">
                           {err.count.toLocaleString()}
                         </td>
                       </tr>
@@ -419,7 +419,7 @@ export default async function AdminTtsPage({ searchParams }: TtsPageProps) {
                       <tr>
                         <td
                           colSpan={2}
-                          className="px-6 py-8 text-center text-on-surface-variant text-sm"
+                          className="px-6 py-8 text-center text-slate-400 text-sm"
                         >
                           No errors recorded for this period.
                         </td>

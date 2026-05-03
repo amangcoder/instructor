@@ -25,16 +25,13 @@ const DEFAULT_RANGE: Range = '30d';
 /**
  * RangePicker — client component
  *
- * Renders three segmented buttons (7d / 30d / 90d) that set the ?range=
- * URL search parameter via useRouter().push(), causing the server component
- * above to re-render with the new range.
- *
- * Active button is highlighted with primary background + ring.
+ * Renders a segmented control (7d / 30d / 90d) that sets the ?range=
+ * URL search parameter via useRouter().replace().
  *
  * Accessibility:
  *  - Wrapper has role="group" with aria-label
  *  - Each button uses aria-pressed to convey selected state
- *  - Keyboard navigable via Tab and activated via Enter / Space
+ *  - Keyboard navigable via Tab, activated via Enter / Space
  */
 export default function RangePicker() {
   const router = useRouter();
@@ -46,14 +43,14 @@ export default function RangePicker() {
     (range: Range) => {
       const params = new URLSearchParams(searchParams.toString());
       params.set('range', range);
-      router.push(`?${params.toString()}`);
+      router.replace(`?${params.toString()}`);
     },
     [router, searchParams],
   );
 
   return (
     <div
-      className="inline-flex rounded-lg border border-outline-variant bg-surface-container overflow-hidden"
+      className="inline-flex border border-white/10 bg-slate-800/50 rounded-xl overflow-hidden p-0.5 gap-0.5"
       role="group"
       aria-label="Time range selector"
     >
@@ -66,14 +63,11 @@ export default function RangePicker() {
             onClick={() => setRange(value)}
             aria-pressed={isActive}
             className={[
-              'px-4 py-2 text-sm font-medium transition-colors',
-              'min-h-[44px]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset',
-              // Border between adjacent buttons
-              'border-r border-outline-variant last:border-r-0',
+              'px-4 py-1.5 text-sm font-medium rounded-lg transition-colors',
+              'focus-visible:outline-none focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2',
               isActive
-                ? 'bg-primary text-white'
-                : 'text-on-surface hover:bg-primary/10',
+                ? 'bg-indigo-600 text-white'
+                : 'text-slate-400 hover:text-white hover:bg-white/5',
             ]
               .filter(Boolean)
               .join(' ')}

@@ -1,25 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// Section header: xs font-bold uppercase tracking-[2px] text-primary.
 class SectionHeader extends StatelessWidget {
-  const SectionHeader({required this.title});
+  const SectionHeader({required this.title, super.key});
 
   final String title;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 24, 8, 8),
-      // Wrap with Semantics so TalkBack/VoiceOver reads the natural-case title
-      // rather than spelling out the uppercase letters individually.
+      padding: const EdgeInsets.fromLTRB(4, 28, 8, 10),
       child: Semantics(
         label: title,
         child: Text(
           title.toUpperCase(),
           style: TextStyle(
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: FontWeight.w700,
-            letterSpacing: 2,
+            letterSpacing: 1.5,
             color: Theme.of(context).colorScheme.primary,
           ),
         ),
@@ -28,19 +25,23 @@ class SectionHeader extends StatelessWidget {
   }
 }
 
-/// Settings group card: bg-surface-container-lowest rounded-2xl p-2.
 class SettingsCard extends StatelessWidget {
-  const SettingsCard({required this.children});
+  const SettingsCard({required this.children, super.key});
 
   final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        color: colorScheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.45),
+        ),
       ),
+      clipBehavior: Clip.antiAlias,
       padding: const EdgeInsets.all(8),
       child: Column(
         children: children,
@@ -55,11 +56,11 @@ class SettingsCard extends StatelessWidget {
 /// on narrow widths so long selection values never crush the title.
 class SettingsControlRow extends StatelessWidget {
   const SettingsControlRow({
-    super.key,
     required this.title,
     required this.control,
+    super.key,
     this.subtitle,
-    this.breakpoint = 360,
+    this.breakpoint = 240,
   });
 
   final String title;

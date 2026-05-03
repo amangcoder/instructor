@@ -106,7 +106,7 @@ export class PlanVoicesService {
     //    needs the provider's catalog name (e.g. 'af_bella'), not the UUID.
     //    TtsBatchPregenService.regenerateVoice resolves slug→UUID internally
     //    for the plan_voices upsert via resolveVoiceUuid().
-    //    Speech rate defaults to '1.00' — the plan_voices table does not store
+    //    Speech rate defaults to '1.0' — the plan_voices table does not store
     //    per-rendition speech rates and the voice table has no speechRate column.
     await this.ttsBatchPregen.regenerateVoice(
       planId,
@@ -349,14 +349,14 @@ export class PlanVoicesService {
     }
 
     // 3. Synthesize through TtsService — populates the shared S3 + L1 cache.
-    //    speechRate '1.00' matches the cache key the mobile client constructs
+    //    speechRate '1.0' matches the cache key the mobile client constructs
     //    when it requests audio for this step.
     await this.ttsService.synthesize(
       step.text,
       voice.slug,
       voice.locale,
       voice.provider,
-      '1.00',
+      '1.0',
     );
 
     this.logger.log(
@@ -380,7 +380,7 @@ export class PlanVoicesService {
    *
    * Cache HIT path is the common case once the rendition is in 'ready' state —
    * the cache key matches what TtsBatchPregenService used during pre-generation
-   * (speech rate '1.00', voice slug, locale, provider). On a miss the audio is
+   * (speech rate '1.0', voice slug, locale, provider). On a miss the audio is
    * synthesized and written to L1 + S3, so subsequent previews are free.
    *
    * @throws NotFoundException if the plan, voice, or any say-step is missing.
@@ -442,7 +442,7 @@ export class PlanVoicesService {
       voice.slug,
       planVoice.locale,
       voice.provider,
-      '1.00',
+      '1.0',
     );
 
     return {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:instructor/providers/categories_providers.dart';
-import 'package:instructor/screens/plan_library/plan_library_screen.dart';
+import 'package:instructor/providers/home_providers.dart';
 import 'package:instructor/screens/plan_library/widgets/plan_card.dart';
 
 /// Horizontal scrollable row of category chips matching the Stitch design:

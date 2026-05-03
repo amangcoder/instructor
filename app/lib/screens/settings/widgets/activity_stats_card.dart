@@ -30,36 +30,65 @@ class ActivityStatsCard extends ConsumerWidget {
 
     return SettingsCard(
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: _StatTile(value: '$planCount', label: 'Plans')),
-            Expanded(
-              child: _StatTile(
-                value: sessionCount == null ? '—' : '$sessionCount',
-                label: 'Sessions',
-                sublabel: sessionCount == null || sessionCount == 0
-                    ? Text(
-                        'Start a session to track',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: colorScheme.outline,
-                        ),
-                      )
-                    : null,
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _StatTile(
+                  value: '$planCount',
+                  label: 'Plans',
+                  leading: Icon(
+                    Icons.library_books_rounded,
+                    size: 16,
+                    color: colorScheme.primary,
+                  ),
+                ),
               ),
-            ),
-            // Streak tile is interactive — tap to open calendar
-            Expanded(
-              child: _StreakStatTile(
-                streakAsync: streakAsync,
-                completedTodayAsync: completedTodayAsync,
-                colorScheme: colorScheme,
-                onTap: () => _openStreakCalendarSheet(context),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: colorScheme.outlineVariant.withValues(alpha: 0.5),
               ),
-            ),
-          ],
+              Expanded(
+                child: _StatTile(
+                  value: sessionCount == null ? '—' : '$sessionCount',
+                  label: 'Sessions',
+                  leading: Icon(
+                    Icons.timer_rounded,
+                    size: 16,
+                    color: colorScheme.tertiary,
+                  ),
+                  sublabel: sessionCount == null || sessionCount == 0
+                      ? Text(
+                          'No sessions yet',
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.outline,
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+              ),
+              // Streak tile is interactive — tap to open calendar
+              Expanded(
+                child: _StreakStatTile(
+                  streakAsync: streakAsync,
+                  completedTodayAsync: completedTodayAsync,
+                  colorScheme: colorScheme,
+                  onTap: () => _openStreakCalendarSheet(context),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -105,25 +134,24 @@ class _StatTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     Widget content = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (leading != null) ...[
-                leading!,
-                const SizedBox(width: 4),
-              ],
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
+          // Reserved leading slot — keeps numbers centered and aligned
+          // across tiles regardless of whether this tile has an icon.
+          SizedBox(
+            height: 18,
+            child: leading == null ? null : Center(child: leading),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              height: 1.1,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -133,10 +161,12 @@ class _StatTile extends StatelessWidget {
               color: colorScheme.onSurfaceVariant,
             ),
           ),
-          if (sublabel != null) ...[
-            const SizedBox(height: 2),
-            sublabel!,
-          ],
+          const SizedBox(height: 6),
+          // Reserved sublabel slot — fixed height keeps tile heights equal.
+          SizedBox(
+            height: 20,
+            child: sublabel == null ? null : Center(child: sublabel),
+          ),
         ],
       ),
     );
@@ -164,7 +194,7 @@ class _StatTile extends StatelessWidget {
   }
 }
 
-/// Streak stat tile that handles AsyncValue<int> for current streak.
+/// Streak stat tile that handles `AsyncValue<int>` for current streak.
 ///
 /// Shows:
 /// - Flame emoji + streak count (e.g., "🔥 10")
@@ -186,10 +216,10 @@ class _StreakStatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return streakAsync.when(
-      loading: () => _StatTile(
+      loading: () => const _StatTile(
         value: '—',
         label: 'Streak',
-        leading: const SizedBox(
+        leading: SizedBox(
           width: 16,
           height: 16,
           child: CircularProgressIndicator(strokeWidth: 2),
@@ -220,28 +250,72 @@ class _StreakStatTile extends StatelessWidget {
         return _StatTile(
           value: '$streak',
           label: 'Streak',
-          leading: Text(
-            '🔥',
-            style: TextStyle(fontSize: 16),
-          ),
+          leading: const Text('🔥', style: TextStyle(fontSize: 16)),
           semanticLabel: streakSemanticLabel,
           sublabel: completedTodayAsync.when(
-            loading: () => Text(
-              'Checking...',
-              style: TextStyle(fontSize: 11, color: colorScheme.outline),
+            loading: () => const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
             ),
             error: (_, __) => Text(
               'Error',
               style: TextStyle(fontSize: 11, color: colorScheme.error),
             ),
-            data: (completedToday) => Text(
-              completedToday ? 'Completed today ✓' : 'No session yet today',
-              style: TextStyle(fontSize: 11, color: colorScheme.outline),
-            ),
+            data: (completedToday) => completedToday
+                ? _CompletionPill(colorScheme: colorScheme)
+                : Text(
+                    'No session yet',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: colorScheme.outline,
+                    ),
+                  ),
           ),
           onTap: onTap,
         );
       },
+    );
+  }
+}
+
+/// Compact "Today ✓" pill rendered in the streak sublabel slot when the user
+/// has completed a session today. Uses primary container colors so the
+/// indicator reads as a positive status without dominating the card.
+class _CompletionPill extends StatelessWidget {
+  const _CompletionPill({required this.colorScheme});
+
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_rounded,
+            size: 12,
+            color: colorScheme.onPrimaryContainer,
+          ),
+          const SizedBox(width: 2),
+          Text(
+            'Today',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

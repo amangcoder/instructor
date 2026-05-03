@@ -98,21 +98,29 @@ export default async function AdminDashboardLayout({
     // pendingDeletionCount remains undefined — badge will not render
   }
 
+  // Extract admin email from JWT payload
+  const adminEmail = typeof payload.email === 'string' ? payload.email : undefined;
+
   return (
     <div className="flex h-full">
       {/* Skip navigation — first focusable element; targets admin-main-content */}
       <a
         href="#admin-main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-white focus:rounded-lg"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-indigo-600 focus:text-white focus:rounded-lg"
       >
         Skip to main content
       </a>
 
-      <AdminSidebar pendingDeletionCount={pendingDeletionCount} />
+      <AdminSidebar
+        pendingDeletionCount={pendingDeletionCount}
+        adminEmail={adminEmail}
+      />
 
-      {/* Main content — offset by sidebar width (w-64 = 16rem) */}
+      {/* Main content — responsive offset by sidebar width */}
+      {/* Desktop (≥ 1024px): ml-64 for full sidebar (w-64 = 16rem)
+           Mobile (< 1024px): ml-[60px] for icon-only rail */}
       <main
-        className="flex-1 ml-64 overflow-y-auto"
+        className="flex-1 ml-[60px] lg:ml-64 overflow-y-auto"
         id="admin-main-content"
         role="main"
         aria-label="Admin content"

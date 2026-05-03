@@ -70,7 +70,7 @@ export class TtsPregenService {
    * Begin TTS pre-generation for a plan.
    * Called after plan activation with voiceQuality='studio'.
    *
-   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.00').
+   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.0').
    *                   Conversion from NUMERIC happens at the repository boundary.
    */
   async startPregen(

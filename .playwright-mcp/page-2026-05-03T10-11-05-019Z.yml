@@ -1,0 +1,50 @@
+- generic [active] [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - banner [ref=e3]:
+    - navigation "Main navigation" [ref=e4]:
+      - link "Instructor home" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: Instructor
+      - generic [ref=e8]:
+        - link "Home" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Privacy Policy" [ref=e10] [cursor=pointer]:
+          - /url: /privacy-policy
+        - link "Data Deletion" [ref=e11] [cursor=pointer]:
+          - /url: /data-deletion
+  - main [ref=e12]:
+    - generic [ref=e14]:
+      - generic [ref=e17]:
+        - generic [ref=e18]:
+          - generic [ref=e20]: I
+          - heading "Admin Sign In" [level=1] [ref=e21]
+          - paragraph [ref=e22]: Enter your admin email to receive a one-time code.
+        - alert [ref=e23]
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - generic [ref=e26]: Email address
+            - textbox "Email address" [ref=e27]:
+              - /placeholder: admin@example.com
+          - button "Send OTP" [disabled] [ref=e28]
+      - generic "Notifications"
+  - contentinfo [ref=e29]:
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]:
+          - heading "Instructor" [level=3] [ref=e33]
+          - paragraph [ref=e34]: Interactive learning content creation platform.
+        - generic [ref=e35]:
+          - heading "Legal" [level=4] [ref=e36]
+          - list [ref=e37]:
+            - listitem [ref=e38]:
+              - link "Privacy Policy" [ref=e39] [cursor=pointer]:
+                - /url: /privacy-policy
+            - listitem [ref=e40]:
+              - link "Data Deletion" [ref=e41] [cursor=pointer]:
+                - /url: /data-deletion
+        - generic [ref=e42]:
+          - heading "Contact" [level=4] [ref=e43]
+          - link "admin@layersiq.com" [ref=e44] [cursor=pointer]:
+            - /url: mailto:admin@layersiq.com
+      - paragraph [ref=e46]: © 2026 LayersIQ Private Limited

@@ -12,11 +12,12 @@ import 'package:instructor/screens/onboarding/onboarding_screen.dart';
 import 'package:instructor/screens/plan_editor/plan_editor_screen.dart';
 import 'package:instructor/screens/plan_generation/plan_generation_screen.dart';
 import 'package:instructor/screens/plan_generation/plan_review_screen.dart';
+import 'package:instructor/screens/plan_request/plan_request_screen.dart';
 import 'package:instructor/screens/create_plan/create_plan_screen.dart';
 import 'package:instructor/screens/discover/category_screen.dart';
 import 'package:instructor/screens/discover/discover_screen.dart';
+import 'package:instructor/screens/home/home_screen.dart';
 import 'package:instructor/screens/plan_detail/plan_detail_screen.dart';
-import 'package:instructor/screens/plan_library/plan_library_screen.dart';
 import 'package:instructor/screens/series/series_detail_screen.dart';
 import 'package:instructor/screens/settings/settings_screen.dart';
 import 'package:instructor/screens/shared_plan/shared_plan_preview_screen.dart';
@@ -94,6 +95,15 @@ abstract final class AppRoutes {
   ///
   /// Auth-gated — unauthenticated users are redirected to [login].
   static const String createPlan = '/create-plan';
+
+  // ── Plan Request ─────────────────────────────────────────────────────────
+
+  /// Route for the consumer plan-request form.
+  ///
+  /// Submits a request to the backend for admin review; the admin either
+  /// approves and generates a plan or pastes a JSON plan back into the
+  /// request. Auth-gated — unauthenticated users are redirected to [login].
+  static const String planRequest = '/plan-request';
 }
 
 /// Routes that require an authenticated user.
@@ -101,6 +111,7 @@ const _kAuthGatedRoutes = {
   AppRoutes.generatePlan,
   AppRoutes.generatePlanReview,
   AppRoutes.createPlan,
+  AppRoutes.planRequest,
 };
 
 /// Returns true if [location] requires authentication.
@@ -196,13 +207,13 @@ GoRouter router(Ref ref) {
         builder: (context, state, navigationShell) =>
             BottomNavShell(navigationShell: navigationShell),
         branches: [
-          // Branch 0: Library
+          // Branch 0: Home
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: AppRoutes.library,
                 builder: (BuildContext context, GoRouterState state) =>
-                    const PlanLibraryScreen(),
+                    const HomeScreen(),
               ),
             ],
           ),
@@ -326,6 +337,13 @@ GoRouter router(Ref ref) {
         path: AppRoutes.createPlan,
         builder: (BuildContext context, GoRouterState state) =>
             const CreatePlanScreen(),
+      ),
+
+      // ── Plan request (full-screen, auth-gated) ────────────────────────────
+      GoRoute(
+        path: AppRoutes.planRequest,
+        builder: (BuildContext context, GoRouterState state) =>
+            const PlanRequestScreen(),
       ),
 
       // ── Auth routes ──────────────────────────────────────────────────────

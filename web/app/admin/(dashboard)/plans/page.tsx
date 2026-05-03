@@ -156,7 +156,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
     <div>
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <h1 className="text-2xl font-bold text-on-surface">Plans</h1>
+        <h1 className="text-2xl font-bold text-white">Plans</h1>
         <Suspense fallback={null}>
           <RangePicker />
         </Suspense>
@@ -166,7 +166,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
       <section aria-labelledby="funnel-heading" className="mb-10">
         <h2
           id="funnel-heading"
-          className="text-lg font-semibold text-on-surface mb-4"
+          className="text-lg font-semibold text-white mb-4"
         >
           Plan Funnel
         </h2>
@@ -174,7 +174,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
         {/* Section error — shown without affecting Plan Usage section */}
         {funnelError && (
           <div
-            className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-4"
+            className="rounded-lg bg-red-950/80 p-4 text-sm text-red-400 mb-4"
             role="alert"
           >
             <p className="font-medium">Failed to load funnel data</p>
@@ -203,7 +203,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
                 value={Math.round(funnelData.totals.overallConversionPercent)}
               />
             </div>
-            <div className="rounded-xl bg-surface-container shadow-sm p-6 mb-6">
+            <div className="rounded-xl bg-slate-800/50 shadow-sm p-6 mb-6">
               <ChartErrorBoundary key={range}>
                 <FunnelChart data={funnelStages} />
               </ChartErrorBoundary>
@@ -225,7 +225,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
       <section aria-labelledby="usage-heading" className="mb-10">
         <h2
           id="usage-heading"
-          className="text-lg font-semibold text-on-surface mb-4"
+          className="text-lg font-semibold text-white mb-4"
         >
           Plan Usage
         </h2>
@@ -233,7 +233,7 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
         {/* Section error — shown without affecting Plan Funnel section */}
         {usageError && (
           <div
-            className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-4"
+            className="rounded-lg bg-red-950/80 p-4 text-sm text-red-400 mb-4"
             role="alert"
           >
             <p className="font-medium">Failed to load usage data</p>
@@ -265,8 +265,8 @@ export default async function AdminPlansPage({ searchParams }: PlansPageProps) {
                 value={usageData.totals.usersWithPlans}
               />
             </div>
-            <div className="rounded-xl bg-surface-container shadow-sm p-6 mb-6">
-              <p className="text-sm font-medium text-on-surface-variant mb-4">
+            <div className="rounded-xl bg-slate-800/50 shadow-sm p-6 mb-6">
+              <p className="text-sm font-medium text-slate-400 mb-4">
                 Plans per User Distribution
               </p>
               <ChartErrorBoundary key={range}>

@@ -504,6 +504,39 @@ export type PlanVoice = typeof planVoices.$inferSelect;
 export type NewPlanVoice = typeof planVoices.$inferInsert;
 
 // ---------------------------------------------------------------------------
+// user_library_links
+//
+// Lightweight join table tracking which library plans a user has linked to
+// their collection. One row per (user, library_plan) pair — strictly a link,
+// never a data copy. planJson is always read from library_plans at query time
+// so library content updates reach all linked users automatically.
+//
+// UNIQUE (user_id, library_plan_id) is the primary dedup guarantee.
+// ---------------------------------------------------------------------------
+
+export const userLibraryLinks = pgTable(
+  'user_library_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    libraryPlanId: uuid('library_plan_id')
+      .references(() => libraryPlans.id, { onDelete: 'cascade' })
+      .notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('user_library_links_user_library_unique').on(table.userId, table.libraryPlanId),
+    index('idx_user_library_links_user_added').on(table.userId, table.addedAt),
+  ],
+);
+
+export type UserLibraryLink = typeof userLibraryLinks.$inferSelect;
+export type NewUserLibraryLink = typeof userLibraryLinks.$inferInsert;
+
+// ---------------------------------------------------------------------------
 // deletion_requests
 //
 // Stores data-deletion requests submitted via the public website form.
@@ -715,7 +748,7 @@ export const appVersionConfig = pgTable(
     forceUpdateEnabled: boolean('force_update_enabled').notNull().default(false),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [
+  (_table) => [
     // Singleton constraint: enforces at most one row in the table.
     // The expression ((true)) ensures only one row can exist: only one value of true exists.
     uniqueIndex('idx_app_version_config_singleton').on(sql`true`),
@@ -724,3 +757,65 @@ export const appVersionConfig = pgTable(
 
 export type AppVersionConfig = typeof appVersionConfig.$inferSelect;
 export type NewAppVersionConfig = typeof appVersionConfig.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// plan_ratings
+//
+// Stores a user's 1–5 star rating for a library plan.
+// One row per (user, plan) — upsert replaces the previous rating.
+// Aggregate stats (averageRating, ratingsCount) are computed on read via
+// a GROUP BY query to avoid stale denormalized data.
+// ---------------------------------------------------------------------------
+
+export const planRatings = pgTable(
+  'plan_ratings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    planId: uuid('plan_id').notNull(),
+    rating: integer('rating').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check('plan_ratings_value_check', sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
+    // One rating per user per plan — enables idempotent upsert on (user_id, plan_id)
+    uniqueIndex('idx_plan_ratings_user_plan').on(table.userId, table.planId),
+    // Aggregate queries: GROUP BY plan_id for average rating computation
+    index('idx_plan_ratings_plan_id').on(table.planId),
+  ],
+);
+
+export type PlanRating = typeof planRatings.$inferSelect;
+export type NewPlanRating = typeof planRatings.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// user_favorites
+//
+// Tracks which library plans a user has marked as a favorite.
+// Effectively a "Favorites" named list (as described in requirements).
+// One row per (user, plan) — toggle via insert / delete.
+// ---------------------------------------------------------------------------
+
+export const userFavorites = pgTable(
+  'user_favorites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    planId: uuid('plan_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // One favorite per user per plan — enables idempotent insert on conflict
+    uniqueIndex('idx_user_favorites_user_plan').on(table.userId, table.planId),
+    // User's favorite list ordered by creation time
+    index('idx_user_favorites_user_created').on(table.userId, table.createdAt),
+  ],
+);
+
+export type UserFavorite = typeof userFavorites.$inferSelect;
+export type NewUserFavorite = typeof userFavorites.$inferInsert;

@@ -24,6 +24,26 @@ import 'package:instructor/models/tags_json.dart';
 import 'package:instructor/models/tts_provider_config.dart';
 import 'package:instructor/models/tts_status_info.dart';
 import 'package:instructor/services/api_client.dart';
+import 'package:instructor/utils/hash_utils.dart' show normalizeSpeechRate;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Value types
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Aggregate rating stats plus the current user's rating for a plan.
+class PlanRatingResult {
+  const PlanRatingResult({
+    required this.averageRating,
+    required this.ratingsCount,
+    this.userRating,
+  });
+
+  final double? averageRating;
+  final int ratingsCount;
+
+  /// The authenticated user's own rating (1–5), or null if not yet rated.
+  final int? userRating;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Exception
@@ -115,6 +135,20 @@ abstract class PlanApiService {
   /// Returns a full [Plan] from the global library, including all steps.
   Future<Plan> getLibraryPlanById(String id);
 
+  /// POST /api/library/links
+  ///
+  /// Links a library plan to the current user's My Plans collection
+  /// (idempotent — returns the same link id on repeated calls).
+  ///
+  /// Returns the link id, which becomes the plan's id in the local Drift
+  /// cache and is used for all subsequent operations (delete, lastUsed, etc.).
+  Future<String> addLibraryLink(String libraryPlanId);
+
+  /// DELETE /api/library/links/:linkId
+  ///
+  /// Removes a library link from the user's My Plans collection.
+  Future<void> removeLibraryLink(String linkId);
+
   // ── TTS ───────────────────────────────────────────────────────────────────
 
   /// GET /api/tts/status/:planId
@@ -134,6 +168,37 @@ abstract class PlanApiService {
   /// Returns all TTS provider configs. The active provider has [isActive] ==
   /// true and [defaultVoice] set to the recommended voice for new plans.
   Future<TtsProvidersResponse> fetchProviderCatalog();
+
+  // ── Ratings ───────────────────────────────────────────────────────────────
+
+  /// POST /api/ratings/:planId
+  ///
+  /// Upserts a 1–5 star rating for a library plan. Returns the updated
+  /// aggregate stats and the user's submitted rating.
+  Future<PlanRatingResult> ratePlan(String planId, int rating);
+
+  /// DELETE /api/ratings/:planId
+  ///
+  /// Removes the current user's rating for a plan.
+  Future<void> deleteRating(String planId);
+
+  /// GET /api/ratings/:planId
+  ///
+  /// Returns aggregate rating stats and the current user's rating (null if
+  /// not yet rated).
+  Future<PlanRatingResult> getPlanRating(String planId);
+
+  // ── Favorites ─────────────────────────────────────────────────────────────
+
+  /// GET /api/favorites
+  ///
+  /// Returns the list of plan IDs the current user has favorited.
+  Future<List<String>> fetchFavorites();
+
+  /// POST /api/favorites/:planId/toggle
+  ///
+  /// Toggles the favorite status for a plan. Returns the new [isFavorite] state.
+  Future<bool> toggleFavorite(String planId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -273,7 +338,7 @@ class PlanApiServiceImpl implements PlanApiService {
         'voiceQuality': 'studio',
         'voice': voice,
         'locale': locale,
-        'speechRate': speechRate,
+        'speechRate': normalizeSpeechRate(speechRate),
       });
     } on ApiException catch (e) {
       throw PlanApiException(
@@ -345,6 +410,60 @@ class PlanApiServiceImpl implements PlanApiService {
       throw PlanApiException(
         e.toString(),
         userMessage: 'Failed to load plan details. Please try again.',
+      );
+    }
+  }
+
+  @override
+  Future<String> addLibraryLink(String libraryPlanId) async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/library/links');
+    try {
+      final response = await _client.postJson(uri, {'libraryPlanId': libraryPlanId});
+      final linkId = response['linkId'] as String?;
+      if (linkId == null || linkId.isEmpty) {
+        throw const PlanApiException(
+          'Server returned no linkId after addLibraryLink',
+          userMessage: 'Failed to save plan. Please try again.',
+        );
+      }
+      return linkId;
+    } on ApiException catch (e) {
+      throw PlanApiException(
+        'addLibraryLink($libraryPlanId) failed: ${e.message}',
+        userMessage: _friendlyError(e),
+      );
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      debugPrint('PlanApiService.addLibraryLink: unexpected error: $e');
+      throw PlanApiException(
+        e.toString(),
+        userMessage: 'Failed to save plan. Please try again.',
+      );
+    }
+  }
+
+  @override
+  Future<void> removeLibraryLink(String linkId) async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/library/links/$linkId');
+    try {
+      final response = await _client.send('DELETE', uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ApiException(
+          'DELETE /api/library/links/$linkId returned ${response.statusCode}',
+          statusCode: response.statusCode,
+        );
+      }
+    } on ApiException catch (e) {
+      throw PlanApiException(
+        'removeLibraryLink($linkId) failed: ${e.message}',
+        userMessage: _friendlyError(e),
+      );
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      debugPrint('PlanApiService.removeLibraryLink: unexpected error: $e');
+      throw PlanApiException(
+        e.toString(),
+        userMessage: 'Failed to remove plan. Please try again.',
       );
     }
   }
@@ -425,6 +544,83 @@ class PlanApiServiceImpl implements PlanApiService {
     }
   }
 
+  // ── Ratings ───────────────────────────────────────────────────────────────
+
+  @override
+  Future<PlanRatingResult> ratePlan(String planId, int rating) async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/ratings/$planId');
+    try {
+      final response = await _client.postJson(uri, {'rating': rating});
+      return _parseRatingResult(response);
+    } on ApiException catch (e) {
+      throw PlanApiException('ratePlan($planId) failed: ${e.message}', userMessage: _friendlyError(e));
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      throw PlanApiException(e.toString(), userMessage: 'Failed to submit rating. Please try again.');
+    }
+  }
+
+  @override
+  Future<void> deleteRating(String planId) async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/ratings/$planId');
+    try {
+      final response = await _client.send('DELETE', uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ApiException('DELETE /api/ratings/$planId returned ${response.statusCode}', statusCode: response.statusCode);
+      }
+    } on ApiException catch (e) {
+      throw PlanApiException('deleteRating($planId) failed: ${e.message}', userMessage: _friendlyError(e));
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      throw PlanApiException(e.toString(), userMessage: 'Failed to remove rating. Please try again.');
+    }
+  }
+
+  @override
+  Future<PlanRatingResult> getPlanRating(String planId) async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/ratings/$planId');
+    try {
+      final response = await _client.getJson(uri);
+      return _parseRatingResult(response);
+    } on ApiException catch (e) {
+      throw PlanApiException('getPlanRating($planId) failed: ${e.message}', userMessage: _friendlyError(e));
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      throw PlanApiException(e.toString(), userMessage: 'Failed to load rating. Please try again.');
+    }
+  }
+
+  // ── Favorites ─────────────────────────────────────────────────────────────
+
+  @override
+  Future<List<String>> fetchFavorites() async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/favorites');
+    try {
+      final response = await _client.getJson(uri);
+      final planIds = response['planIds'] as List<dynamic>? ?? [];
+      return planIds.cast<String>();
+    } on ApiException catch (e) {
+      throw PlanApiException('fetchFavorites failed: ${e.message}', userMessage: _friendlyError(e));
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      throw PlanApiException(e.toString(), userMessage: 'Failed to load favorites. Please try again.');
+    }
+  }
+
+  @override
+  Future<bool> toggleFavorite(String planId) async {
+    final uri = Uri.parse('${_client.backendBaseUrl}/api/favorites/$planId/toggle');
+    try {
+      final response = await _client.postJson(uri, {});
+      return response['isFavorite'] as bool? ?? false;
+    } on ApiException catch (e) {
+      throw PlanApiException('toggleFavorite($planId) failed: ${e.message}', userMessage: _friendlyError(e));
+    } catch (e) {
+      if (e is PlanApiException) rethrow;
+      throw PlanApiException(e.toString(), userMessage: 'Failed to update favorite. Please try again.');
+    }
+  }
+
   // ── Private parsers ───────────────────────────────────────────────────────
 
   Plan _parsePlanSummary(Map<String, dynamic> json) =>
@@ -452,27 +648,50 @@ class PlanApiServiceImpl implements PlanApiService {
   /// Builds a [Plan] from a library plan detail response.
   ///
   /// Library plans are stored with a `planJson` string blob in the same
-  /// format as user plans. If parsing fails, falls back to top-level fields.
+  /// format as user plans. Library blobs commonly omit fields the [Plan]
+  /// model marks as required (e.g. `createdAt`/`updatedAt` are admin-side
+  /// metadata, not part of the playback payload), so a strict
+  /// [Plan.fromJson] frequently throws. When that happens we fall back to
+  /// a per-field merge against a minimal plan built from the top-level
+  /// response so the steps still survive.
   Plan _parseLibraryPlanDetail(String id, Map<String, dynamic> json) {
     final planJsonStr = json['planJson'] as String?;
+    Map<String, dynamic>? planJsonMap;
 
     if (planJsonStr != null && planJsonStr.isNotEmpty) {
       try {
-        final planJson = jsonDecode(planJsonStr) as Map<String, dynamic>;
-        // Use the library plan's own id as the plan id.
-        final withId = Map<String, dynamic>.from(planJson)
-          ..['id'] = json['id'] as String? ?? id;
-        return Plan.fromJson(withId);
+        planJsonMap = jsonDecode(planJsonStr) as Map<String, dynamic>;
       } catch (e) {
         debugPrint(
-            'PlanApiService._parseLibraryPlanDetail: failed to parse planJson — $e');
+            'PlanApiService._parseLibraryPlanDetail: failed to decode planJson — $e');
       }
     }
 
-    // Fallback: build a minimal Plan from top-level response fields.
+    final libId = json['id'] as String? ?? id;
+
+    if (planJsonMap != null) {
+      try {
+        final withId = Map<String, dynamic>.from(planJsonMap)..['id'] = libId;
+        return Plan.fromJson(withId);
+      } catch (e) {
+        debugPrint(
+          'PlanApiService._parseLibraryPlanDetail: Plan.fromJson failed, '
+          'falling back to partial-merge — $e',
+        );
+        return _mergePartialPlanJson(
+          _minimalLibraryPlan(libId, json),
+          planJsonMap,
+        );
+      }
+    }
+
+    return _minimalLibraryPlan(libId, json);
+  }
+
+  Plan _minimalLibraryPlan(String id, Map<String, dynamic> json) {
     final category = _parseCategory(json['category'] as String?);
     return Plan(
-      id: json['id'] as String? ?? id,
+      id: id,
       name: json['name'] as String? ?? 'Untitled Plan',
       description: json['description'] as String?,
       category: category,
@@ -483,6 +702,15 @@ class PlanApiServiceImpl implements PlanApiService {
   }
 
   // ── Private utilities ─────────────────────────────────────────────────────
+
+  PlanRatingResult _parseRatingResult(Map<String, dynamic> json) {
+    final avg = json['averageRating'];
+    return PlanRatingResult(
+      averageRating: avg == null ? null : (avg as num).toDouble(),
+      ratingsCount: (json['ratingsCount'] as num?)?.toInt() ?? 0,
+      userRating: (json['userRating'] as num?)?.toInt(),
+    );
+  }
 
   String _parseCategory(String? raw) => raw ?? 'custom';
 
@@ -575,6 +803,9 @@ Plan parsePlanFromServerRecord(
     ttsTotal: (json['ttsTotal'] as num?)?.toInt() ?? base.ttsTotal,
     ttsCompleted: (json['ttsCompleted'] as num?)?.toInt() ?? base.ttsCompleted,
     seriesId: (json['seriesId'] as String?) ?? base.seriesId,
+    // sourceLibraryPlanId from the server maps to libraryId on the client.
+    // Present for plans synthesised from user_library_links; null otherwise.
+    libraryId: (json['sourceLibraryPlanId'] as String?) ?? base.libraryId,
     createdAt: overrideCreatedAt
         ? (_safeParseDateTime(json['createdAt']) ?? base.createdAt)
         : base.createdAt,

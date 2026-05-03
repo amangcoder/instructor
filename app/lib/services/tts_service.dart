@@ -374,12 +374,13 @@ class TTSServiceImpl implements TTSService {
     final speechRate = await _readSpeechRate();
     final provider = await _readTtsProvider();
 
+    final canonicalRate = normalizeSpeechRate(speechRate.toString());
     final hash = fullParamCacheKey(
       provider: provider,
       voice: voiceId,
       text: text,
       locale: locale.name,
-      speechRate: speechRate.toString(),
+      speechRate: canonicalRate,
     );
     debugPrint('TTSService.renderTTS: hash=${hash.substring(0, 8)}…');
 
@@ -786,6 +787,7 @@ class TTSServiceImpl implements TTSService {
 
     final storedLocale = await _currentLocale();
     final locale = _effectiveLocale(text, storedLocale);
+    final canonicalRate = normalizeSpeechRate((await _readSpeechRate()).toString());
 
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -811,6 +813,7 @@ class TTSServiceImpl implements TTSService {
       'voice': voiceId,
       'locale': locale.name,
       'provider': provider,
+      'speechRate': canonicalRate,
     });
 
     var response = await _httpClient

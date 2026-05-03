@@ -131,12 +131,7 @@ Color categoryBadgeForeground(String category, ColorScheme cs) {
 ///
 /// Stitch design: bg-surface-container-low p-6 rounded-xl, with icon badge,
 /// category tag, title, description, duration, and play button.
-///
-/// When [onActivate] is provided and [plan.isActive] is false, a prominent
-/// "Activate AI Voice" button is rendered between the description and the
-/// bottom row. The button shows a loading indicator while the activation
-/// request is in-flight and an inline error message on failure.
-class PlanCard extends StatefulWidget {
+class PlanCard extends StatelessWidget {
   const PlanCard({
     super.key,
     required this.plan,
@@ -145,7 +140,6 @@ class PlanCard extends StatefulWidget {
     this.onEdit,
     this.onDuplicate,
     this.onDelete,
-    this.onActivate,
     this.onPlayWithAiVoice,
   });
 
@@ -160,12 +154,6 @@ class PlanCard extends StatefulWidget {
   final VoidCallback? onDuplicate;
   final VoidCallback? onDelete;
 
-  /// Async callback that triggers server-side TTS pre-generation for this
-  /// plan. When non-null and [plan.isActive] is false, the card renders an
-  /// "Activate AI Voice" button. The callback must throw (or complete with an
-  /// error) to signal failure — the card then displays an inline error message.
-  final Future<void> Function()? onActivate;
-
   /// Called when the "Play with AI Voice" button is tapped (TTS is ready).
   ///
   /// When non-null, this is used instead of [onPlay] for the AI-voice action
@@ -173,78 +161,36 @@ class PlanCard extends StatefulWidget {
   /// Falls back to [onPlay] when null.
   final VoidCallback? onPlayWithAiVoice;
 
-  @override
-  State<PlanCard> createState() => _PlanCardState();
-}
-
-class _PlanCardState extends State<PlanCard> {
-  bool _isActivating = false;
-  String? _errorMessage;
-
-  // ── Activate handler ──────────────────────────────────────────────────────
-
-  Future<void> _handleActivate() async {
-    if (widget.onActivate == null) return;
-    setState(() {
-      _isActivating = true;
-      _errorMessage = null;
-    });
-    try {
-      await widget.onActivate!();
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          // Strip the Dart "Exception: " prefix for a cleaner user message.
-          final raw = e.toString();
-          _errorMessage = raw.startsWith('Exception: ')
-              ? raw.substring('Exception: '.length)
-              : raw.isNotEmpty
-                  ? raw
-                  : 'Failed to activate AI voice. Please try again.';
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isActivating = false);
-      }
-    }
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final badgeColor = categoryBadgeColor(widget.plan.category, colorScheme);
-    final badgeFg = categoryBadgeForeground(widget.plan.category, colorScheme);
+    final badgeColor = categoryBadgeColor(plan.category, colorScheme);
+    final badgeFg = categoryBadgeForeground(plan.category, colorScheme);
 
-    final bool showTtsBadge = widget.plan.ttsStatus != 'none';
-    final ttsStatus = widget.plan.ttsStatus;
-    final bool isTtsLoading = _isActivating ||
-        ttsStatus == 'pending' ||
-        ttsStatus == 'processing';
+    final bool showTtsBadge = plan.ttsStatus != 'none';
+    final ttsStatus = plan.ttsStatus;
+    final bool isTtsLoading =
+        ttsStatus == 'pending' || ttsStatus == 'processing';
     final bool isTtsReady =
         ttsStatus == 'completed' || ttsStatus == 'partial';
-    final bool showActivateButton =
-        (ttsStatus == 'none' || ttsStatus == 'failed') &&
-            widget.onActivate != null;
-    final bool showTtsActionButton =
-        showActivateButton || _isActivating || isTtsLoading || isTtsReady;
-    final double? ttsProgress = isTtsLoading && widget.plan.ttsTotal > 0
-        ? widget.plan.ttsCompleted / widget.plan.ttsTotal
+    final bool showTtsActionButton = isTtsLoading || isTtsReady;
+    final double? ttsProgress = isTtsLoading && plan.ttsTotal > 0
+        ? plan.ttsCompleted / plan.ttsTotal
         : null;
 
     return Semantics(
       button: true,
-      label: '${widget.plan.name}, ${planCategoryLabel(widget.plan.category)}, '
-          '${formatPlanDuration(widget.plan.totalDuration)}, '
-          '${formatRelativeTime(widget.plan.lastUsedAt)}',
+      label: '${plan.name}, ${planCategoryLabel(plan.category)}, '
+          '${formatPlanDuration(plan.totalDuration)}, '
+          '${formatRelativeTime(plan.lastUsedAt)}',
       explicitChildNodes: true,
       child: GestureDetector(
-        onTap: widget.onTap,
-        onLongPress: (widget.onEdit != null ||
-                widget.onDuplicate != null ||
-                widget.onDelete != null)
+        onTap: onTap,
+        onLongPress: (onEdit != null ||
+                onDuplicate != null ||
+                onDelete != null)
             ? () => _showContextMenu(context)
             : null,
         child: Container(
@@ -269,7 +215,7 @@ class _PlanCardState extends State<PlanCard> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
-                      planCategoryIcon(widget.plan.category),
+                      planCategoryIcon(plan.category),
                       color: badgeFg,
                       size: 24,
                     ),
@@ -280,14 +226,9 @@ class _PlanCardState extends State<PlanCard> {
                     children: [
                       if (showTtsBadge) ...[
                         TtsStatusBadge(
-                          status: widget.plan.ttsStatus,
-                          completed: widget.plan.ttsCompleted,
-                          total: widget.plan.ttsTotal,
-                          onRetry: (widget.plan.ttsStatus == 'failed' ||
-                                      widget.plan.ttsStatus == 'partial') &&
-                                  widget.onActivate != null
-                              ? _handleActivate
-                              : null,
+                          status: plan.ttsStatus,
+                          completed: plan.ttsCompleted,
+                          total: plan.ttsTotal,
                         ),
                         const SizedBox(width: 8),
                       ],
@@ -300,7 +241,7 @@ class _PlanCardState extends State<PlanCard> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          planCategoryLabel(widget.plan.category).toUpperCase(),
+                          planCategoryLabel(plan.category).toUpperCase(),
                           style: TextStyle(
                             color: badgeFg,
                             fontSize: 10,
@@ -318,7 +259,7 @@ class _PlanCardState extends State<PlanCard> {
 
               // ── Title ──────────────────────────────────────────────────
               Text(
-                widget.plan.name,
+                plan.name,
                 style: GoogleFonts.manrope(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -332,11 +273,11 @@ class _PlanCardState extends State<PlanCard> {
 
               // ── Description / last used ────────────────────────────────
               Text(
-                widget.plan.description ??
-                    (widget.plan.steps.isEmpty
-                        ? formatRelativeTime(widget.plan.lastUsedAt)
-                        : '${widget.plan.steps.length} steps · '
-                            '${formatRelativeTime(widget.plan.lastUsedAt)}'),
+                plan.description ??
+                    (plan.steps.isEmpty
+                        ? formatRelativeTime(plan.lastUsedAt)
+                        : '${plan.steps.length} steps · '
+                            '${formatRelativeTime(plan.lastUsedAt)}'),
                 style: TextStyle(
                   fontSize: 14,
                   color: colorScheme.onSurfaceVariant,
@@ -355,15 +296,11 @@ class _PlanCardState extends State<PlanCard> {
                     button: true,
                     label: isTtsLoading
                         ? 'Loading Instructor Voice, please wait'
-                        : isTtsReady
-                            ? 'Play with AI Voice'
-                            : 'Activate AI Voice for ${widget.plan.name}',
+                        : 'Play with AI Voice',
                     child: FilledButton.tonal(
                       onPressed: isTtsLoading
                           ? null
-                          : isTtsReady
-                              ? (widget.onPlayWithAiVoice ?? widget.onPlay)
-                              : _handleActivate,
+                          : (onPlayWithAiVoice ?? onPlay),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size(0, 44),
                         padding: const EdgeInsets.symmetric(
@@ -416,42 +353,20 @@ class _PlanCardState extends State<PlanCard> {
                                 ),
                               ],
                             )
-                          : isTtsReady
-                              ? Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.play_circle_outline,
-                                        size: 16,
-                                        color:
-                                            colorScheme.onSecondaryContainer,),
-                                    const SizedBox(width: 6),
-                                    const Text('Play with AI Voice'),
-                                  ],
-                                )
-                              : const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.auto_awesome, size: 16),
-                                    SizedBox(width: 6),
-                                    Text('Activate AI Voice'),
-                                  ],
-                                ),
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.play_circle_outline,
+                                    size: 16,
+                                    color:
+                                        colorScheme.onSecondaryContainer,),
+                                const SizedBox(width: 6),
+                                const Text('Play with AI Voice'),
+                              ],
+                            ),
                     ),
                   ),
                 ),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 4),
-                  Semantics(
-                    liveRegion: true,
-                    child: Text(
-                      _errorMessage!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: colorScheme.error,
-                      ),
-                    ),
-                  ),
-                ],
               ],
 
               const SizedBox(height: 24),
@@ -461,9 +376,9 @@ class _PlanCardState extends State<PlanCard> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    widget.plan.totalDuration == Duration.zero
+                    plan.totalDuration == Duration.zero
                         ? 'NEW'
-                        : '${formatPlanDuration(widget.plan.totalDuration)} SESSION'
+                        : '${formatPlanDuration(plan.totalDuration)} SESSION'
                             .toUpperCase(),
                     style: TextStyle(
                       fontSize: 12,
@@ -474,10 +389,10 @@ class _PlanCardState extends State<PlanCard> {
                   ),
                   Semantics(
                     button: true,
-                    label: 'Play ${widget.plan.name}',
+                    label: 'Play ${plan.name}',
                     excludeSemantics: true,
                     child: GestureDetector(
-                      onTap: widget.onPlay,
+                      onTap: onPlay,
                       child: Container(
                         width: 40,
                         height: 40,
@@ -520,25 +435,25 @@ class _PlanCardState extends State<PlanCard> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (widget.onEdit != null)
+            if (onEdit != null)
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Edit'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  widget.onEdit!();
+                  onEdit!();
                 },
               ),
-            if (widget.onDuplicate != null)
+            if (onDuplicate != null)
               ListTile(
                 leading: const Icon(Icons.copy_outlined),
                 title: const Text('Duplicate'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  widget.onDuplicate!();
+                  onDuplicate!();
                 },
               ),
-            if (widget.onDelete != null)
+            if (onDelete != null)
               ListTile(
                 leading:
                     Icon(Icons.delete_outline, color: colorScheme.error),
@@ -546,7 +461,7 @@ class _PlanCardState extends State<PlanCard> {
                     style: TextStyle(color: colorScheme.error)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  widget.onDelete!();
+                  onDelete!();
                 },
               ),
           ],

@@ -8,6 +8,46 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: false,
   },
+  async redirects() {
+    return [
+      // ── Consolidated admin pages (moved to tabbed views) ────────────────────
+      {
+        source: '/admin/deletion-requests',
+        destination: '/admin/users?tab=deletion-requests',
+        permanent: true,
+      },
+      {
+        source: '/admin/engagement',
+        destination: '/admin/overview',
+        permanent: true,
+      },
+      {
+        source: '/admin/app-version',
+        destination: '/admin/settings?tab=app-version',
+        permanent: true,
+      },
+      {
+        source: '/admin/admins',
+        destination: '/admin/settings?tab=admins',
+        permanent: true,
+      },
+      {
+        source: '/admin/library',
+        destination: '/admin/content?tab=library',
+        permanent: true,
+      },
+      {
+        source: '/admin/series',
+        destination: '/admin/content?tab=series',
+        permanent: true,
+      },
+      {
+        source: '/admin/categories',
+        destination: '/admin/content?tab=categories',
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     const isDev = process.env.NODE_ENV !== 'production';
     return [
@@ -25,8 +65,10 @@ const nextConfig: NextConfig = {
               isDev
                 ? "script-src 'self' 'unsafe-eval' 'unsafe-inline'"
                 : "script-src 'self'",
-              "img-src 'self' data:",
+              "img-src 'self' data: https:",
               "font-src 'self'",
+              // Voice preview pipes WAV bytes through URL.createObjectURL → blob:
+              "media-src 'self' blob:",
               // Dev needs websocket for HMR
               isDev
                 ? "connect-src 'self' ws: wss:"

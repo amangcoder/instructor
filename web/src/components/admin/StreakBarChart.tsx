@@ -45,28 +45,28 @@ export default function StreakBarChart({ data }: StreakBarChartProps) {
         >
           <CartesianGrid
             strokeDasharray="3 3"
-            stroke="var(--color-outline-variant)"
+            stroke="rgba(255,255,255,0.08)"
           />
           <XAxis
             dataKey="bucket"
             tick={{
               fontSize: 12,
-              fill: 'var(--color-on-surface-variant)',
+              fill: '#94a3b8',
             }}
-            axisLine={{ stroke: 'var(--color-outline-variant)' }}
+            axisLine={{ stroke: 'rgba(255,255,255,0.08)' }}
             tickLine={false}
             label={{
               value: 'Streak Length (days)',
               position: 'insideBottom',
               offset: -2,
               fontSize: 11,
-              fill: 'var(--color-on-surface-variant)',
+              fill: '#94a3b8',
             }}
           />
           <YAxis
             tick={{
               fontSize: 12,
-              fill: 'var(--color-on-surface-variant)',
+              fill: '#94a3b8',
             }}
             axisLine={false}
             tickLine={false}
@@ -75,18 +75,18 @@ export default function StreakBarChart({ data }: StreakBarChartProps) {
               angle: -90,
               position: 'insideLeft',
               fontSize: 11,
-              fill: 'var(--color-on-surface-variant)',
+              fill: '#94a3b8',
             }}
           />
           <Tooltip
             contentStyle={{
-              backgroundColor: 'var(--color-surface-container)',
-              border: '1px solid var(--color-outline-variant)',
+              backgroundColor: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.08)',
               borderRadius: '8px',
-              color: 'var(--color-on-surface)',
+              color: '#f1f5f9',
               fontSize: 13,
             }}
-            cursor={{ fill: 'var(--color-primary)', opacity: 0.08 }}
+            cursor={{ fill: '#6366f1', opacity: 0.08 }}
             formatter={(value: number) => [
               value.toLocaleString(),
               'Users',
@@ -95,7 +95,7 @@ export default function StreakBarChart({ data }: StreakBarChartProps) {
           />
           <Bar
             dataKey="userCount"
-            fill="var(--color-primary, #3b82f6)"
+            fill="#6366f1"
             radius={[4, 4, 0, 0]}
           />
         </BarChart>

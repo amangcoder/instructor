@@ -68,6 +68,51 @@ services:
       start_period: 120s
       retries: 8
 
+  # ── VibeVoice TTS Python Server ─────────────────────────────────────────────
+  # Microsoft VibeVoice diffusion TTS (1.5B). Binds to 127.0.0.1:3073 on the
+  # host. Requires voice prompt WAVs in vibevoice-server/voices/ before use.
+  # GPU recommended — mount a CUDA-capable runtime or set VIBEVOICE_DEVICE=cpu
+  # to fall back to slow CPU inference.
+  vibevoice:
+    build:
+      context: ./vibevoice-server
+      dockerfile: Dockerfile
+    container_name: instructor-vibevoice
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3073:3073"
+    environment:
+      VIBEVOICE_HOST: "0.0.0.0"
+      VIBEVOICE_PORT: "3073"
+      VIBEVOICE_MODEL_DIR: "/app/models"
+      VIBEVOICE_VOICE_DIR: "/app/voices"
+      VIBEVOICE_DEVICE: "cpu"
+      OMP_NUM_THREADS: "2"
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+          cpus: "4.0"
+        reservations:
+          memory: 4g
+    volumes:
+      - vibevoice_models:/app/models
+      - ./vibevoice-server/voices:/app/voices:ro
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - >-
+          import urllib.request, sys, json;
+          r = urllib.request.urlopen('http://localhost:3073/health', timeout=5);
+          d = json.loads(r.read());
+          sys.exit(0 if d.get('status') == 'ready' else 1)
+      interval: 30s
+      timeout: 10s
+      start_period: 300s
+      retries: 10
+
   # ── Redis ────────────────────────────────────────────────────────────────────
   # Shared state for distributed rate limiting across server instances.
   redis:
@@ -102,6 +147,7 @@ services:
       # Point NestJS at the Kokoro service using its Docker service name.
       # Falls back to disabled (Gemini-only) if KOKORO_SERVER_URL is absent.
       KOKORO_SERVER_URL: "http://kokoro:3070"
+      VIBEVOICE_SERVER_URL: "http://vibevoice:3073"
       # Redis for distributed rate limiting.
       REDIS_URL: "redis://redis:6379"
     depends_on:
@@ -109,6 +155,8 @@ services:
         condition: service_healthy
       kokoro:
         condition: service_healthy
+      vibevoice:
+        condition: service_started
     healthcheck:
       # POST with empty JSON body → 400 (validation error) proves server is up.
       test:
@@ -130,6 +178,8 @@ services:
 # ── Named Volumes ─────────────────────────────────────────────────────────────
 volumes:
   kokoro_models:
+    driver: local
+  vibevoice_models:
     driver: local
   redis_data:
     driver: local

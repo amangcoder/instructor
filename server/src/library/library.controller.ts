@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   Logger,
   NotFoundException,
   UseGuards,
@@ -18,6 +19,7 @@ import { CreateLibraryPlanDto } from './dto/create-library-plan.dto';
 import { UpdateLibraryPlanDto } from './dto/update-library-plan.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
+import type { JwtPayload } from '../auth/auth.service';
 
 /**
  * LibraryController — routes for the curated global plan library.
@@ -25,6 +27,10 @@ import { AdminRoleGuard } from '../auth/admin-role.guard';
  * Public endpoints (no auth required):
  *   GET    /api/library/plans            — list published plans
  *   GET    /api/library/plans/:id        — get plan detail
+ *
+ * Authenticated user endpoints (JWT required):
+ *   POST   /api/library/links            — link a library plan to My Plans (idempotent)
+ *   DELETE /api/library/links/:linkId    — remove a library link from My Plans
  *
  * Admin-only endpoints (JWT + admin role required):
  *   GET    /api/library/plans/all        — list all plans including drafts
@@ -121,5 +127,37 @@ export class LibraryController {
     if (!deleted) {
       throw new NotFoundException(`Library plan ${id} not found`);
     }
+  }
+
+  // ── User library links ────────────────────────────────────────────────────
+
+  /**
+   * POST /api/library/links
+   * Authenticated: link a library plan to the user's My Plans collection.
+   * Idempotent — returns the link id whether new or already existed.
+   * Body: { libraryPlanId: string }
+   */
+  @Post('links')
+  @UseGuards(JwtAuthGuard)
+  async addLink(
+    @Req() req: Request,
+    @Body() body: { libraryPlanId: string },
+  ): Promise<{ linkId: string }> {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`POST /library/links — userId=${user.sub}, libraryPlanId=${body.libraryPlanId}`);
+    return this.libraryService.addLink(user.sub, body.libraryPlanId);
+  }
+
+  /**
+   * DELETE /api/library/links/:linkId
+   * Authenticated: remove a library link from the user's My Plans collection.
+   */
+  @Delete('links/:linkId')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeLink(@Req() req: Request, @Param('linkId') linkId: string) {
+    const user = (req as any).user as JwtPayload;
+    this.logger.log(`DELETE /library/links/${linkId} — userId=${user.sub}`);
+    await this.libraryService.removeLink(user.sub, linkId);
   }
 }

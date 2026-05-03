@@ -122,6 +122,7 @@ export class PlansController {
       ttsCompleted: number;
       ttsTotal: number;
       voiceQuality: string;
+      sourceLibraryPlanId: string | null;
       createdAt: string;
       updatedAt: string;
     }>;
@@ -139,6 +140,7 @@ export class PlansController {
         ttsCompleted: p.ttsCompleted,
         ttsTotal: p.ttsTotal,
         voiceQuality: p.voiceQuality,
+        sourceLibraryPlanId: p.sourceLibraryPlanId ?? null,
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       })),

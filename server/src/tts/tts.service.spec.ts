@@ -714,12 +714,12 @@ describe('TtsService', () => {
       const provider = 'kokoro';
       const speechRate = '1.0';
 
-      // Expected: SHA-256 of JSON payload with alphabetically ordered keys.
-      // JSON payload: {"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}
-      const expectedPayload = JSON.stringify({ locale, provider, speechRate, text, voice });
+      // Locale is normalised (lowercased, non-alphanumerics stripped) before hashing
+      // so 'en-US' and 'enUS' collapse to 'enus'.
+      // Canonical payload: {"locale":"enus","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}
+      const expectedPayload = JSON.stringify({ locale: 'enus', provider, speechRate, text, voice });
       const expectedKey = createHash('sha256').update(expectedPayload).digest('hex');
 
-      // Server-side cacheKey must produce the same value.
       const serverKey = service.cacheKey(text, voice, locale, provider, speechRate);
 
       expect(serverKey).toBe(expectedKey);
@@ -727,12 +727,51 @@ describe('TtsService', () => {
       expect(serverKey).toMatch(/^[0-9a-f]{64}$/);
     });
 
+    it("speechRate variants '1', '1.0', '1.00' all produce the same cache key (canonical 1 decimal place)", () => {
+      // Admin pre-gen passed '1.00' historically; live client / DTO defaults
+      // pass '1.0'. Both must collapse to the same hash via toFixed(1).
+      const args = (rate: string) =>
+        service.cacheKey('Hello', 'af_heart', 'enUS', 'kokoro', rate);
+      const keys = ['1', '1.0', '1.00'].map(args);
+      expect(new Set(keys).size).toBe(1);
+
+      // '1.5' must hash distinctly from '1.0' — speechRate matters semantically.
+      const k15 = service.cacheKey('Hello', 'af_heart', 'enUS', 'kokoro', '1.5');
+      expect(k15).not.toBe(keys[0]);
+
+      // '1.5' and '1.50' must collapse together too.
+      const k150 = service.cacheKey('Hello', 'af_heart', 'enUS', 'kokoro', '1.50');
+      expect(k150).toBe(k15);
+    });
+
+    it('Devanagari text hashes with locale=hi regardless of input locale', () => {
+      // Admin pre-gen passes voice.locale (e.g. 'en-US' for am_michael) and the
+      // Dart client passes the user's TtsLocale.name. For Hindi/Devanagari text
+      // both paths must collapse to locale='hi' so the cache hits.
+      const hindiText = 'गहरी सांस लीजिए';
+      const args = (locale: string) =>
+        service.cacheKey(hindiText, 'am_michael', locale, 'kokoro', '1.0');
+      const keys = ['en-US', 'enUS', 'hi', 'enIN', '', 'en_GB'].map(args);
+      expect(new Set(keys).size).toBe(1);
+    });
+
+    it('locale variants en-US, enUS, EN_us, en_US all produce the same cache key', () => {
+      // Guards the locale normalisation contract: the DB voices.locale ('en-US')
+      // and the Dart TtsLocale.name ('enUS') MUST hash identically so admin pre-gen
+      // and live /synthesize hit the same S3 entry.
+      const baseArgs = ['Hello', 'af_heart', '', 'kokoro', '1.0'] as const;
+      const keys = ['en-US', 'enUS', 'EN_us', 'en_US', 'EN-US'].map((locale) =>
+        service.cacheKey(baseArgs[0], baseArgs[1], locale, baseArgs[3], baseArgs[4]),
+      );
+      // All variants collapse to the same hash.
+      expect(new Set(keys).size).toBe(1);
+    });
+
     it('JSON payload uses exactly 5 fields in alphabetical order (no whitespace)', () => {
-      // Verifies the canonical JSON serialisation format.
-      // This string is what gets SHA-256 hashed on BOTH Flutter and server side.
-      // Any field change must be reflected in both hash_utils.dart and tts.service.ts.
+      // Verifies the canonical JSON serialisation format. The locale value here is
+      // the post-normalisation form ('enus'), which is what actually gets hashed.
       const payload = JSON.stringify({
-        locale: 'en-US',
+        locale: 'enus',
         provider: 'kokoro',
         speechRate: '1.0',
         text: 'Hello',
@@ -740,24 +779,23 @@ describe('TtsService', () => {
       });
 
       expect(payload).toBe(
-        '{"locale":"en-US","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}',
+        '{"locale":"enus","provider":"kokoro","speechRate":"1.0","text":"Hello","voice":"af_heart"}',
       );
     });
 
-    it('cacheKey with all 5 alphabetical fields matches inline SHA-256 computation', () => {
-      // Verifies that cacheKey() uses the documented field set and ordering.
-      // This test guards against field additions or renames that would break
-      // cross-platform cache key alignment with the Flutter client.
+    it('cacheKey with all 5 alphabetical fields matches inline SHA-256 computation (locale normalised)', () => {
+      // Verifies that cacheKey() uses the documented field set and ordering, with
+      // locale normalised to lowercase + non-alphanumerics stripped.
       const { createHash } = require('crypto') as typeof import('crypto');
 
-      const inputs: Array<{ text: string; voice: string; locale: string; provider: string; speechRate: string }> = [
-        { text: 'Breathe in slowly', voice: 'aoede',    locale: 'enUS',  provider: 'gemini',  speechRate: '1.0' },
-        { text: 'Hold the pose',     voice: 'af_heart', locale: 'en-US', provider: 'kokoro',  speechRate: '1.5' },
-        { text: 'Begin now',         voice: 'charon',   locale: 'enIN',  provider: 'gemini',  speechRate: '0.8' },
+      const inputs: Array<{ text: string; voice: string; locale: string; normalisedLocale: string; provider: string; speechRate: string }> = [
+        { text: 'Breathe in slowly', voice: 'aoede',    locale: 'enUS',  normalisedLocale: 'enus', provider: 'gemini',  speechRate: '1.0' },
+        { text: 'Hold the pose',     voice: 'af_heart', locale: 'en-US', normalisedLocale: 'enus', provider: 'kokoro',  speechRate: '1.5' },
+        { text: 'Begin now',         voice: 'charon',   locale: 'enIN',  normalisedLocale: 'enin', provider: 'gemini',  speechRate: '0.8' },
       ];
 
-      for (const { text, voice, locale, provider, speechRate } of inputs) {
-        const expectedPayload = JSON.stringify({ locale, provider, speechRate, text, voice });
+      for (const { text, voice, locale, normalisedLocale, provider, speechRate } of inputs) {
+        const expectedPayload = JSON.stringify({ locale: normalisedLocale, provider, speechRate, text, voice });
         const expected = createHash('sha256').update(expectedPayload).digest('hex');
         const actual = service.cacheKey(text, voice, locale, provider, speechRate);
         expect(actual).toBe(expected);

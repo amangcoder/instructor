@@ -82,7 +82,7 @@ export default function DeletionRequestsTable({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
   // Local state for inline updates after processing
   const [rows, setRows] = useState(initialRows);
@@ -178,22 +178,22 @@ export default function DeletionRequestsTable({
           value={searchValue}
           onChange={(e) => setSearchValue(e.target.value)}
           placeholder="Search by email..."
-          className="w-full sm:w-80 rounded-lg border border-outline-variant bg-surface-container px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="w-full sm:w-80 rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:border-indigo-500"
           aria-label="Search deletion requests by email"
         />
       </div>
 
       {/* ── Summary ────────────────────────────────────────────────────── */}
-      <p className="text-sm text-on-surface-variant mb-4">
+      <p className="text-sm text-slate-400 mb-4">
         {total.toLocaleString()} deletion request{total !== 1 ? 's' : ''}
         {search ? ` matching "${search}"` : ''} — page {page} of {totalPages}
       </p>
 
       {/* ── Table ──────────────────────────────────────────────────────── */}
-      <div className="rounded-xl bg-surface-container shadow-sm overflow-hidden">
+      <div className="rounded-xl bg-slate-900 border border-white/8 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-outline-variant">
-            <thead className="bg-surface-variant/30">
+          <table className="min-w-full divide-y divide-white/8">
+            <thead className="bg-slate-800/50">
               <tr>
                 <Th>Email</Th>
                 <Th>IP Address</Th>
@@ -202,12 +202,12 @@ export default function DeletionRequestsTable({
                 <Th className="text-right">Actions</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant">
+            <tbody className="divide-y divide-white/5">
               {rows.length === 0 ? (
                 <tr>
                   <td
                     colSpan={5}
-                    className="px-4 py-10 text-center text-sm text-on-surface-variant"
+                    className="px-4 py-10 text-center text-sm text-slate-400"
                   >
                     {search
                       ? `No deletion requests matching "${search}"`
@@ -216,9 +216,9 @@ export default function DeletionRequestsTable({
                 </tr>
               ) : (
                 rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-surface-variant/20">
+                  <tr key={row.id} className="hover:bg-white/5 transition-colors duration-150">
                     <Td>
-                      <span className="font-medium text-on-surface">
+                      <span className="font-medium text-white">
                         {maskEmail(row.email)}
                       </span>
                     </Td>
@@ -239,13 +239,13 @@ export default function DeletionRequestsTable({
                             setProcessingId(row.id);
                             setProcessingEmail(row.email);
                           }}
-                          className="inline-flex items-center rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 min-h-[44px] transition-colors"
+                          className="inline-flex items-center rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1 min-h-[44px] transition-colors"
                           aria-label={`Mark deletion request from ${maskEmail(row.email)} as processed`}
                         >
                           Mark as Processed
                         </button>
                       ) : (
-                        <span className="text-xs text-on-surface-variant">
+                        <span className="text-xs text-slate-400">
                           —
                         </span>
                       )}
@@ -308,10 +308,10 @@ function StatusBadge({ status }: { status: string }) {
   const isProcessed = status === 'processed';
 
   const colorClasses = isPending
-    ? 'bg-amber-100 text-amber-900'
+    ? 'bg-amber-500/20 text-amber-400'
     : isProcessed
-      ? 'bg-green-100 text-green-900'
-      : 'bg-surface-variant text-on-surface-variant';
+      ? 'bg-emerald-500/20 text-emerald-400'
+      : 'bg-slate-700 text-slate-300';
 
   const label = isPending
     ? 'Pending'
@@ -339,7 +339,7 @@ function Th({
   return (
     <th
       scope="col"
-      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant ${className}`}
+      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 ${className}`}
     >
       {children}
     </th>
@@ -354,7 +354,7 @@ function Td({
   className?: string;
 }) {
   return (
-    <td className={`px-4 py-3 text-sm text-on-surface-variant ${className}`}>
+    <td className={`px-4 py-3 text-sm text-slate-300 ${className}`}>
       {children}
     </td>
   );
@@ -371,7 +371,7 @@ function PageLink({
 }) {
   if (disabled) {
     return (
-      <span className="rounded-lg border border-outline-variant px-4 py-2 text-sm text-on-surface-variant opacity-50 cursor-not-allowed">
+      <span className="rounded-lg border border-white/8 px-4 py-2 text-sm text-slate-400 opacity-50 cursor-not-allowed">
         {label}
       </span>
     );
@@ -379,7 +379,7 @@ function PageLink({
   return (
     <Link
       href={href}
-      className="rounded-lg border border-outline-variant px-4 py-2 text-sm text-on-surface hover:bg-surface-variant/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="rounded-lg border border-white/8 px-4 py-2 text-sm text-white hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
     >
       {label}
     </Link>

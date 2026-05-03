@@ -1,0 +1,26 @@
+# ── Runtime dependencies ──────────────────────────────────────────────────────
+
+# FastAPI web framework + ASGI server
+fastapi>=0.115.0
+uvicorn>=0.30.0
+
+# Numerical + audio I/O. soundfile is used by the VibeVoice processor to load
+# the speaker prompt WAVs.
+numpy>=1.26
+soundfile>=0.12.1
+
+# Torch — pin to >=2.4 so MPS bf16/fp16 fallbacks work cleanly. CUDA users can
+# override with the CUDA wheel index at install time.
+torch>=2.4
+torchaudio>=2.4
+
+# HuggingFace stack pulled in transitively by VibeVoice; pin floors so the
+# image build doesn't silently pick up an incompatible release.
+transformers>=4.43
+accelerate>=0.33
+safetensors>=0.4
+huggingface_hub>=0.24
+
+# Microsoft VibeVoice — installed from the upstream repo. Override with
+# VIBEVOICE_REPO at build time to point at a fork or pinned commit.
+vibevoice @ git+https://github.com/microsoft/VibeVoice.git

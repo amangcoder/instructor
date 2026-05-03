@@ -210,6 +210,13 @@ class _SessionTile extends StatelessWidget {
                 : colorScheme.onSurfaceVariant,
           ),
         ),
+        trailing: isCurrent
+            ? Icon(
+                Icons.play_circle_fill,
+                size: 32,
+                color: colorScheme.primary,
+              )
+            : null,
         // Soft-lock: future days are tappable, but we don't yet route to them
         // here — that's the responsibility of the CTA bar's "Continue" flow.
         // Tapping a completed day re-runs it.
@@ -233,7 +240,7 @@ class _SessionStateIcon extends StatelessWidget {
       case _SessionState.completed:
         return Icon(Icons.check_circle, color: colorScheme.primary);
       case _SessionState.current:
-        return Icon(Icons.play_circle_fill, color: colorScheme.primary);
+        return Icon(Icons.radio_button_checked, color: colorScheme.primary);
       case _SessionState.locked:
         return Icon(Icons.lock_outline, color: colorScheme.outline);
     }

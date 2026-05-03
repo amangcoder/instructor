@@ -53,7 +53,7 @@ class PlanTriggerSyncService {
       'triggers': dirty.map(_rowToJson).toList(),
     };
 
-    final uri = Uri.parse('${_api.backendBaseUrl}/sync/triggers');
+    final uri = Uri.parse('${_api.backendBaseUrl}/api/sync/triggers');
     final response = await _api.postJson(uri, body);
 
     final rows = (response['triggers'] as List?) ?? const [];
@@ -81,7 +81,7 @@ class PlanTriggerSyncService {
   /// next cursor, or null if no rows were returned.
   Future<DateTime?> pull(String userId, {DateTime? since}) async {
     final uri = Uri.parse(
-      '${_api.backendBaseUrl}/sync/triggers'
+      '${_api.backendBaseUrl}/api/sync/triggers'
       '${since != null ? '?since=${Uri.encodeQueryComponent(since.toUtc().toIso8601String())}' : ''}',
     );
     final response = await _api.getJson(uri);

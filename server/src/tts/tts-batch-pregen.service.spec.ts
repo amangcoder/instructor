@@ -18,6 +18,7 @@ const mockS3Send = jest.fn();
 jest.mock('@aws-sdk/client-s3', () => ({
   S3Client: jest.fn().mockImplementation(() => ({ send: mockS3Send })),
   HeadObjectCommand: jest.fn().mockImplementation((params) => params),
+  GetObjectCommand: jest.fn().mockImplementation((params) => params),
 }));
 
 // ---------------------------------------------------------------------------
@@ -1070,14 +1071,14 @@ describe('TtsBatchPregenService — regenerateVoice()', () => {
     expect(mockWorkerDispatch.dispatchBatchPregen).not.toHaveBeenCalled();
   });
 
-  it('uses default speechRate of 1.00 when omitted', async () => {
+  it('uses default speechRate of 1.0 when omitted', async () => {
     mockEnumService.enumerate.mockReturnValue([]);
 
-    // Call without speechRate (uses default '1.00')
+    // Call without speechRate (uses default '1.0')
     await service.regenerateVoice(planId, voiceId, locale, planJson, provider);
 
     expect(mockEnumService.enumerate).toHaveBeenCalledWith(
-      planJson, voiceId, locale, provider, '1.00',
+      planJson, voiceId, locale, provider, '1.0',
     );
   });
 });

@@ -27,3 +27,51 @@ export function buildWav(pcm: Buffer): Buffer {
 
   return Buffer.concat([header, pcm]);
 }
+
+/**
+ * Parses a WAV buffer (or just its leading bytes — at least the RIFF header
+ * + "fmt " + "data" chunk descriptors are required) and returns the audio
+ * duration in milliseconds. Returns null when the buffer is not a recognisable
+ * RIFF/WAVE PCM stream.
+ *
+ * Handles standard 44-byte PCM headers as well as files where extra chunks
+ * (e.g. "LIST", "bext") sit between "fmt " and "data" by walking the chunk
+ * list rather than assuming fixed offsets.
+ */
+export function getWavDurationMs(buffer: Buffer): number | null {
+  if (buffer.length < 44) return null;
+  if (buffer.toString('ascii', 0, 4) !== 'RIFF') return null;
+  if (buffer.toString('ascii', 8, 12) !== 'WAVE') return null;
+
+  let sampleRate = 0;
+  let channels = 0;
+  let bitsPerSample = 0;
+  let dataSize = 0;
+
+  let offset = 12;
+  while (offset + 8 <= buffer.length) {
+    const chunkId = buffer.toString('ascii', offset, offset + 4);
+    const chunkSize = buffer.readUInt32LE(offset + 4);
+    const bodyStart = offset + 8;
+
+    if (chunkId === 'fmt ' && bodyStart + 16 <= buffer.length) {
+      channels = buffer.readUInt16LE(bodyStart + 2);
+      sampleRate = buffer.readUInt32LE(bodyStart + 4);
+      bitsPerSample = buffer.readUInt16LE(bodyStart + 14);
+    } else if (chunkId === 'data') {
+      dataSize = chunkSize;
+      break;
+    }
+
+    // Chunks are word-aligned: round odd sizes up by one byte.
+    offset = bodyStart + chunkSize + (chunkSize % 2);
+  }
+
+  if (sampleRate === 0 || channels === 0 || bitsPerSample === 0 || dataSize === 0) {
+    return null;
+  }
+
+  const bytesPerSecond = (sampleRate * channels * bitsPerSample) / 8;
+  if (bytesPerSecond === 0) return null;
+  return Math.round((dataSize * 1000) / bytesPerSecond);
+}

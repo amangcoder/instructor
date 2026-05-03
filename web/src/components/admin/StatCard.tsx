@@ -18,32 +18,24 @@ export interface StatCardProps {
   /**
    * Optional change relative to the previous period (raw count).
    * Positive values show a green ▲ indicator; negative values show red ▼.
-   * Takes precedence over deltaLabel if both are provided.
-   * Ignored when deltaLabel is provided.
    */
   delta?: number;
   /**
    * Optional override for the displayed delta string (e.g. '+12.5%').
-   * When provided, renders this string instead of the computed delta count.
-   * Direction is inferred from deltaIsPositive.
    */
   deltaLabel?: string;
   /**
    * Direction indicator used when deltaLabel is provided.
-   * true → green ▲ (positive change); false → red ▼ (negative change).
-   * Defaults to true when not specified.
    */
   deltaIsPositive?: boolean;
   /**
    * When true, renders a skeleton pulse animation in place of real content.
-   * Use while the metric data is loading.
    */
   loading?: boolean;
   /**
    * Visual variant.
    * 'default' — standard compact card (default).
    * 'hero'    — larger, prominently styled card for the North Star metric.
-   *             Supports children (e.g. an embedded SparklineChart).
    */
   variant?: 'default' | 'hero';
   /**
@@ -60,26 +52,16 @@ export interface StatCardProps {
 /**
  * StatCard — server component
  *
- * Renders a metric card with:
- *  - Title (label for the metric)
- *  - Value (formatted number or custom valueLabel string)
- *  - Optional delta indicator (▲ green for positive, ▼ red for negative)
- *  - Optional loading skeleton (pulse animation)
- *  - Optional children (embedded sparkline, etc.) — hero variant only
+ * Renders a metric card with dark-slate/indigo design system styling.
  *
  * Variants:
- *  - 'default' — compact card for secondary metrics
- *  - 'hero'    — larger prominent card for the North Star metric
- *
- * Styling follows the existing web aesthetic:
- *  - rounded-xl card with shadow-sm
- *  - bg-surface-container (default) / primary-tinted (hero)
- *  - Theme-aware semantic colors for delta (success / error)
+ *  - 'default' — bg-slate-800/50 border border-white/8 compact card
+ *  - 'hero'    — gradient from-indigo-950/60 to-violet-950/60 larger card
  *
  * Accessibility:
  *  - Decorative arrow characters are aria-hidden
  *  - Delta value has an aria-label describing direction + magnitude
- *  - Skeleton state has aria-busy="true" and a visually-hidden status message
+ *  - Skeleton state has aria-busy="true"
  *  - role="region" with aria-label matching the card title
  */
 export default function StatCard({
@@ -99,28 +81,28 @@ export default function StatCard({
   if (loading) {
     return (
       <div
-        className={`rounded-xl shadow-sm animate-pulse ${
+        className={`rounded-xl animate-pulse ${
           isHero
-            ? 'bg-primary/10 border border-primary/20 p-8'
-            : 'bg-surface-container p-6'
+            ? 'bg-gradient-to-br from-indigo-950/60 to-violet-950/60 border border-indigo-500/20 p-8'
+            : 'bg-slate-800/50 border border-white/8 p-5'
         }`}
         aria-busy="true"
         aria-label={`Loading ${title}`}
         role="status"
       >
         {/* Title skeleton */}
-        <div className="h-3.5 bg-outline-variant/40 rounded w-2/5 mb-4" />
+        <div className="h-3 bg-slate-700 rounded w-2/5 mb-4" />
         {/* Value skeleton */}
         <div
-          className={`bg-outline-variant/40 rounded w-3/5 mb-3 ${
+          className={`bg-slate-700 rounded w-3/5 mb-3 ${
             isHero ? 'h-12' : 'h-8'
           }`}
         />
         {/* Delta skeleton */}
-        <div className="h-3 bg-outline-variant/40 rounded w-1/4" />
+        <div className="h-3 bg-slate-700 rounded w-1/4" />
         {/* Children area skeleton (hero only) */}
         {isHero && (
-          <div className="h-12 bg-outline-variant/40 rounded w-full mt-6" />
+          <div className="h-12 bg-slate-700 rounded w-full mt-6" />
         )}
       </div>
     );
@@ -137,13 +119,11 @@ export default function StatCard({
   let deltaAriaLabel = '';
 
   if (hasDeltaLabel) {
-    // Custom label path — direction from deltaIsPositive prop (default: true)
     isPositive = deltaIsPositiveProp ?? true;
     arrowChar = isPositive ? '▲' : '▼';
     deltaDisplayText = deltaLabel;
     deltaAriaLabel = `${isPositive ? 'Increase' : 'Decrease'} of ${deltaLabel} from previous period`;
   } else if (hasDeltaCount) {
-    // Raw count path — existing behaviour (backward-compatible)
     isPositive = delta! >= 0;
     const deltaAbs = Math.abs(delta!);
     arrowChar = isPositive ? '▲' : '▼';
@@ -156,20 +136,24 @@ export default function StatCard({
 
   return (
     <div
-      className={`rounded-xl shadow-sm ${
+      className={`rounded-xl ${
         isHero
-          ? 'bg-primary/10 border border-primary/20 p-8'
-          : 'bg-surface-container p-6'
+          ? 'bg-gradient-to-br from-indigo-950/60 to-violet-950/60 border border-indigo-500/20 p-8'
+          : 'bg-slate-800/50 border border-white/8 p-5'
       }`}
       role="region"
       aria-label={title}
     >
       {/* Title */}
-      <p className="text-sm font-medium text-on-surface-variant">{title}</p>
+      <p className={`font-medium uppercase tracking-widest ${
+        isHero ? 'text-indigo-300 text-xs' : 'text-slate-400 text-xs'
+      }`}>
+        {title}
+      </p>
 
       {/* Value */}
       <p
-        className={`font-bold text-on-surface mt-1 tabular-nums ${
+        className={`font-black text-white mt-1 tabular-nums ${
           isHero ? 'text-5xl' : 'text-3xl'
         }`}
       >
@@ -180,7 +164,7 @@ export default function StatCard({
       {hasDelta && (
         <p
           className={`text-sm font-medium mt-2 flex items-center gap-1 ${
-            isPositive ? 'text-success' : 'text-error'
+            isPositive ? 'text-emerald-400' : 'text-red-400'
           }`}
           aria-label={deltaAriaLabel}
         >

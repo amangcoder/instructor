@@ -183,38 +183,47 @@ FROM (VALUES
 JOIN series s ON s.name = v.series_name;
 
 -- ── Library plans (one published plan per category) ────────────────────────
-DELETE FROM library_plans WHERE name IN (
-  '10-Minute Body Scan',
-  '5-Minute Focus Reset',
-  'Box Breathing',
-  '3-Minute Morning Stretch'
-);
-
-INSERT INTO library_plans (name, description, category, tags, default_voice, plan_json, locale, is_published, sort_order)
+-- Fixed UUIDs are intentional: re-running the seed preserves plan IDs so
+-- cached app references and user_library_links remain valid across re-seeds.
+INSERT INTO library_plans (id, name, description, category, tags, default_voice, plan_json, locale, is_published, sort_order)
 VALUES
-  ('10-Minute Body Scan',
+  ('a1000000-0000-4000-8000-000000000001',
+   '10-Minute Body Scan',
    'A guided body scan to release tension before sleep.',
    'sleep', 'sleep,body-scan', 'leda',
    '{"steps":[{"id":"s1","text":"Close your eyes and take three slow breaths.","runtimeType":"say"},{"id":"s2","text":"Bring your attention to the crown of your head.","runtimeType":"say"},{"id":"s3","text":"Slowly move your awareness down through your body.","runtimeType":"say"}]}',
    'en-US', true, 0),
 
-  ('5-Minute Focus Reset',
+  ('a1000000-0000-4000-8000-000000000002',
+   '5-Minute Focus Reset',
    'Reset your attention between work blocks.',
    'focus', 'focus,reset', 'puck',
    '{"steps":[{"id":"s1","text":"Sit upright and close your eyes.","runtimeType":"say"},{"id":"s2","text":"Take five long breaths through the nose.","runtimeType":"say"},{"id":"s3","text":"Open your eyes and choose one task.","runtimeType":"say"}]}',
    'en-US', true, 0),
 
-  ('Box Breathing',
+  ('a1000000-0000-4000-8000-000000000003',
+   'Box Breathing',
    '4-4-4-4 breathing pattern to calm the nervous system.',
    'stress', 'stress,breathing', 'leda',
    '{"steps":[{"id":"s1","text":"Inhale for four counts.","runtimeType":"say"},{"id":"s2","text":"Hold for four counts.","runtimeType":"say"},{"id":"s3","text":"Exhale for four counts.","runtimeType":"say"},{"id":"s4","text":"Hold for four counts.","runtimeType":"say"}]}',
    'en-US', true, 0),
 
-  ('3-Minute Morning Stretch',
+  ('a1000000-0000-4000-8000-000000000004',
+   '3-Minute Morning Stretch',
    'A short mobility flow to wake the body.',
    'movement', 'movement,morning', 'af_heart',
    '{"steps":[{"id":"s1","text":"Reach both arms overhead and stretch tall.","runtimeType":"say"},{"id":"s2","text":"Roll your shoulders backward five times.","runtimeType":"say"},{"id":"s3","text":"Gentle forward fold, let your head hang.","runtimeType":"say"}]}',
-   'en-US', true, 0);
+   'en-US', true, 0)
+ON CONFLICT (id) DO UPDATE
+  SET name         = EXCLUDED.name,
+      description  = EXCLUDED.description,
+      category     = EXCLUDED.category,
+      tags         = EXCLUDED.tags,
+      default_voice = EXCLUDED.default_voice,
+      plan_json    = EXCLUDED.plan_json,
+      locale       = EXCLUDED.locale,
+      is_published = EXCLUDED.is_published,
+      sort_order   = EXCLUDED.sort_order;
 
 COMMIT;
 

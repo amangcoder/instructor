@@ -124,6 +124,49 @@ function TtsStatusBadge({ status }: { status: string }) {
 const TH = 'px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Avatar
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initialsFor(name: string | null, email: string): string {
+  const source = (name ?? email).trim();
+  if (!source) return '?';
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return source[0]!.toUpperCase();
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+}
+
+function UserAvatar({
+  photoUrl,
+  name,
+  email,
+}: {
+  photoUrl: string | null;
+  name: string | null;
+  email: string;
+}) {
+  const label = name ?? email;
+  const baseCls =
+    'h-16 w-16 shrink-0 rounded-full overflow-hidden bg-surface-variant flex items-center justify-center text-on-surface-variant text-lg font-semibold';
+  if (photoUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={photoUrl}
+        alt={`${label}'s profile photo`}
+        className={baseCls + ' object-cover'}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <div className={baseCls} aria-label={`${label}'s profile photo placeholder`}>
+      {initialsFor(name, email)}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -177,15 +220,22 @@ export default async function UserDetailPage({ params }: PageProps) {
         <>
           {/* ── Header ─────────────────────────────────────────────────── */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-            <div>
-              <h1 className="text-2xl font-bold text-on-surface">
-                {data.user.name ?? data.user.email}
-              </h1>
-              <p className="text-sm text-on-surface-variant mt-1">
-                {data.user.email}
-                {data.user.username ? ` • @${data.user.username}` : ''} •
-                joined {formatDate(data.user.createdAt)}
-              </p>
+            <div className="flex items-center gap-4">
+              <UserAvatar
+                photoUrl={data.user.photoUrl}
+                name={data.user.name}
+                email={data.user.email}
+              />
+              <div>
+                <h1 className="text-2xl font-bold text-on-surface">
+                  {data.user.name ?? data.user.email}
+                </h1>
+                <p className="text-sm text-on-surface-variant mt-1">
+                  {data.user.email}
+                  {data.user.username ? ` • @${data.user.username}` : ''} •
+                  joined {formatDate(data.user.createdAt)}
+                </p>
+              </div>
             </div>
             <span
               className={[

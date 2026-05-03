@@ -3,26 +3,22 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:instructor/providers/settings_providers.dart';
+import 'package:instructor/screens/settings/widgets/activity_stats_card.dart';
+import 'package:instructor/screens/settings/widgets/auth_section.dart';
+import 'package:instructor/screens/settings/widgets/battery_optimization_prompt.dart';
+import 'package:instructor/screens/settings/widgets/profile_header.dart';
+import 'package:instructor/screens/settings/widgets/profile_sidebar.dart';
+import 'package:instructor/screens/settings/widgets/scheduled_triggers_card.dart';
+import 'package:instructor/screens/settings/widgets/shared_settings_widgets.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/theme/app_branding.dart';
-
-import 'widgets/activity_stats_card.dart';
-import 'widgets/auth_section.dart';
-import 'widgets/battery_optimization_prompt.dart';
-import 'widgets/personalization_card.dart';
-import 'widgets/profile_header.dart';
-import 'widgets/profile_sidebar.dart';
-import 'widgets/scheduled_triggers_card.dart';
-import 'widgets/shared_settings_widgets.dart';
 
 /// App settings screen — Profile-first layout.
 ///
 /// Structure (top to bottom):
 /// - **Profile Header** — user avatar, email, plan badge, upgrade button.
 /// - **My Activity** — live plan count, session and streak placeholders.
-/// - **For You** — activity level and goal personalisation chips.
 /// - **Account** — sign-in / sign-out (AuthSection).
 /// - **Preferences** — theme mode selector.
 /// - **Audio & Speech** — speech rate, ambient volume, voice volume sliders.
@@ -40,6 +36,9 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Parent BottomNavShell uses extendBody: true, so trailing list items scroll
+    // under the glassmorphic nav. Reserve enough bottom padding to clear it.
+    final bottomInset = MediaQuery.of(context).padding.bottom + 96;
     return Scaffold(
       endDrawer: const ProfileSidebar(),
       appBar: AppBranding.brandedAppBar(
@@ -54,7 +53,7 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+        padding: EdgeInsets.fromLTRB(24, 8, 24, bottomInset),
         children: [
           // ── Profile Header ────────────────────────────────────────────
           const ProfileHeader(),
@@ -66,44 +65,42 @@ class SettingsScreen extends ConsumerWidget {
           // ── Scheduled Sessions (renders only when the user has any) ─────
           const ScheduledTriggersCard(),
 
-          // ── For You ───────────────────────────────────────────────────
-          const SectionHeader(title: 'For You'),
-          const PersonalizationCard(),
-
           // ── Account ───────────────────────────────────────────────────
           const SectionHeader(title: 'Account'),
-          SettingsCard(children: [const AuthSection()]),
+          const SettingsCard(children: [AuthSection()]),
 
           // ── Preferences ───────────────────────────────────────────────
           const SectionHeader(title: 'Preferences'),
-          SettingsCard(
-            children: const [_ThemeModeSelector()],
+          const SettingsCard(
+            children: [_ThemeModeSelector()],
           ),
 
           // ── Audio & Speech ────────────────────────────────────────────
           const SectionHeader(title: 'Audio & Speech'),
-          SettingsCard(
+          const SettingsCard(
             children: [
-              const _SpeechRateSlider(),
-              const _AmbientVolumeSlider(),
-              const _VoiceVolumeSlider(),
+              _SpeechRateSlider(),
+              _SliderDivider(),
+              _AmbientVolumeSlider(),
+              _SliderDivider(),
+              _VoiceVolumeSlider(),
             ],
           ),
 
           // ── Notifications ─────────────────────────────────────────────
           const SectionHeader(title: 'Notifications'),
-          SettingsCard(
+          const SettingsCard(
             children: [
-              const _NotificationSoundSwitch(),
-              const _VibrationSwitch(),
+              _NotificationSoundSwitch(),
+              _VibrationSwitch(),
             ],
           ),
 
           // ── Battery (Android only) ────────────────────────────────────
           if (Platform.isAndroid) ...[
             const SectionHeader(title: 'Battery'),
-            SettingsCard(
-              children: [const BatteryOptimizationPrompt()],
+            const SettingsCard(
+              children: [BatteryOptimizationPrompt()],
             ),
           ],
 
@@ -120,8 +117,6 @@ class SettingsScreen extends ConsumerWidget {
               textAlign: TextAlign.center,
             ),
           ),
-
-          const SizedBox(height: 32),
         ],
       ),
     );
@@ -139,39 +134,49 @@ class _ThemeModeSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final current =
         ref.watch(themeModeSettingProvider).valueOrNull ?? ThemeMode.system;
+    final theme = Theme.of(context);
 
-    const options = [
-      (value: ThemeMode.system, label: 'System'),
-      (value: ThemeMode.light, label: 'Light'),
-      (value: ThemeMode.dark, label: 'Dark'),
-    ];
-
-    return SettingsControlRow(
-      title: 'Appearance',
-      subtitle: 'App colour scheme',
-      control: DropdownButton<ThemeMode>(
-        value: current,
-        isDense: true,
-        underline: const SizedBox.shrink(),
-        items: options
-            .map(
-              (o) => DropdownMenuItem(
-                value: o.value,
-                child: Text(o.label),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Appearance', style: theme.textTheme.bodyLarge),
+          const SizedBox(height: 10),
+          SegmentedButton<ThemeMode>(
+            segments: const [
+              ButtonSegment(
+                value: ThemeMode.system,
+                label: Text('System'),
+                icon: Icon(Icons.brightness_auto_rounded, size: 16),
               ),
-            )
-            .toList(),
-        onChanged: (mode) {
-          if (mode == null) return;
-          final raw = switch (mode) {
-            ThemeMode.light => 'light',
-            ThemeMode.dark => 'dark',
-            ThemeMode.system => 'system',
-          };
-          unawaited(
-            ref.read(appSettingsProvider).write(AppSettingsKeys.themeMode, raw),
-          );
-        },
+              ButtonSegment(
+                value: ThemeMode.light,
+                label: Text('Light'),
+                icon: Icon(Icons.light_mode_rounded, size: 16),
+              ),
+              ButtonSegment(
+                value: ThemeMode.dark,
+                label: Text('Dark'),
+                icon: Icon(Icons.dark_mode_rounded, size: 16),
+              ),
+            ],
+            selected: {current},
+            onSelectionChanged: (selection) {
+              final mode = selection.first;
+              final raw = switch (mode) {
+                ThemeMode.light => 'light',
+                ThemeMode.dark => 'dark',
+                ThemeMode.system => 'system',
+              };
+              unawaited(
+                ref
+                    .read(appSettingsProvider)
+                    .write(AppSettingsKeys.themeMode, raw),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -189,50 +194,67 @@ class _SpeechRateSlider extends ConsumerStatefulWidget {
 }
 
 class _SpeechRateSliderState extends ConsumerState<_SpeechRateSlider> {
-  /// Non-null while the user is actively dragging.
   double? _activeValue;
 
   String _label(double rate) {
-    if (rate == 1.0) return '1.0x (Normal)';
+    if (rate == 1.0) return '1.0x';
     return '${rate.toStringAsFixed(1)}x';
   }
 
   @override
   Widget build(BuildContext context) {
     final rateAsync = ref.watch(speechRateSettingProvider);
+    final theme = Theme.of(context);
 
     return rateAsync.when(
       data: (rate) {
         final display = _activeValue ?? rate;
-        return ListTile(
-          title: const Text('Instruction Speed'),
-          subtitle: Semantics(
-            label: 'Speech rate: ${_label(display)}',
-            child: Slider(
-              value: display,
-              min: 0.5,
-              max: 2.0,
-              divisions: 15,
-              label: _label(display),
-              onChanged: (v) => setState(() => _activeValue = v),
-              onChangeEnd: (v) {
-                setState(() => _activeValue = null);
-                ref
-                    .read(appSettingsProvider)
-                    .write(
-                      AppSettingsKeys.speechRate,
-                      v.toStringAsFixed(1),
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Instruction Speed', style: theme.textTheme.bodyLarge),
+                  Text(
+                    _label(display),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              Semantics(
+                label: 'Speech rate: ${_label(display)}',
+                child: Slider(
+                  value: display,
+                  min: 0.5,
+                  max: 2.0,
+                  divisions: 15,
+                  label: _label(display),
+                  onChanged: (v) => setState(() => _activeValue = v),
+                  onChangeEnd: (v) {
+                    setState(() => _activeValue = null);
+                    unawaited(
+                      ref
+                          .read(appSettingsProvider)
+                          .write(AppSettingsKeys.speechRate, v.toStringAsFixed(1)),
                     );
-              },
-            ),
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },
-      loading: () => const ListTile(
-        title: Text('Instruction Speed'),
-        subtitle: LinearProgressIndicator(),
+      loading: () => const Padding(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: LinearProgressIndicator(),
       ),
-      error: (_, __) => const ListTile(title: Text('Instruction Speed')),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
@@ -247,34 +269,48 @@ class _AmbientVolumeSlider extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final volumeAsync = ref.watch(ambientVolumeSettingProvider);
+    final theme = Theme.of(context);
 
     return volumeAsync.when(
-      data: (volume) => ListTile(
-        title: const Text('Ambient Volume'),
-        subtitle: Semantics(
-          label: 'Ambient volume: ${(volume * 100).round()} percent',
-          child: Slider(
-            value: volume,
-            min: 0.0,
-            max: 1.0,
-            divisions: 10,
-            label: '${(volume * 100).round()}%',
-            onChanged: (newValue) {
-              ref
-                  .read(appSettingsProvider)
-                  .write(
-                    AppSettingsKeys.ambientVolume,
-                    newValue.toStringAsFixed(2),
-                  );
-            },
-          ),
+      data: (volume) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Ambient Volume', style: theme.textTheme.bodyLarge),
+                Text(
+                  '${(volume * 100).round()}%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            Semantics(
+              label: 'Ambient volume: ${(volume * 100).round()} percent',
+              child: Slider(
+                value: volume,
+                divisions: 10,
+                label: '${(volume * 100).round()}%',
+                onChanged: (v) => unawaited(
+                  ref
+                      .read(appSettingsProvider)
+                      .write(AppSettingsKeys.ambientVolume, v.toStringAsFixed(2)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
-      loading: () => const ListTile(
-        title: Text('Ambient Volume'),
-        subtitle: LinearProgressIndicator(),
+      loading: () => const Padding(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: LinearProgressIndicator(),
       ),
-      error: (_, __) => const ListTile(title: Text('Ambient Volume')),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
@@ -285,34 +321,48 @@ class _VoiceVolumeSlider extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final volumeAsync = ref.watch(voiceVolumeSettingProvider);
+    final theme = Theme.of(context);
 
     return volumeAsync.when(
-      data: (volume) => ListTile(
-        title: const Text('Voice Volume'),
-        subtitle: Semantics(
-          label: 'Voice volume: ${(volume * 100).round()} percent',
-          child: Slider(
-            value: volume,
-            min: 0.0,
-            max: 1.0,
-            divisions: 10,
-            label: '${(volume * 100).round()}%',
-            onChanged: (newValue) {
-              ref
-                  .read(appSettingsProvider)
-                  .write(
-                    AppSettingsKeys.voiceVolume,
-                    newValue.toStringAsFixed(2),
-                  );
-            },
-          ),
+      data: (volume) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Voice Volume', style: theme.textTheme.bodyLarge),
+                Text(
+                  '${(volume * 100).round()}%',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            Semantics(
+              label: 'Voice volume: ${(volume * 100).round()} percent',
+              child: Slider(
+                value: volume,
+                divisions: 10,
+                label: '${(volume * 100).round()}%',
+                onChanged: (v) => unawaited(
+                  ref
+                      .read(appSettingsProvider)
+                      .write(AppSettingsKeys.voiceVolume, v.toStringAsFixed(2)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
-      loading: () => const ListTile(
-        title: Text('Voice Volume'),
-        subtitle: LinearProgressIndicator(),
+      loading: () => const Padding(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: LinearProgressIndicator(),
       ),
-      error: (_, __) => const ListTile(title: Text('Voice Volume')),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
@@ -333,14 +383,12 @@ class _NotificationSoundSwitch extends ConsumerWidget {
         title: const Text('Notification Sound'),
         subtitle: const Text('Play a sound on notify steps'),
         value: enabled,
-        onChanged: (newValue) {
-          ref
-              .read(appSettingsProvider)
-              .write(
+        onChanged: (newValue) => unawaited(
+          ref.read(appSettingsProvider).write(
                 AppSettingsKeys.notificationSound,
                 newValue ? 'true' : 'false',
-              );
-        },
+              ),
+        ),
       ),
       loading: () => const ListTile(title: Text('Notification Sound')),
       error: (_, __) => const ListTile(title: Text('Notification Sound')),
@@ -360,14 +408,12 @@ class _VibrationSwitch extends ConsumerWidget {
         title: const Text('Vibration'),
         subtitle: const Text('Vibrate on notify steps'),
         value: enabled,
-        onChanged: (newValue) {
-          ref
-              .read(appSettingsProvider)
-              .write(
+        onChanged: (newValue) => unawaited(
+          ref.read(appSettingsProvider).write(
                 AppSettingsKeys.vibration,
                 newValue ? 'true' : 'false',
-              );
-        },
+              ),
+        ),
       ),
       loading: () => const ListTile(title: Text('Vibration')),
       error: (_, __) => const ListTile(title: Text('Vibration')),
@@ -375,3 +421,17 @@ class _VibrationSwitch extends ConsumerWidget {
   }
 }
 
+class _SliderDivider extends StatelessWidget {
+  const _SliderDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      indent: 16,
+      endIndent: 16,
+      color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+    );
+  }
+}

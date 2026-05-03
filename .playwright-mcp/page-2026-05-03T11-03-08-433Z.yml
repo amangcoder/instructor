@@ -1,0 +1,401 @@
+- generic [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - banner [ref=e3]:
+    - navigation "Main navigation" [ref=e4]:
+      - link "Instructor home" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: Instructor
+      - generic [ref=e8]:
+        - link "Home" [ref=e9] [cursor=pointer]:
+          - /url: /
+        - link "Privacy Policy" [active] [ref=e10] [cursor=pointer]:
+          - /url: /privacy-policy
+        - link "Data Deletion" [ref=e11] [cursor=pointer]:
+          - /url: /data-deletion
+  - main [ref=e12]:
+    - article [ref=e146]:
+      - generic [ref=e147]:
+        - heading "Privacy Policy" [level=1] [ref=e148]
+        - generic [ref=e149]:
+          - paragraph [ref=e150]: "Last Updated: April 14, 2026"
+          - paragraph [ref=e151]: "Effective Date: April 2026"
+      - navigation "Privacy policy sections" [ref=e152]:
+        - heading "Quick Navigation" [level=2] [ref=e153]
+        - list [ref=e154]:
+          - listitem [ref=e155]:
+            - link "Introduction" [ref=e156] [cursor=pointer]:
+              - /url: "#intro"
+          - listitem [ref=e157]:
+            - link "Identity and Contact Information" [ref=e158] [cursor=pointer]:
+              - /url: "#controller"
+          - listitem [ref=e159]:
+            - link "What Personal Data We Collect" [ref=e160] [cursor=pointer]:
+              - /url: "#collection"
+          - listitem [ref=e161]:
+            - link "How Data Is Stored and Secured" [ref=e162] [cursor=pointer]:
+              - /url: "#storage"
+          - listitem [ref=e163]:
+            - link "Purpose of Data Collection" [ref=e164] [cursor=pointer]:
+              - /url: "#purposes"
+          - listitem [ref=e165]:
+            - link "Third-Party Services and Data Sharing" [ref=e166] [cursor=pointer]:
+              - /url: "#third-party"
+          - listitem [ref=e167]:
+            - link "Authentication and Security" [ref=e168] [cursor=pointer]:
+              - /url: "#authentication"
+          - listitem [ref=e169]:
+            - link "Text-to-Speech Data Processing" [ref=e170] [cursor=pointer]:
+              - /url: "#tts-processing"
+          - listitem [ref=e171]:
+            - link "Your Privacy Rights" [ref=e172] [cursor=pointer]:
+              - /url: "#rights"
+          - listitem [ref=e173]:
+            - link "Data Deletion and Account Removal" [ref=e174] [cursor=pointer]:
+              - /url: "#deletion"
+          - listitem [ref=e175]:
+            - link "Cookies and Local Storage" [ref=e176] [cursor=pointer]:
+              - /url: "#cookies"
+          - listitem [ref=e177]:
+            - link "Children's Privacy" [ref=e178] [cursor=pointer]:
+              - /url: "#children"
+          - listitem [ref=e179]:
+            - link "Changes to This Policy" [ref=e180] [cursor=pointer]:
+              - /url: "#changes"
+          - listitem [ref=e181]:
+            - link "Governing Law and Dispute Resolution" [ref=e182] [cursor=pointer]:
+              - /url: "#law"
+      - generic [ref=e183]:
+        - generic [ref=e184]:
+          - heading "Introduction" [level=2] [ref=e185]
+          - generic [ref=e186]:
+            - paragraph [ref=e187]: Instructor is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and otherwise process your personal data in connection with our mobile application (the "App") and related services.
+            - paragraph [ref=e188]: This policy is effective as of April 2026 and was last updated on April 14, 2026.
+        - generic [ref=e189]:
+          - heading "Identity and Contact Information" [level=2] [ref=e190]
+          - generic [ref=e191]:
+            - paragraph [ref=e192]: The data controller for Instructor is Layers IQ, a software development organization.
+            - paragraph [ref=e193]: "If you have questions about this Privacy Policy or our privacy practices, please contact us at: Email: admin@layersiq.com"
+            - paragraph [ref=e194]: We will respond to all privacy inquiries within 30 days.
+        - generic [ref=e195]:
+          - heading "What Personal Data We Collect" [level=2] [ref=e196]
+          - generic [ref=e197]:
+            - paragraph [ref=e198]: "We collect the following categories of personal data when you use the App:"
+            - list [ref=e199]:
+              - listitem [ref=e200]:
+                - strong [ref=e201]: "Account Information:"
+              - listitem [ref=e202]: Email address (required for authentication and account recovery)
+              - listitem [ref=e203]: Display name (optional, shown to users who view shared plans)
+              - listitem [ref=e204]: Username (unique identifier, optional)
+              - listitem [ref=e205]: Profile photo URL (optional, stored as a URL reference only, not as file data)
+            - list [ref=e206]:
+              - listitem [ref=e207]:
+                - strong [ref=e208]: "Plan and Routine Data:"
+              - listitem [ref=e209]: User-created plans (routine names, step descriptions, timings, voice parameters)
+              - listitem [ref=e210]: Plan metadata (creation date, modification date, category tags)
+              - listitem [ref=e211]: Execution state (current progress in running routines, completion history)
+            - list [ref=e212]:
+              - listitem [ref=e213]:
+                - strong [ref=e214]: "Audio and Text Processing:"
+              - listitem [ref=e215]: Text submitted for voice synthesis (temporary, used only to generate audio)
+              - listitem [ref=e216]: Resulting audio files (cached and stored as described in Section 4)
+              - listitem [ref=e217]: Cache keys derived from text content (SHA-256 hashes)
+              - listitem [ref=e218]: TTS voice preference (which voice profile you select)
+            - list [ref=e219]:
+              - listitem [ref=e220]:
+                - strong [ref=e221]: "Authentication Data:"
+              - listitem [ref=e222]: Email-based one-time passcodes (OTP) - hashed using SHA-256 before storage
+              - listitem [ref=e223]: Refresh tokens for maintaining login sessions - stored securely with revocation support
+              - listitem [ref=e224]: Session tokens (temporary, not persisted long-term)
+            - paragraph [ref=e225]: "We do not collect: passwords, credit card information, location data, contacts, or photos stored on your device."
+        - generic [ref=e226]:
+          - heading "How Data Is Stored and Secured" [level=2] [ref=e227]
+          - generic [ref=e228]:
+            - list [ref=e229]:
+              - listitem [ref=e230]:
+                - strong [ref=e231]: "Primary Database:"
+              - listitem [ref=e232]: All user account data, plans, execution state, and authentication records are stored in a PostgreSQL relational database hosted on Amazon Web Services (AWS) in compliance with AWS security best practices.
+              - listitem [ref=e233]: The database is encrypted at rest using AWS-managed encryption keys.
+              - listitem [ref=e234]: Network traffic to the database is encrypted in transit using TLS 1.3.
+              - listitem [ref=e235]: Database backups are automated and encrypted before storage.
+            - list [ref=e236]:
+              - listitem [ref=e237]:
+                - strong [ref=e238]: "Audio Cache:"
+              - listitem [ref=e239]: Voice synthesis output (MP3 audio files) is cached on AWS S3 (Amazon Simple Storage Service).
+              - listitem [ref=e240]: Cache entries are indexed using SHA-256 hashes of the input text.
+              - listitem [ref=e241]: S3 objects are encrypted at rest using server-side encryption.
+              - listitem [ref=e242]: Access to S3 is restricted to the application backend only; users do not have direct S3 URLs.
+            - list [ref=e243]:
+              - listitem [ref=e244]:
+                - strong [ref=e245]: "Local Device Storage:"
+              - listitem [ref=e246]: Plans and routine data are also cached locally on your device using a local SQLite database (Drift ORM).
+              - listitem [ref=e247]: Authentication tokens are stored securely in your device's secure storage (iOS Keychain, Android Keystore).
+              - listitem [ref=e248]: Local data remains on your device even when offline; it synchronizes with the backend when connectivity is restored.
+            - list [ref=e249]:
+              - listitem [ref=e250]:
+                - strong [ref=e251]: "Data Retention:"
+              - listitem [ref=e252]: Active user account data is retained for the duration of your account.
+              - listitem [ref=e253]: Deleted accounts are permanently removed from the database within 30 days of deletion request.
+              - listitem [ref=e254]: TTS audio cache entries are retained for 90 days after last access, then automatically purged.
+              - listitem [ref=e255]: Execution history (e.g., "completed workout on date X") is retained for 1 year.
+              - listitem [ref=e256]: Refresh token revocation records are maintained for 90 days.
+        - generic [ref=e257]:
+          - heading "Purpose of Data Collection" [level=2] [ref=e258]
+          - generic [ref=e259]:
+            - paragraph [ref=e260]: "We process your personal data for the following purposes:"
+            - list [ref=e261]:
+              - listitem [ref=e262]:
+                - strong [ref=e263]: "Essential Service Delivery:"
+              - listitem [ref=e264]: Authenticating your identity when you log in
+              - listitem [ref=e265]: Storing and retrieving your plans and routines
+              - listitem [ref=e266]: Generating voice guidance audio via the Kokoro TTS engine
+              - listitem [ref=e267]: Syncing your data across devices
+              - listitem [ref=e268]: Providing offline access to your data
+            - list [ref=e269]:
+              - listitem [ref=e270]:
+                - strong [ref=e271]: "User Experience and Features:"
+              - listitem [ref=e272]: Personalizing the app based on your preferences (voice type, speech speed)
+              - listitem [ref=e273]: Tracking execution progress and session history
+              - listitem [ref=e274]: Recommending starter plans based on your routine types
+            - list [ref=e275]:
+              - listitem [ref=e276]:
+                - strong [ref=e277]: "Communication:"
+              - listitem [ref=e278]: Sending transactional emails (account confirmations, OTP login links, deletion receipts)
+              - listitem [ref=e279]: Notifying you of app updates and critical security issues
+            - list [ref=e280]:
+              - listitem [ref=e281]:
+                - strong [ref=e282]: "Safety and Compliance:"
+              - listitem [ref=e283]: Detecting and preventing fraudulent usage
+              - listitem [ref=e284]: Enforcing our Terms of Service
+              - listitem [ref=e285]: Complying with legal obligations (GDPR, CCPA, app store requirements)
+              - listitem [ref=e286]: Responding to data subject rights requests (access, correction, deletion)
+        - generic [ref=e287]:
+          - heading "Third-Party Services and Data Sharing" [level=2] [ref=e288]
+          - generic [ref=e289]:
+            - paragraph [ref=e290]: "We do not sell your personal data to third parties. However, we do engage the following service providers who process your data on our behalf:"
+            - list [ref=e291]:
+              - listitem [ref=e292]:
+                - strong [ref=e293]: "AWS (Amazon Web Services):"
+              - listitem [ref=e294]: Hosts our PostgreSQL database and S3 storage
+              - listitem [ref=e295]: May process and store data in the us-east-1 region (Virginia, USA)
+              - listitem [ref=e296]: AWS has signed Data Processing Agreements (DPAs) to comply with GDPR
+            - list [ref=e297]:
+              - listitem [ref=e298]:
+                - strong [ref=e299]: "Kokoro TTS Engine:"
+              - listitem [ref=e300]: Processes text you submit for voice synthesis
+              - listitem [ref=e301]: Generates audio output that we cache and return to you
+              - listitem [ref=e302]: Does not retain your text or audio after synthesis is complete
+              - listitem [ref=e303]: Kokoro processes data in-memory; outputs are not logged
+            - list [ref=e304]:
+              - listitem [ref=e305]:
+                - strong [ref=e306]: "AWS SES (Simple Email Service):"
+              - listitem [ref=e307]: Sends transactional emails from our infrastructure
+              - listitem [ref=e308]: Does not store or use your email address for marketing purposes
+              - listitem [ref=e309]: Only sends emails you have requested (account confirmations, OTP login links)
+            - list [ref=e310]:
+              - listitem [ref=e311]:
+                - strong [ref=e312]: "We do NOT share data with:"
+              - listitem [ref=e313]: Analytics platforms (we do not use Google Analytics or similar trackers)
+              - listitem [ref=e314]: Advertising networks
+              - listitem [ref=e315]: Social media platforms
+              - listitem [ref=e316]: Data brokers or marketing services
+              - listitem [ref=e317]: Any other commercial entities
+            - paragraph [ref=e318]: If we are ever acquired or merged, we will notify you of any change in data ownership and your rights will be preserved.
+        - generic [ref=e319]:
+          - heading "Authentication and Security" [level=2] [ref=e320]
+          - generic [ref=e321]:
+            - list [ref=e322]:
+              - listitem [ref=e323]:
+                - strong [ref=e324]: "Email-Based Authentication:"
+              - listitem [ref=e325]: We use email-based one-time passcodes (OTP) for secure login — no passwords required
+              - listitem [ref=e326]: OTP codes are hashed using SHA-256 cryptographic hashing before storage in the database
+              - listitem [ref=e327]: OTP codes expire after 10 minutes
+              - listitem [ref=e328]: Failed authentication attempts are logged and rate-limited to prevent brute-force attacks
+            - list [ref=e329]:
+              - listitem [ref=e330]:
+                - strong [ref=e331]: "Refresh Tokens:"
+              - listitem [ref=e332]: Refresh tokens allow you to stay logged in across app sessions
+              - listitem [ref=e333]: All refresh tokens are hashed and stored with a revocation flag
+              - listitem [ref=e334]: Tokens expire after 30 days of inactivity
+              - listitem [ref=e335]: You can revoke all active tokens by logging out of all sessions or requesting account deletion
+            - list [ref=e336]:
+              - listitem [ref=e337]:
+                - strong [ref=e338]: "Session Security:"
+              - listitem [ref=e339]: Authentication sessions use secure, httpOnly cookies (on web) or secure device storage (on mobile)
+              - listitem [ref=e340]: Session tokens are encrypted in transit using TLS 1.3
+              - listitem [ref=e341]: We do not use password-based authentication
+            - list [ref=e342]:
+              - listitem [ref=e343]:
+                - strong [ref=e344]: "Rate Limiting and DDoS Protection:"
+              - listitem [ref=e345]: API endpoints are protected by Redis-backed rate limiting
+              - listitem [ref=e346]: "We enforce limits: 10 deletion requests per user per hour, 100 API calls per IP per minute"
+              - listitem [ref=e347]: AWS WAFv2 provides additional DDoS protection and malicious request filtering
+        - generic [ref=e348]:
+          - heading "Text-to-Speech Data Processing" [level=2] [ref=e349]
+          - generic [ref=e350]:
+            - list [ref=e351]:
+              - listitem [ref=e352]:
+                - strong [ref=e353]: "How TTS Works:"
+              - listitem [ref=e354]: When you create a plan step, the step text is submitted to the Kokoro TTS engine for voice synthesis
+              - listitem [ref=e355]: The Kokoro engine generates an MP3 audio file based on your text and selected voice profile
+              - listitem [ref=e356]: The resulting audio is cached on AWS S3 for future playback
+              - listitem [ref=e357]: Cache entries are indexed using SHA-256 hashes of the input text (no raw text stored as the key)
+            - list [ref=e358]:
+              - listitem [ref=e359]:
+                - strong [ref=e360]: "Data Retention for TTS:"
+              - listitem [ref=e361]: Input text is used only for synthesis and is not permanently stored after audio generation
+              - listitem [ref=e362]: Generated audio files are cached for 90 days after last access, then automatically deleted
+              - listitem [ref=e363]: If the same text is submitted again, we reuse the cached audio (improving performance)
+            - list [ref=e364]:
+              - listitem [ref=e365]:
+                - strong [ref=e366]: "No Data Selling:"
+              - listitem [ref=e367]: The developer does not sell or use your text submissions or TTS audio for any commercial purpose
+              - listitem [ref=e368]: We do not use your text to train AI models or sell voice data to third parties
+              - listitem [ref=e369]: Kokoro TTS processing is a technical service, not a data monetization activity
+        - generic [ref=e370]:
+          - heading "Your Privacy Rights" [level=2] [ref=e371]
+          - generic [ref=e372]:
+            - paragraph [ref=e373]: "Depending on your location, you may have the following rights:"
+            - list [ref=e374]:
+              - listitem [ref=e375]:
+                - strong [ref=e376]: "Under GDPR (European Union residents):"
+              - listitem [ref=e377]: "Right of access: Request a copy of your personal data"
+              - listitem [ref=e378]: "Right of correction: Ask us to update inaccurate data"
+              - listitem [ref=e379]: "Right of erasure (\"right to be forgotten\"): Request deletion of your account and all associated data"
+              - listitem [ref=e380]: "Right of data portability: Export your data in a machine-readable format"
+              - listitem [ref=e381]: "Right to restrict processing: Limit how we use your data"
+              - listitem [ref=e382]: "Right to object: Opt out of certain processing activities"
+              - listitem [ref=e383]: "Right to lodge a complaint: File a complaint with your local data protection authority"
+            - list [ref=e384]:
+              - listitem [ref=e385]:
+                - strong [ref=e386]: "Under CCPA (California residents):"
+              - listitem [ref=e387]: "Right to know: Request what personal data we collect about you"
+              - listitem [ref=e388]: "Right to delete: Request deletion of your data"
+              - listitem [ref=e389]: "Right to opt-out: Opt out of data sales (though we do not sell your data)"
+              - listitem [ref=e390]: "Right to correct: Request correction of inaccurate information"
+              - listitem [ref=e391]: "Right to appeal: Appeal our decision on a data subject rights request"
+            - list [ref=e392]:
+              - listitem [ref=e393]:
+                - strong [ref=e394]: "How to Exercise Your Rights:"
+              - listitem [ref=e395]: "Submit any data subject rights request to admin@layersiq.com with:"
+              - listitem [ref=e396]: Your email address and username (if applicable)
+              - listitem [ref=e397]: A clear description of your request (access, correction, deletion, etc.)
+              - listitem [ref=e398]: Proof of identity (email verification) if required
+            - paragraph [ref=e399]: We will respond to all data subject rights requests within 30 days. Complex requests may take up to 60 days.
+        - generic [ref=e400]:
+          - heading "Data Deletion and Account Removal" [level=2] [ref=e401]
+          - generic [ref=e402]:
+            - paragraph [ref=e403]:
+              - strong [ref=e404]: "What Happens When You Request Deletion:"
+              - text: "When you submit a data deletion request, we permanently remove the following within 30 days: 1. Your account record (email, username, display name, profile photo URL) 2. All user-created plans and routines associated with your account 3. Execution history and session state 4. TTS audio cache files generated for your plans 5. All refresh tokens and OTP records (revoked immediately) 6. Any other personal data linked to your account"
+            - list [ref=e405]:
+              - listitem [ref=e406]:
+                - strong [ref=e407]: "What Is Not Deleted:"
+              - listitem [ref=e408]: Backup data held for disaster recovery (deleted within 90 days)
+              - listitem [ref=e409]: Aggregated, anonymized statistics (e.g., "1000 users completed a workout this week")
+              - listitem [ref=e410]: Data required by law to retain (e.g., for tax or legal purposes, deleted after retention period expires)
+            - list [ref=e411]:
+              - listitem [ref=e412]:
+                - strong [ref=e413]: "Fallback Methods:"
+              - listitem [ref=e414]: "If the automated form is unavailable, you can request deletion by:"
+              - listitem [ref=e415]: Emailing admin@layersiq.com with "Delete My Account" in the subject line
+              - listitem [ref=e416]: Including your registered email address and any identifying information
+            - paragraph [ref=e417]:
+              - strong [ref=e418]: "Confirmation:"
+              - text: You will receive an email confirmation within 24 hours confirming receipt of your deletion request. Another email will confirm completion within 30 days.
+        - generic [ref=e419]:
+          - heading "Cookies and Local Storage" [level=2] [ref=e420]
+          - generic [ref=e421]:
+            - list [ref=e422]:
+              - listitem [ref=e423]:
+                - strong [ref=e424]: "Cookies (Web App Only):"
+              - listitem [ref=e425]: "The Instructor web site uses minimal cookies: only a session authentication cookie (httpOnly, Secure, SameSite=Strict)"
+              - listitem [ref=e426]: This cookie is required for login functionality and is deleted when you log out
+              - listitem [ref=e427]: We do not use tracking cookies, advertising cookies, or third-party analytics cookies
+              - listitem [ref=e428]: No cookies are used to track your browsing behavior
+            - list [ref=e429]:
+              - listitem [ref=e430]:
+                - strong [ref=e431]: "Local Storage:"
+              - listitem [ref=e432]: The mobile app (iOS, Android, etc.) uses device-local SQLite databases and secure device storage (Keychain/Keystore) instead of cookies
+              - listitem [ref=e433]: This local data is encrypted at rest on your device
+              - listitem [ref=e434]: Local data synchronizes with our backend servers for backup and cross-device access
+            - list [ref=e435]:
+              - listitem [ref=e436]:
+                - strong [ref=e437]: "Data Tracking:"
+              - listitem [ref=e438]: We do not use Google Analytics, Mixpanel, Amplitude, or any third-party analytics platform
+              - listitem [ref=e439]: We do not track your behavior across the web or on third-party sites
+              - listitem [ref=e440]: Crash reporting is optional and only sent if you explicitly opt-in to the beta testing program
+        - generic [ref=e441]:
+          - heading "Children's Privacy" [level=2] [ref=e442]
+          - generic [ref=e443]:
+            - paragraph [ref=e444]:
+              - strong [ref=e445]: "Minimum Age Requirement:"
+              - text: The Instructor app is not intended for children under 13 years of age. We do not knowingly collect personal data from children under 13.
+            - paragraph [ref=e446]:
+              - strong [ref=e447]: "For EU Residents (GDPR Article 8):"
+              - text: In the European Union, parental consent is required for processing personal data of children under the age of digital majority (typically 13-16, depending on member state). If we become aware that we have collected data from a child under 13 without proper parental consent, we will delete the data immediately.
+            - paragraph [ref=e448]:
+              - strong [ref=e449]: "For US Residents (COPPA):"
+              - text: In the United States, the Children's Online Privacy Protection Act (COPPA) requires parental consent for children under 13. The Instructor app complies with COPPA by not intentionally collecting data from users under 13.
+            - paragraph [ref=e450]:
+              - strong [ref=e451]: "If You Are a Parent or Guardian:"
+              - text: If you believe your child has used the app or created an account, please contact us immediately at admin@layersiq.com and we will delete the account and associated data.
+        - generic [ref=e452]:
+          - heading "Changes to This Policy" [level=2] [ref=e453]
+          - generic [ref=e454]:
+            - paragraph [ref=e455]: We may update this Privacy Policy from time to time to reflect changes in our practices, technology, legal requirements, or other factors.
+            - list [ref=e456]:
+              - listitem [ref=e457]:
+                - strong [ref=e458]: "How We Notify You of Changes:"
+              - listitem [ref=e459]: Material changes will be communicated via email to your registered email address
+              - listitem [ref=e460]: The "Last Updated" date at the top of this policy will be updated
+              - listitem [ref=e461]: We will provide at least 30 days' notice for any material changes that negatively affect your privacy rights
+              - listitem [ref=e462]: Continued use of the app after changes take effect constitutes acceptance of the updated policy
+            - list [ref=e463]:
+              - listitem [ref=e464]:
+                - strong [ref=e465]: "Policy History:"
+              - listitem [ref=e466]: "Original policy published: April 6, 2026 (version 0.1)"
+              - listitem [ref=e467]: "Last updated: April 14, 2026 (version 0.2)"
+        - generic [ref=e468]:
+          - heading "Governing Law and Dispute Resolution" [level=2] [ref=e469]
+          - generic [ref=e470]:
+            - paragraph [ref=e471]:
+              - strong [ref=e472]: "Applicable Law:"
+              - text: This Privacy Policy and our privacy practices are governed by and construed in accordance with the laws of the United States, specifically the laws of the State of California, without regard to its conflict of law principles.
+            - list [ref=e473]:
+              - listitem [ref=e474]:
+                - strong [ref=e475]: "Jurisdiction and Disputes:"
+              - listitem [ref=e476]: "For any disputes, claims, or legal proceedings related to this policy:"
+              - listitem [ref=e477]: EU residents may bring proceedings in the courts of their member state or before their data protection authority
+              - listitem [ref=e478]: California residents have rights under the California Consumer Privacy Act (CCPA)
+              - listitem [ref=e479]: All other users consent to the jurisdiction of the state and federal courts located in California
+            - paragraph [ref=e480]:
+              - strong [ref=e481]: "Dispute Resolution:"
+              - text: In the event of a privacy dispute, we commit to good-faith resolution through discussion. If resolution cannot be reached, either party may pursue legal action as permitted by law.
+            - paragraph [ref=e482]:
+              - strong [ref=e483]: "Contact for Disputes:"
+              - text: admin@layersiq.com
+      - paragraph [ref=e485]: This privacy policy was last updated on April 14, 2026. We recommend reviewing this policy periodically to stay informed about how we protect your information.
+  - contentinfo [ref=e128]:
+    - generic [ref=e129]:
+      - generic [ref=e130]:
+        - generic [ref=e131]:
+          - heading "Instructor" [level=3] [ref=e132]
+          - paragraph [ref=e133]: Interactive learning content creation platform.
+        - generic [ref=e134]:
+          - heading "Legal" [level=4] [ref=e135]
+          - list [ref=e136]:
+            - listitem [ref=e137]:
+              - link "Privacy Policy" [ref=e138] [cursor=pointer]:
+                - /url: /privacy-policy
+            - listitem [ref=e139]:
+              - link "Data Deletion" [ref=e140] [cursor=pointer]:
+                - /url: /data-deletion
+        - generic [ref=e141]:
+          - heading "Contact" [level=4] [ref=e142]
+          - link "admin@layersiq.com" [ref=e143] [cursor=pointer]:
+            - /url: mailto:admin@layersiq.com
+      - paragraph [ref=e145]: © 2026 LayersIQ Private Limited
+  - button "Open Next.js Dev Tools" [ref=e491] [cursor=pointer]:
+    - img [ref=e492]
+  - alert [ref=e495]: Privacy Policy | Instructor

@@ -1,0 +1,5 @@
+# Drop voice prompt WAVs (3-30s, mono, 24kHz preferred) here. Each file becomes
+# a selectable voice id (filename stem, lower-cased) returned by GET /voices.
+#
+# Suggested naming: `<locale>_<name>.wav` (e.g. `en_alice.wav`, `en_frank.wav`)
+# so the auto-generated label looks like "Alice (en)".

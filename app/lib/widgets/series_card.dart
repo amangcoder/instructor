@@ -20,12 +20,17 @@ class SeriesCard extends StatelessWidget {
     required this.onTap,
     this.subscription,
     this.width,
+    this.onRemove,
   });
 
   final Series series;
   final SeriesSubscription? subscription;
   final VoidCallback onTap;
   final double? width;
+
+  /// If provided, long-pressing the card shows a context menu with a
+  /// "Remove from My Programs" option that calls this callback.
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +70,7 @@ class SeriesCard extends StatelessWidget {
           ),
           child: InkWell(
             onTap: onTap,
+            onLongPress: onRemove != null ? () => _showContextMenu(context) : null,
             borderRadius: BorderRadius.circular(16),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -191,6 +197,46 @@ class SeriesCard extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showContextMenu(BuildContext context) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                series.name,
+                style: GoogleFonts.manrope(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.remove_circle_outline, color: colorScheme.error),
+              title: Text(
+                'Remove from My Programs',
+                style: TextStyle(color: colorScheme.error),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                onRemove!();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );

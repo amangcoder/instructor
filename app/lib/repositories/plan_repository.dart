@@ -273,11 +273,21 @@ class ApiPlanRepository with PlanRepositoryMixin implements PlanRepository {
 
   @override
   Future<String> createPlan(Plan plan) async {
-    // 1. Persist on the server; server returns the canonical UUID.
-    final serverId = await _api.savePlan(plan);
+    final String serverId;
 
-    // 2. Write to local cache using the server-assigned id.
-    //    Preserve createdAt from the caller; stamp updatedAt to now.
+    if (plan.libraryId != null) {
+      // Library-linked plan: create a lightweight link record on the server
+      // instead of copying planJson. The server returns the link's UUID which
+      // becomes the plan's local id. GET /api/plans/list synthesises the full
+      // plan from the link + library_plans on every refresh, so planJson in
+      // the local cache stays current with the library automatically.
+      serverId = await _api.addLibraryLink(plan.libraryId!);
+    } else {
+      // User-created plan: full planJson round-trip.
+      serverId = await _api.savePlan(plan);
+    }
+
+    // Write to local Drift cache using the server-assigned id.
     final companion = planToCompanion(plan).copyWith(
       id: Value(serverId),
       updatedAt: Value(DateTime.now()),

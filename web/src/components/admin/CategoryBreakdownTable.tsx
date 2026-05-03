@@ -35,8 +35,6 @@ function formatConversionRate(value: number | null): string {
 
 /**
  * Sort an array of CategoryRow by a given key and direction.
- * String keys sort lexicographically; numeric keys sort numerically.
- * Null conversionRate values are sorted to the bottom in both directions.
  */
 function sortRows(rows: CategoryRow[], key: SortKey, dir: SortDir): CategoryRow[] {
   return [...rows].sort((a, b) => {
@@ -49,7 +47,6 @@ function sortRows(rows: CategoryRow[], key: SortKey, dir: SortDir): CategoryRow[
     } else if (key === 'conversionRate') {
       aVal = a.conversionRate;
       bVal = b.conversionRate;
-      // Push nulls to the bottom
       if (aVal === null && bVal === null) return 0;
       if (aVal === null) return 1;
       if (bVal === null) return -1;
@@ -88,7 +85,7 @@ function ColHeader({ label, sortKey, currentSort, align = 'left', onSort }: ColH
     <th
       scope="col"
       className={[
-        'px-6 py-3 text-xs font-semibold text-on-surface-variant uppercase tracking-wider',
+        'px-6 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider',
         align === 'right' ? 'text-right' : 'text-left',
       ].join(' ')}
     >
@@ -97,8 +94,8 @@ function ColHeader({ label, sortKey, currentSort, align = 'left', onSort }: ColH
         onClick={() => onSort(sortKey)}
         className={[
           'inline-flex items-center gap-1 transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 rounded',
-          isActive ? 'text-primary' : 'hover:text-on-surface',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-1 rounded',
+          isActive ? 'text-indigo-400' : 'hover:text-white',
         ].join(' ')}
         aria-label={`Sort by ${label}${isActive ? `, currently ${currentSort.dir}ending` : ''}`}
       >
@@ -121,23 +118,6 @@ function ColHeader({ label, sortKey, currentSort, align = 'left', onSort }: ColH
  * CategoryBreakdownTable — client component
  *
  * Renders a sortable table of library plan category metrics.
- *
- * Props:
- *   rows — CategoryRow[] from /admin/analytics/library/categories
- *
- * Columns: Category | Published Plans | Total Adoptions | Total Sessions | Conversion Rate (%)
- *
- * Clicking any column header sorts that column ascending then descending on
- * subsequent clicks (toggle). The active sort column shows a ▲ or ▼ indicator.
- * conversionRate is formatted as a percentage (e.g. '34.2%'); null → '—'.
- *
- * Shows EmptyState if rows is empty.
- *
- * Accessibility:
- *   - Table uses <thead>/<tbody> with proper scope attributes
- *   - Column header buttons have aria-label conveying current sort direction
- *   - Sort indicator arrows are aria-hidden (decorative)
- *   - Empty-state panel has role="status"
  */
 export default function CategoryBreakdownTable({ rows }: CategoryBreakdownTableProps) {
   const [sort, setSort] = useState<SortState>({ key: 'category', dir: 'asc' });
@@ -156,14 +136,14 @@ export default function CategoryBreakdownTable({ rows }: CategoryBreakdownTableP
   }
 
   return (
-    <div className="rounded-xl bg-surface-container shadow-sm overflow-hidden">
+    <div className="rounded-xl bg-slate-900 border border-white/8 overflow-hidden">
       <div className="overflow-x-auto">
         <table
           className="w-full text-sm"
           aria-label="Library category breakdown"
         >
           <thead>
-            <tr className="border-b border-outline-variant bg-surface-container-high">
+            <tr className="border-b border-white/8 bg-slate-800/50">
               <ColHeader
                 label="Category"
                 sortKey="category"
@@ -204,21 +184,21 @@ export default function CategoryBreakdownTable({ rows }: CategoryBreakdownTableP
             {sortedRows.map((row) => (
               <tr
                 key={row.category}
-                className="border-b border-outline-variant/50 hover:bg-primary/5 transition-colors last:border-b-0"
+                className="border-b border-white/5 hover:bg-white/5 transition-colors duration-150 last:border-b-0"
               >
-                <td className="px-6 py-3 font-medium text-on-surface capitalize">
+                <td className="px-6 py-3 font-medium text-white capitalize">
                   {row.category}
                 </td>
-                <td className="px-6 py-3 text-right tabular-nums text-on-surface-variant">
+                <td className="px-6 py-3 text-right tabular-nums text-slate-400">
                   {row.publishedPlans.toLocaleString()}
                 </td>
-                <td className="px-6 py-3 text-right tabular-nums text-on-surface">
+                <td className="px-6 py-3 text-right tabular-nums text-slate-300">
                   {row.totalAdoptions.toLocaleString()}
                 </td>
-                <td className="px-6 py-3 text-right tabular-nums text-on-surface">
+                <td className="px-6 py-3 text-right tabular-nums text-slate-300">
                   {row.totalSessions.toLocaleString()}
                 </td>
-                <td className="px-6 py-3 text-right tabular-nums font-medium text-on-surface">
+                <td className="px-6 py-3 text-right tabular-nums font-medium text-slate-300">
                   {formatConversionRate(row.conversionRate)}
                 </td>
               </tr>

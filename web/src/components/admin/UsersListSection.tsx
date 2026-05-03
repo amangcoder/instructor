@@ -156,7 +156,7 @@ export default async function UsersListSection({
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-4 mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h1 className="text-2xl font-bold text-on-surface">{heading}</h1>
+          <h1 className="text-2xl font-bold text-white">{heading}</h1>
           <Suspense fallback={null}>
             <UserSearchInput initialValue={search} />
           </Suspense>
@@ -167,7 +167,7 @@ export default async function UsersListSection({
       {/* ── Error banner ──────────────────────────────────────────────── */}
       {error && (
         <div
-          className="rounded-lg bg-error-container p-4 text-sm text-on-error-container mb-6"
+          className="rounded-lg bg-red-950/80 border border-red-500/20 p-4 text-sm text-red-400 mb-6"
           role="alert"
         >
           <p className="font-medium">Failed to load {nounPlural}</p>
@@ -177,7 +177,7 @@ export default async function UsersListSection({
 
       {/* ── Summary ───────────────────────────────────────────────────── */}
       {data && (
-        <p className="text-sm text-on-surface-variant mb-4">
+        <p className="text-sm text-slate-400 mb-4">
           {data.total.toLocaleString()} {data.total === 1 ? noun : nounPlural}
           {search ? ` matching "${search}"` : ''} — page {currentPage} of{' '}
           {totalPages}
@@ -185,10 +185,10 @@ export default async function UsersListSection({
       )}
 
       {/* ── Table ─────────────────────────────────────────────────────── */}
-      <div className="rounded-xl bg-surface-container shadow-sm overflow-hidden">
+      <div className="rounded-xl bg-slate-900 border border-white/8 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-outline-variant">
-            <thead className="bg-surface-variant/30">
+          <table className="min-w-full divide-y divide-white/8">
+            <thead className="bg-slate-800/50">
               <tr>
                 <Th>Email</Th>
                 <Th>Name</Th>
@@ -200,23 +200,23 @@ export default async function UsersListSection({
                 <Th className="text-right">Actions</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant">
+            <tbody className="divide-y divide-white/5">
               {rows.length === 0 && !error ? (
                 <tr>
                   <td
                     colSpan={8}
-                    className="px-4 py-10 text-center text-sm text-on-surface-variant"
+                    className="px-4 py-10 text-center text-sm text-slate-400"
                   >
                     No {nounPlural} found.
                   </td>
                 </tr>
               ) : (
                 rows.map((u) => (
-                  <tr key={u.id} className="hover:bg-surface-variant/20">
+                  <tr key={u.id} className="hover:bg-white/5 transition-colors duration-150">
                     <Td>
                       <Link
                         href={`/admin/users/${u.id}`}
-                        className="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm"
+                        className="font-medium text-indigo-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded-sm"
                       >
                         {u.email}
                       </Link>
@@ -284,7 +284,7 @@ function Th({
   return (
     <th
       scope="col"
-      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant ${className}`}
+      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 ${className}`}
     >
       {children}
     </th>
@@ -300,7 +300,7 @@ function Td({
 }) {
   return (
     <td
-      className={`px-4 py-3 text-sm text-on-surface-variant ${className}`}
+      className={`px-4 py-3 text-sm text-slate-300 ${className}`}
     >
       {children}
     </td>
@@ -313,8 +313,8 @@ function RoleBadge({ role }: { role: 'user' | 'admin' }) {
       className={[
         'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
         role === 'admin'
-          ? 'bg-primary/15 text-primary'
-          : 'bg-surface-variant text-on-surface-variant',
+          ? 'bg-indigo-500/20 text-indigo-400'
+          : 'bg-slate-700 text-slate-300',
       ].join(' ')}
     >
       {role}
@@ -333,7 +333,7 @@ function PageLink({
 }) {
   if (disabled) {
     return (
-      <span className="rounded-lg border border-outline-variant px-4 py-2 text-sm text-on-surface-variant opacity-50 cursor-not-allowed">
+      <span className="rounded-lg border border-white/8 px-4 py-2 text-sm text-slate-400 opacity-50 cursor-not-allowed">
         {label}
       </span>
     );
@@ -341,7 +341,7 @@ function PageLink({
   return (
     <Link
       href={href}
-      className="rounded-lg border border-outline-variant px-4 py-2 text-sm text-on-surface hover:bg-surface-variant/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="rounded-lg border border-white/8 px-4 py-2 text-sm text-white hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
     >
       {label}
     </Link>

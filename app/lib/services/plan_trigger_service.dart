@@ -106,6 +106,31 @@ class PlanTriggerService {
     }
   }
 
+  /// Whether full-screen-intent notifications can take over the lockscreen on
+  /// this device. Android 14+ requires the user to grant USE_FULL_SCREEN_INTENT
+  /// in Settings; this method reflects that state. Returns `true` on Android
+  /// 13 and below, and on iOS (no equivalent gate — iOS uses notifications).
+  Future<bool> canUseFullScreenIntent() async {
+    if (!_isAndroid) return true;
+    try {
+      return await _channel.invokeMethod<bool>('canUseFullScreenIntent') ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('[PlanTriggerService] canUseFullScreenIntent failed: $e');
+      return false;
+    }
+  }
+
+  /// Opens the system "Allow full screen intent" settings page on Android 14+.
+  /// No-op on older Android and on iOS.
+  Future<void> openFullScreenIntentSettings() async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('openFullScreenIntentSettings');
+    } on PlatformException catch (e) {
+      debugPrint('[PlanTriggerService] openFullScreenIntentSettings failed: $e');
+    }
+  }
+
   // ── Schedule ─────────────────────────────────────────────────────────────
 
   /// Schedules a plan-start trigger.

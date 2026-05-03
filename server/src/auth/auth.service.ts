@@ -29,6 +29,11 @@ import { UserRepository } from '../database/repositories/user.repository';
 import { SESEmailService } from '../email/ses-email.service';
 import { UpstashRateLimitService } from '../ratelimit/upstash-ratelimit.service';
 import type { AppConfig } from '../config/app-config.interface';
+import {
+  AVATAR_PREFIX,
+  buildPublicPhotoUrl,
+  resolvePhotoUrl,
+} from './photo-url.util';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -63,14 +68,12 @@ export interface AuthResult {
 
 // ── Service ──────────────────────────────────────────────────────────────────
 
-/** S3 key prefix for profile photos. */
-const AVATAR_PREFIX = 'avatars';
-
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly s3: S3Client | null;
   private readonly bucket: string | null;
+  private readonly region: string;
   private readonly auth: AuthRepository | DatabaseService;
   private readonly userRepo: UserRepository | DatabaseService;
 
@@ -88,9 +91,12 @@ export class AuthService {
     this.auth = authRepo ?? db;
     this.userRepo = userRepo ?? db;
     this.bucket = (config?.awsS3Bucket || process.env.AWS_S3_BUCKET) ?? null;
-    this.s3 = this.bucket
-      ? new S3Client({ region: config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1' })
-      : null;
+    this.region = config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1';
+    this.s3 = this.bucket ? new S3Client({ region: this.region }) : null;
+  }
+
+  private photoOpts() {
+    return { bucket: this.bucket, region: this.region };
   }
 
   // ── OTP request ───────────────────────────────────────────────────────────
@@ -196,7 +202,7 @@ export class AuthService {
         email: user.email,
         name: user.name ?? null,
         username: user.username ?? null,
-        photoUrl: this.resolvePhotoUrl(user.photoUrl ?? null),
+        photoUrl: resolvePhotoUrl(user.photoUrl ?? null, this.photoOpts()),
       },
     };
   }
@@ -254,7 +260,7 @@ export class AuthService {
         email: user.email,
         name: user.name ?? null,
         username: user.username ?? null,
-        photoUrl: this.resolvePhotoUrl(user.photoUrl ?? null),
+        photoUrl: resolvePhotoUrl(user.photoUrl ?? null, this.photoOpts()),
       },
     };
   }
@@ -289,7 +295,7 @@ export class AuthService {
       email: user.email,
       name: user.name ?? null,
       username: user.username ?? null,
-      photoUrl: this.resolvePhotoUrl(user.photoUrl ?? null),
+      photoUrl: resolvePhotoUrl(user.photoUrl ?? null, this.photoOpts()),
     };
   }
 
@@ -319,7 +325,7 @@ export class AuthService {
 
     await this.userRepo.updateUserProfile(userId, { photoUrl: s3Key });
 
-    const photoUrl = this.buildPublicPhotoUrl(s3Key)!;
+    const photoUrl = buildPublicPhotoUrl(s3Key, this.photoOpts())!;
 
     this.logger.log(`Profile photo uploaded: userId=${userId}, key=${s3Key}`);
     return { photoUrl };
@@ -345,24 +351,6 @@ export class AuthService {
       throw err;
     }
     return this.getProfile(userId);
-  }
-
-  // ── Private: photo URL resolution ────────────────────────────────────────
-
-  /**
-   * If the stored value is an S3 key (starts with 'avatars/'), return the
-   * public virtual-hosted S3 URL. Otherwise returns the value unchanged.
-   * Public read access is granted via bucket policy (ACLs disabled on bucket).
-   */
-  private resolvePhotoUrl(raw: string | null): string | null {
-    if (!raw || !raw.startsWith(`${AVATAR_PREFIX}/`)) return raw;
-    return this.buildPublicPhotoUrl(raw);
-  }
-
-  private buildPublicPhotoUrl(s3Key: string): string | null {
-    if (!this.bucket) return null;
-    const region = this.config?.awsRegion ?? process.env.AWS_REGION ?? 'ap-south-1';
-    return `https://${this.bucket}.s3.${region}.amazonaws.com/${s3Key}`;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

@@ -18,6 +18,8 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { SyncModule } from './sync/sync.module';
 import { AppVersionModule } from './app-version/app-version.module';
 import { AppConfigRuntimeModule } from './app-config/app-config-runtime.module';
+import { RatingsModule } from './ratings/ratings.module';
+import { FavoritesModule } from './favorites/favorites.module';
 import { HealthController } from './health.controller';
 import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
 
@@ -46,6 +48,8 @@ import { ApiLoggerInterceptor } from './common/api-logger.interceptor';
     SyncModule,
     AppVersionModule,
     AppConfigRuntimeModule,
+    RatingsModule,
+    FavoritesModule,
   ],
   controllers: [HealthController],
   providers: [

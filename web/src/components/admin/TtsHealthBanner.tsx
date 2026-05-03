@@ -18,38 +18,33 @@ const POLL_INTERVAL_MS = 60_000;
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-/**
- * Map TTS health status to a Tailwind background-colour class for the dot.
- *
- * Colour rules (AC-007):
- *   green  — healthy   (error rate < 5%)
- *   amber  — degraded  (error rate 5–20%)
- *   red    — unknown   (error rate > 20% or no success in last 60m)
- *   grey   — (fallback) no data / fully unknown
- */
+/** Aggregate status: worst status among all providers */
+type AggregateStatus = 'healthy' | 'degraded' | 'offline';
+
+function getAggregateStatus(providers: TtsProviderHealth[]): AggregateStatus {
+  if (providers.length === 0) return 'offline';
+  const hasOffline = providers.some((p) => p.status === 'unknown');
+  const hasDegraded = providers.some((p) => p.status === 'degraded');
+  if (hasOffline) return 'offline';
+  if (hasDegraded) return 'degraded';
+  return 'healthy';
+}
+
 function statusDotClass(status: TtsHealthStatus): string {
   switch (status) {
-    case 'healthy':
-      return 'bg-green-500';
-    case 'degraded':
-      return 'bg-amber-400';
-    case 'unknown':
-      return 'bg-red-500';
-    default:
-      return 'bg-gray-400';
+    case 'healthy': return 'bg-emerald-500';
+    case 'degraded': return 'bg-amber-400';
+    case 'unknown': return 'bg-red-500';
+    default: return 'bg-slate-500';
   }
 }
 
 function statusLabel(status: TtsHealthStatus): string {
   switch (status) {
-    case 'healthy':
-      return 'Healthy';
-    case 'degraded':
-      return 'Degraded';
-    case 'unknown':
-      return 'Unknown';
-    default:
-      return 'Unknown';
+    case 'healthy': return 'Healthy';
+    case 'degraded': return 'Degraded';
+    case 'unknown': return 'Offline';
+    default: return 'Unknown';
   }
 }
 
@@ -78,38 +73,38 @@ function ProviderRow({ provider }: { provider: TtsProviderHealth }) {
 
   const errorRateClass =
     provider.errorRateLast60m > 0.2
-      ? 'font-semibold text-error'
+      ? 'font-semibold text-red-400'
       : provider.errorRateLast60m >= 0.05
-        ? 'font-semibold text-amber-600'
-        : 'font-medium text-on-surface';
+        ? 'font-semibold text-amber-400'
+        : 'font-medium text-slate-300';
 
   return (
-    <li className="flex flex-wrap items-center gap-x-6 gap-y-1.5 px-6 py-4">
+    <li className="flex flex-wrap items-center gap-x-6 gap-y-1.5 px-6 py-3.5 border-b border-white/5 last:border-b-0">
       {/* Status dot */}
       <span
         aria-hidden="true"
-        className={`inline-block h-3 w-3 flex-shrink-0 rounded-full ${dotClass}`}
+        className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${dotClass}`}
       />
 
       {/* Provider name */}
-      <span className="w-28 text-sm font-semibold capitalize text-on-surface">
+      <span className="w-28 text-sm font-semibold capitalize text-white">
         {provider.provider}
       </span>
 
       {/* Status label */}
-      <span className="w-20 text-sm text-on-surface-variant">{label}</span>
+      <span className="w-20 text-sm text-slate-400">{label}</span>
 
       {/* Error rate */}
-      <span className="flex items-center gap-1 text-sm text-on-surface-variant">
-        <span className="text-xs uppercase tracking-wide">Error rate (60m):</span>
+      <span className="flex items-center gap-1 text-sm text-slate-400">
+        <span className="text-xs uppercase tracking-wide">Errors (60m):</span>
         <span className={errorRateClass}>
           {formatErrorRate(provider.errorRateLast60m)}
         </span>
       </span>
 
       {/* Last success */}
-      <span className="ml-auto text-sm text-on-surface-variant">
-        <span className="text-xs uppercase tracking-wide">Last success: </span>
+      <span className="ml-auto text-sm text-slate-500">
+        <span className="text-xs uppercase tracking-wide">Last ok: </span>
         {formatLastSuccess(provider.lastSuccessAt)}
       </span>
     </li>
@@ -123,19 +118,16 @@ function ProviderRow({ provider }: { provider: TtsProviderHealth }) {
 /**
  * TtsHealthBanner — 'use client' component
  *
- * Polls /api/admin/tts-health-proxy every 60 seconds and renders a status
- * banner showing one row per TTS provider (Kokoro + ElevenLabs) with:
- *   - Provider name
- *   - Colour-coded status dot (green / amber / red / grey)
- *   - Error rate percentage for the last 60 minutes
- *   - Last successful job timestamp
+ * Three visual states based on aggregate provider status:
+ *   1. Healthy   — emerald bg/border, pulsing green dot
+ *   2. Degraded  — amber bg/border, amber dot, Refresh button
+ *   3. Offline   — red bg/border, red dot, Refresh button
  *
- * The proxy route reads the httpOnly access_token cookie server-side so
- * the admin JWT is never exposed to the browser.
+ * Polls /api/admin/tts-health-proxy every 60 seconds.
  *
  * Accessibility (WCAG 2.1 AA):
  *   - Section labelled via aria-label
- *   - Status dot is aria-hidden; status is communicated via text label
+ *   - Status dot is aria-hidden; status communicated via text label
  *   - Providers rendered as a <ul> list for screen-reader enumeration
  *   - Loading state announced via aria-busy on the section
  */
@@ -146,87 +138,131 @@ export default function TtsHealthBanner() {
 
   const fetchHealth = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/tts-health-proxy', {
-        cache: 'no-store',
-      });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      const res = await fetch('/api/admin/tts-health-proxy', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: TtsHealthResponse = await res.json();
       setData(json);
       setFetchError(null);
     } catch (err) {
-      setFetchError(
-        err instanceof Error ? err.message : 'Failed to fetch TTS health',
-      );
+      setFetchError(err instanceof Error ? err.message : 'Failed to fetch TTS health');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchHealth();
-    const timer = setInterval(fetchHealth, POLL_INTERVAL_MS);
+    void fetchHealth();
+    const timer = setInterval(() => { void fetchHealth(); }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [fetchHealth]);
 
-  const hasProviders = data && data.providers.length > 0;
+  const providers = data?.providers ?? [];
+  const aggregateStatus = getAggregateStatus(providers);
+
+  // Banner colour config per aggregate status
+  const bannerConfig =
+    aggregateStatus === 'healthy'
+      ? {
+          container: 'bg-emerald-950/80 border-emerald-500/20',
+          dot: 'bg-emerald-500 animate-pulse',
+          heading: 'text-emerald-300',
+          headingText: 'All TTS providers healthy',
+          sub: 'text-emerald-400/70',
+        }
+      : aggregateStatus === 'degraded'
+        ? {
+            container: 'bg-amber-950/80 border-amber-500/20',
+            dot: 'bg-amber-400 animate-pulse',
+            heading: 'text-amber-300',
+            headingText: 'One or more providers degraded',
+            sub: 'text-amber-400/70',
+          }
+        : {
+            container: 'bg-red-950/80 border-red-500/20',
+            dot: 'bg-red-500 animate-pulse',
+            heading: 'text-red-300',
+            headingText: 'One or more TTS providers are offline',
+            sub: 'text-red-400/70',
+          };
+
+  const showRefresh = (aggregateStatus !== 'healthy' || !!fetchError) && !loading;
 
   return (
     <section
       aria-label="TTS Provider Health Status"
       aria-busy={loading}
-      className="mb-8 overflow-hidden rounded-xl bg-surface-container shadow-sm"
+      className={`mb-8 overflow-hidden rounded-xl border ${bannerConfig.container}`}
     >
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between border-b border-outline-variant px-6 py-4">
-        <div>
-          <p className="text-sm font-semibold text-on-surface">
-            Provider Health
-          </p>
-          <p className="mt-0.5 text-xs text-on-surface-variant">
-            Last 60 minutes · auto-refreshes every 60s
-          </p>
+      {/* ── Banner header ─────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-6 py-4">
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden="true"
+            className={`inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full ${loading ? 'bg-slate-500 animate-pulse' : bannerConfig.dot}`}
+          />
+          <div>
+            <p className={`text-sm font-semibold ${bannerConfig.heading}`}>
+              {loading
+                ? 'Checking TTS provider health…'
+                : fetchError
+                  ? 'Failed to load health data'
+                  : bannerConfig.headingText}
+            </p>
+            <p className={`mt-0.5 text-xs ${bannerConfig.sub}`}>
+              Last 60 minutes · auto-refreshes every 60s
+            </p>
+          </div>
         </div>
-        <span
-          aria-live="polite"
-          className="animate-pulse text-xs text-on-surface-variant"
-        >
-          {loading ? 'Loading…' : ''}
-        </span>
+
+        <div className="flex items-center gap-3">
+          {loading && (
+            <span aria-live="polite" className={`text-xs ${bannerConfig.sub}`}>
+              Loading…
+            </span>
+          )}
+          {showRefresh && (
+            <button
+              type="button"
+              onClick={() => { void fetchHealth(); }}
+              className={[
+                'border rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                'focus-visible:outline-none focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2',
+                aggregateStatus === 'degraded'
+                  ? 'border-amber-500/30 text-amber-400 hover:bg-amber-500/10'
+                  : 'border-red-500/30 text-red-400 hover:bg-red-500/10',
+              ].join(' ')}
+            >
+              Refresh
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── API error state ─────────────────────────────────────────────────── */}
+      {/* ── API error state ─────────────────────────────────────────────── */}
       {fetchError && !loading && (
         <div
           role="alert"
-          className="bg-error-container px-6 py-4 text-sm text-on-error-container"
+          className="bg-red-950/60 px-6 py-3 text-sm text-red-400 border-t border-red-500/20"
         >
           Failed to load provider health: {fetchError}
         </div>
       )}
 
-      {/* ── No-data / unknown state ─────────────────────────────────────────── */}
-      {!loading && !fetchError && !hasProviders && (
-        <div className="flex items-center gap-3 px-6 py-4">
+      {/* ── No-data state ────────────────────────────────────────────────── */}
+      {!loading && !fetchError && providers.length === 0 && (
+        <div className="flex items-center gap-3 px-6 py-3 border-t border-white/8">
           <span
             aria-hidden="true"
-            className="inline-block h-3 w-3 flex-shrink-0 rounded-full bg-gray-400"
+            className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full bg-slate-500"
           />
-          <span className="text-sm text-on-surface-variant">
-            Unknown — no provider data available
-          </span>
+          <span className="text-sm text-slate-400">Unknown — no provider data available</span>
         </div>
       )}
 
-      {/* ── Provider rows ───────────────────────────────────────────────────── */}
-      {hasProviders && (
-        <ul
-          role="list"
-          className="divide-y divide-outline-variant"
-          aria-label="TTS providers"
-        >
-          {data.providers.map((p) => (
+      {/* ── Provider rows ─────────────────────────────────────────────────── */}
+      {providers.length > 0 && (
+        <ul role="list" aria-label="TTS providers" className="border-t border-white/8">
+          {providers.map((p) => (
             <ProviderRow key={p.provider} provider={p} />
           ))}
         </ul>

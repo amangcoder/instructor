@@ -73,9 +73,9 @@ String fullParamCacheKey({
 }) {
   // Keys must be in alphabetical order to match server-side JSON serialisation.
   final params = <String, String>{
-    'locale': locale,
+    'locale': _resolveCacheLocale(text, locale),
     'provider': provider,
-    'speechRate': speechRate,
+    'speechRate': normalizeSpeechRate(speechRate),
     'text': text,
     'voice': voice,
   };
@@ -85,6 +85,40 @@ String fullParamCacheKey({
   final sortedMap = {for (final k in sortedKeys) k: params[k]!};
   final jsonString = jsonEncode(sortedMap);
   return sha256Hex(jsonString);
+}
+
+/// Canonicalises a locale string so equivalent values from different sources
+/// (server DB 'en-US', enum-format 'enUS', variants 'en_US' / 'EN-us') collapse
+/// to a single cache key. MUST stay byte-for-byte identical to the server's
+/// `TtsService.normalizeLocale` in `server/src/tts/tts.service.ts`.
+String _normalizeLocale(String locale) {
+  if (locale.isEmpty) return '';
+  return locale.toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
+}
+
+/// Canonicalises a speech rate string to exactly 1 decimal place so '1', '1.0',
+/// '1.00' all produce the same cache key. Falls back to '1.0' on unparseable
+/// input. Exported so callers (e.g. TtsService.renderTTS) can use the same
+/// canonical form when sending speechRate to the server.
+///
+/// MUST stay byte-for-byte identical to the server's `TtsService.normalizeSpeechRate`
+/// in `server/src/tts/tts.service.ts`.
+String normalizeSpeechRate(String rate) {
+  final n = double.tryParse(rate);
+  if (n == null || !n.isFinite) return '1.0';
+  return n.toStringAsFixed(1);
+}
+
+/// Locale used for cache key hashing. Devanagari text always hashes as 'hi'
+/// regardless of the caller's locale so admin pre-gen (which passes the voice's
+/// native DB locale, e.g. 'en-US' for am_michael) and the Dart client agree on
+/// the same cache key when synthesising the same Hindi text.
+///
+/// MUST stay byte-for-byte identical to the server's `TtsService.resolveCacheLocale`
+/// in `server/src/tts/tts.service.ts`.
+String _resolveCacheLocale(String text, String locale) {
+  if (RegExp('[ऀ-ॿ]').hasMatch(text)) return 'hi';
+  return _normalizeLocale(locale);
 }
 
 /// Alias for [fullParamCacheKey] — matches the naming convention used in tests

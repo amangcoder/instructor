@@ -58,6 +58,7 @@ export default function DeletionForm() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [scope, setScope] = useState<ScopeType>('');
+  const [scopeError, setScopeError] = useState('');
   const [selectiveItems, setSelectiveItems] = useState<SelectiveItems>(
     INITIAL_SELECTIVE_ITEMS,
   );
@@ -135,6 +136,7 @@ export default function DeletionForm() {
 
   const handleScopeChange = (value: ScopeType) => {
     setScope(value);
+    setScopeError('');
     if (value === 'full') {
       setSelectiveItems(INITIAL_SELECTIVE_ITEMS);
     }
@@ -148,17 +150,18 @@ export default function DeletionForm() {
     e.preventDefault();
 
     const isEmailValid = validateEmail(email);
-    if (!isEmailValid || !hasValidScope()) return;
+    const isScopeValid = hasValidScope();
+    if (!isScopeValid) setScopeError('Please select a deletion scope');
+    if (!isEmailValid || !isScopeValid) return;
 
     setStatus('submitting');
     setErrorMessage('');
 
     // Map internal scope state to API-compatible values.
-    // Full account deletion sends 'full' as a plain string.
-    // Selective deletion sends an array of selected data category keys.
-    const scopePayload: string | string[] =
+    // Backend DTO always expects an array of scope strings.
+    const scopePayload: string[] =
       scope === 'full'
-        ? 'full'
+        ? ['full_account']
         : [
             ...(selectiveItems.plans ? ['plans'] : []),
             ...(selectiveItems.ttsCache ? ['audio_cache'] : []),
@@ -403,6 +406,12 @@ export default function DeletionForm() {
               </div>
             )}
           </fieldset>
+
+          {scopeError && (
+            <p role="alert" className="text-sm text-error -mt-4">
+              {scopeError}
+            </p>
+          )}
 
           {/* Reason (optional) */}
           <div>

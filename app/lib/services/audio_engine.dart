@@ -343,7 +343,9 @@ class AudioEngineImpl implements AudioEngine {
     if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
       _voiceCompleter!.completeError(const StoppedByUserException());
     }
-    _voiceCompleter = Completer<void>();
+    // Capture locally so this call awaits its own future even if a later
+    // playVoice/playEffect/stopAll reassigns the field.
+    final completer = _voiceCompleter = Completer<void>();
 
     // Duck ambient channel before starting voice.
     await _animateAmbientVolume(
@@ -405,7 +407,7 @@ class AudioEngineImpl implements AudioEngine {
 
     // Await completion so that the caller (PlanExecutionEngine) can sequence
     // steps correctly — the next step only starts after voice is done.
-    await _voiceCompleter!.future;
+    await completer.future;
     debugPrint('AudioEngine: playVoice completed');
   }
 
@@ -422,7 +424,7 @@ class AudioEngineImpl implements AudioEngine {
     if (_voiceCompleter != null && !_voiceCompleter!.isCompleted) {
       _voiceCompleter!.completeError(const StoppedByUserException());
     }
-    _voiceCompleter = Completer<void>();
+    final completer = _voiceCompleter = Completer<void>();
 
     await _animateAmbientVolume(
       from: _currentAmbientVolume,
@@ -472,7 +474,7 @@ class AudioEngineImpl implements AudioEngine {
       _voiceCompleter = null;
     });
 
-    await _voiceCompleter!.future;
+    await completer.future;
   }
 
   // ────────────────────────────────────────────────────────────────────────

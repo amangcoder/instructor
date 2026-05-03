@@ -1,5 +1,4 @@
-/// AuthSection — auth status display and logout control for the Settings screen.
-library auth_section;
+// AuthSection — auth status display and logout control for the Settings screen.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,7 +37,8 @@ class AuthSection extends ConsumerWidget {
       builder: (ctx) => AlertDialog.adaptive(
         title: const Text('Log Out'),
         content: const Text(
-            'Are you sure you want to log out? Your local data will be preserved.'),
+          'Are you sure you want to log out? Your local data will be preserved.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -76,50 +76,54 @@ class _AuthenticatedTile extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: colorScheme.primaryContainer,
-            child: Icon(
-              Icons.person_outlined,
-              color: colorScheme.onPrimaryContainer,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('Signed in as', style: theme.textTheme.bodyMedium),
-                const SizedBox(height: 2),
-                Text(
-                  email,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Semantics(
-            label: 'Log out',
-            child: OutlinedButton(
-              onPressed: onLogout,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                visualDensity: VisualDensity.compact,
+    return Semantics(
+      label: 'Sign out of $email',
+      button: true,
+      child: InkWell(
+        onTap: onLogout,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(
+                Icons.logout_rounded,
+                size: 20,
+                color: colorScheme.error,
               ),
-              child: const Text('Log Out'),
-            ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Sign Out',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: colorScheme.outlineVariant,
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

@@ -17,3 +17,5 @@ export { AdminRepository } from './admin.repository';
 export { CategoryRepository } from './category.repository';
 export { VoiceRepository } from './voice.repository';
 export { PlanVoicesRepository } from './plan-voices.repository';
+export { RatingsRepository } from './ratings.repository';
+export { FavoritesRepository } from './favorites.repository';

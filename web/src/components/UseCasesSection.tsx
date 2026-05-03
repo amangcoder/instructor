@@ -36,7 +36,7 @@ export default function UseCasesSection() {
       className="
         w-full py-16 md:py-24 lg:py-32
         px-4 sm:px-6 lg:px-8
-        bg-primary/5
+        bg-indigo-950/30
       "
     >
       <div className="mx-auto max-w-6xl">
@@ -44,11 +44,11 @@ export default function UseCasesSection() {
         <div className="mb-12 md:mb-16 text-center">
           <h2
             id="use-cases-heading"
-            className="text-3xl sm:text-4xl md:text-5xl font-black text-on-surface mb-4"
+            className="text-3xl sm:text-4xl md:text-5xl font-black text-white mb-4"
           >
             Built for every routine
           </h2>
-          <p className="text-base sm:text-lg text-on-surface-variant max-w-2xl mx-auto leading-relaxed">
+          <p className="text-base sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
             Whether you&apos;re breaking a sweat, finding inner calm, cramming
             for an exam, or following a recipe — Instructor adapts to your
             rhythm.
@@ -73,11 +73,11 @@ export default function UseCasesSection() {
                 <article
                   className="
                     flex flex-col gap-4 h-full
-                    rounded-2xl border border-outline-variant bg-surface-container
+                    rounded-2xl border border-white/8 bg-slate-900/80
                     p-6
                     shadow-sm
                     transition-all duration-200
-                    hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5
+                    hover:shadow-xl hover:border-indigo-400/30 hover:-translate-y-0.5
                   "
                 >
                   {/* Icon */}
@@ -85,7 +85,7 @@ export default function UseCasesSection() {
                     aria-hidden="true"
                     className="
                       flex h-14 w-14 items-center justify-center
-                      rounded-2xl bg-primary/10
+                      rounded-2xl bg-indigo-500/15
                       text-3xl
                       select-none
                     "
@@ -94,12 +94,12 @@ export default function UseCasesSection() {
                   </div>
 
                   {/* Title */}
-                  <h3 className="text-lg font-bold text-on-surface">
+                  <h3 className="text-lg font-bold text-white">
                     {useCase.title}
                   </h3>
 
                   {/* Description */}
-                  <p className="text-sm leading-relaxed text-on-surface-variant flex-1">
+                  <p className="text-sm leading-relaxed text-slate-400 flex-1">
                     {useCase.description}
                   </p>
                 </article>

@@ -1,54 +1,49 @@
 @import 'tailwindcss';
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=block');
 @plugin '@tailwindcss/typography';
 
-@theme {
-  /* ── Light mode (Material Theme Builder — seed #5B6BE8) ────────────── */
-  --color-primary: #565C8C;
-  --color-primary-container: #C0C6FD;
-  --color-surface: #FBF8FE;
-  --color-on-surface: #31323B;
-  --color-surface-container: #EFECF4;
-  --color-on-surface-variant: #46464F;
-  --color-outline: #777680;
-  --color-outline-variant: #C7C5D0;
-  --color-surface-dim: #DCD9E1;
-  --color-surface-bright: #FBF8FE;
-  --color-inverse-surface: #313034;
-  --color-inverse-on-surface: #F3F0F7;
-  --color-error: #BA1A1A;
-  --color-error-container: #FFDAD6;
-  --color-on-error: #FFFFFF;
-  --color-on-error-container: #410002;
-  --color-success: #1B6D30;
-  --color-success-container: #A3F6AA;
-  --color-warning: #7D5700;
-  --color-warning-container: #FFDEAB;
+/* ── Sound-wave animation for hero section ───────────────────────────── */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+.animate-wave {
+  animation: wave 1.2s ease-in-out infinite;
 }
 
-/* ── Dark mode (Material Theme Builder — seed #5B6BE8) ───────────────── */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-primary: #BEC6FF;
-    --color-primary-container: #3E4578;
-    --color-surface: #121318;
-    --color-on-surface: #C7C5D0;
-    --color-surface-container: #201F25;
-    --color-on-surface-variant: #C7C5D0;
-    --color-outline: #8F909A;
-    --color-outline-variant: #46464F;
-    --color-surface-dim: #121318;
-    --color-surface-bright: #38373E;
-    --color-inverse-surface: #E5E1E9;
-    --color-inverse-on-surface: #313034;
-    --color-error: #FFB4AB;
-    --color-error-container: #93000A;
-    --color-on-error: #690005;
-    --color-on-error-container: #FFDAD6;
-    --color-success: #88D990;
-    --color-success-container: #005319;
-    --color-warning: #FABD48;
-    --color-warning-container: #5A3F00;
-  }
+/* Material Symbols Outlined — used by the admin category icon picker. */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined', sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+@theme {
+  /* ── Dark-slate/indigo design system palette ────────────────────────── */
+  --color-primary:            #6366f1; /* indigo-500 */
+  --color-on-primary:         #ffffff;
+  --color-on-surface:         #f1f5f9; /* slate-100 */
+  --color-on-surface-variant: #94a3b8; /* slate-400 */
+  --color-surface-container:  #0f172a; /* slate-900 */
+  --color-outline-variant:    #334155; /* slate-700 */
+  --color-error:              #ef4444; /* red-500 */
+  --color-on-error:           #ffffff;
+  --color-error-container:    #450a0a; /* red-950 */
+  --color-warning:            #f59e0b; /* amber-500 */
+  --color-warning-container:  #451a03; /* amber-950 */
+  --color-success:            #10b981; /* emerald-500 */
+  --color-success-container:  #022c22; /* emerald-950 */
 }
 
 @layer base {
@@ -57,12 +52,12 @@
   }
 
   body {
-    @apply bg-surface text-on-surface antialiased;
+    @apply bg-slate-950 text-slate-100 antialiased;
   }
 
   /* Focus indicators for keyboard navigation — WCAG 2.1 AA */
   :focus-visible {
-    outline: 2px solid var(--color-primary);
+    outline: 2px solid #818cf8;
     outline-offset: 2px;
   }
 
@@ -83,7 +78,7 @@
     left: 0.5rem;
     z-index: 9999;
     padding: 0.75rem 1.5rem;
-    background-color: var(--color-primary);
+    background-color: #6366f1;
     color: white;
     font-weight: 700;
     border-radius: 0.5rem;

@@ -6,7 +6,7 @@ const logger = new Logger('AppConfigModule');
 /**
  * Valid values for constrained configuration fields.
  */
-const VALID_TTS_PROVIDERS = ['kokoro', 'gemini', 'elevenlabs'];
+const VALID_TTS_PROVIDERS = ['kokoro', 'gemini', 'elevenlabs', 'vibevoice'];
 const VALID_LLM_PROVIDERS = ['gemini', 'ollama'];
 const VALID_NODE_ENVS = ['development', 'production', 'test'];
 
@@ -51,6 +51,8 @@ function buildConfig(): AppConfig {
     defaultTtsProvider,
     kokoroServerUrl: process.env.KOKORO_SERVER_URL ?? 'http://127.0.0.1:3070',
     kokoroApiKey: process.env.KOKORO_API_KEY ?? '',
+    vibevoiceServerUrl: process.env.VIBEVOICE_SERVER_URL ?? 'http://127.0.0.1:3073',
+    vibevoiceApiKey: process.env.VIBEVOICE_API_KEY ?? '',
     geminiApiKey: process.env.GEMINI_API_KEY ?? '',
     jwtSecret: process.env.JWT_SECRET ?? 'dev-jwt-secret-change-in-production',
     otpSalt: process.env.OTP_SALT ?? '',

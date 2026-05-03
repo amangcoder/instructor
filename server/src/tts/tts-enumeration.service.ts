@@ -34,7 +34,7 @@ export class TtsEnumerationService {
    * @param voiceId    Default voice to use for synthesis
    * @param locale     Locale code (e.g. 'enUS')
    * @param provider   TTS provider (e.g. 'kokoro', 'gemini')
-   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.00').
+   * @param speechRate Speech rate as a pre-formatted string (e.g. '1.0').
    *                   Conversion from NUMERIC happens at the repository boundary.
    * @returns Deduplicated array of TtsPairs
    */

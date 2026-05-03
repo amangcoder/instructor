@@ -44,7 +44,9 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'package:instructor/database/app_database.dart';
 import 'package:instructor/models/enums.dart';
+import 'package:instructor/providers/auth_providers.dart';
 import 'package:instructor/providers/tts_status_providers.dart';
+import 'package:instructor/repositories/session_completion_repository.dart';
 import 'package:instructor/services/app_settings.dart';
 import 'package:instructor/models/plan.dart';
 import 'package:instructor/models/plan_step.dart';
@@ -297,11 +299,14 @@ class PlanExecutionEngineImpl
     required NotificationService notificationService,
     required AppDatabase db,
     required TtsPlaybackMode Function() ttsPlaybackModeGetter,
+    String? Function()? userIdGetter,
   })  : _audioEngine = audioEngine,
         _ttsService = ttsService,
         _notificationService = notificationService,
         _db = db,
-        _ttsPlaybackMode = ttsPlaybackModeGetter {
+        _ttsPlaybackMode = ttsPlaybackModeGetter,
+        _userIdGetter = userIdGetter ?? (() => null),
+        _completionRepository = SessionCompletionRepository(db) {
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -309,6 +314,11 @@ class PlanExecutionEngineImpl
   final TTSService _ttsService;
   final NotificationService _notificationService;
   final AppDatabase _db;
+  final SessionCompletionRepository _completionRepository;
+
+  /// Returns the currently authenticated user id, or null if unauthenticated.
+  /// Used to attribute session completions written on natural finish.
+  final String? Function() _userIdGetter;
 
   /// Returns the current [TtsPlaybackMode] at call time.
   ///
@@ -334,6 +344,15 @@ class PlanExecutionEngineImpl
   // ── Execution state ───────────────────────────────────────────────────────
 
   Plan? _currentPlan;
+
+  /// Wall-clock start time of the current session, used to compute
+  /// duration when the plan completes naturally and a SessionCompletionRecord
+  /// is written. Null when no session is active.
+  DateTime? _sessionStartTime;
+
+  /// True when the current session was started via [startPreview]; preview
+  /// sessions are not recorded as completions (they don't count for streaks).
+  bool _isPreviewSession = false;
 
   /// Flattened step sequence built at [startPlan] time.
   List<_FlatStep> _flatSteps = [];
@@ -494,6 +513,8 @@ class PlanExecutionEngineImpl
     _waitStepElapsedMs = 0;
     _cancelled = false;
     _status = ExecutionStatus.running;
+    _sessionStartTime = DateTime.now();
+    _isPreviewSession = false;
 
     _emitState();
     await _persistState();
@@ -525,6 +546,8 @@ class PlanExecutionEngineImpl
     _waitStepElapsedMs = 0;
     _cancelled = false;
     _status = ExecutionStatus.running;
+    _sessionStartTime = DateTime.now();
+    _isPreviewSession = false;
 
     _emitState();
     await _persistState();
@@ -541,6 +564,9 @@ class PlanExecutionEngineImpl
     // (after several awaits), well after this assignment lands.
     await startPlan(plan);
     _speedMultiplier = 4.0;
+    // Mark as preview AFTER startPlan, which resets the flag to false.
+    // Preview sessions are not recorded toward streaks/sessions stats.
+    _isPreviewSession = true;
   }
 
   @override
@@ -1769,8 +1795,55 @@ class PlanExecutionEngineImpl
       _notificationService.cancelAll(),
     ]);
 
+    await _recordSessionCompletion();
+
     await _clearPersistedState();
     _emitState();
+  }
+
+  /// Persists a SessionCompletionRecord for the just-finished session so it
+  /// counts toward the user's session total and streak.
+  ///
+  /// Skipped when:
+  ///   - The session was a preview (4× speed-up; not a real run).
+  ///   - The user is unauthenticated (userId is required by the table).
+  ///   - The current plan is null (defensive — shouldn't happen here).
+  ///   - The session start time wasn't captured.
+  ///
+  /// Errors are caught and logged so a transient DB failure can't crash the
+  /// completion path or surface to the user mid-celebration.
+  Future<void> _recordSessionCompletion() async {
+    final plan = _currentPlan;
+    final startedAt = _sessionStartTime;
+    if (_isPreviewSession || plan == null || startedAt == null) {
+      _sessionStartTime = null;
+      return;
+    }
+
+    final userId = _userIdGetter();
+    if (userId == null || userId.isEmpty) {
+      debugPrint(
+        '[PlanExecutionEngine] Skipping completion record: no userId',
+      );
+      _sessionStartTime = null;
+      return;
+    }
+
+    final completedAt = DateTime.now();
+    final durationMs =
+        completedAt.difference(startedAt).inMilliseconds.clamp(0, 1 << 31);
+    _sessionStartTime = null;
+
+    try {
+      await _completionRepository.recordCompletion(
+        userId: userId,
+        planId: plan.id,
+        completedAt: completedAt,
+        durationMs: durationMs,
+      );
+    } catch (e) {
+      debugPrint('[PlanExecutionEngine] recordCompletion failed: $e');
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -2086,6 +2159,9 @@ PlanExecutionEngine planExecutionEngine(Ref ref) {
     // Read the current playback mode at each renderTTS call — not watched,
     // so the engine doesn't rebuild; it simply samples the latest value.
     ttsPlaybackModeGetter: () => ref.read(ttsPlaybackModeProvider),
+    // Sample the authenticated user id at completion time so the engine
+    // doesn't rebuild on auth state changes.
+    userIdGetter: () => ref.read(currentUserProvider)?.id,
   );
   ref.onDispose(engine.dispose);
   return engine;

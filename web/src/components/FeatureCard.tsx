@@ -44,8 +44,7 @@ interface FeatureCardProps {
  * - Heading hierarchy: h3 (inside a section > grid)
  *
  * Dark mode:
- * - Uses surface-container instead of hardcoded bg-white
- * - Borders use theme-aware outline-variant
+ * - Uses dark-slate/indigo Tailwind palette
  */
 export default function FeatureCard({ feature }: FeatureCardProps) {
   const emoji = ICON_MAP[feature.icon] ?? FALLBACK_ICON;
@@ -54,12 +53,12 @@ export default function FeatureCard({ feature }: FeatureCardProps) {
     <article
       className="
         flex flex-col gap-4
-        rounded-2xl border border-outline-variant bg-surface-container
+        rounded-2xl border border-white/8 bg-slate-900/80
         p-6
         shadow-sm
         transition-all duration-200
-        hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5
-        focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2
+        hover:shadow-xl hover:border-indigo-400/30 hover:-translate-y-0.5
+        focus-within:ring-2 focus-within:ring-indigo-400 focus-within:ring-offset-2 focus-within:ring-offset-slate-950
       "
     >
       {/* Icon */}
@@ -67,7 +66,7 @@ export default function FeatureCard({ feature }: FeatureCardProps) {
         aria-hidden="true"
         className="
           flex h-12 w-12 items-center justify-center
-          rounded-xl bg-primary/10
+          rounded-xl bg-indigo-500/15
           text-2xl
           select-none
         "
@@ -76,12 +75,12 @@ export default function FeatureCard({ feature }: FeatureCardProps) {
       </div>
 
       {/* Title */}
-      <h3 className="text-lg font-bold leading-snug text-on-surface">
+      <h3 className="text-lg font-bold leading-snug text-white">
         {feature.title}
       </h3>
 
       {/* Description */}
-      <p className="text-sm leading-relaxed text-on-surface-variant">
+      <p className="text-sm leading-relaxed text-slate-400">
         {feature.description}
       </p>
     </article>
